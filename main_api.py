@@ -4,17 +4,43 @@ Conectada a PostgreSQL via db.py
 """
 from __future__ import annotations
 
+import json
+import os
 import uuid as _uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
+from pathlib import Path
 from typing import Optional
 
 import psycopg2
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile, status
+from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, field_validator
 
+try:
+    from jose import JWTError, jwt
+    JWT_OK = True
+except ImportError:
+    JWT_OK = False
+
+try:
+    import bcrypt as _bcrypt
+    BCRYPT_OK = True
+except ImportError:
+    BCRYPT_OK = False
+
 import db
+
+# ─── JWT config ──────────────────────────────────────────────
+JWT_SECRET    = os.environ.get("JWT_SECRET", "fiscalcore-dev-secret-change-in-prod")
+JWT_ALGORITHM = "HS256"
+JWT_EXP_HOURS = 8
+
+_bearer = HTTPBearer(auto_error=False)
+
+UPLOADS_DIR = Path("uploads/constancias")
+UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
 # ─── App ─────────────────────────────────────────────────────
 app = FastAPI(
@@ -52,7 +78,66 @@ class IngestaResponse(BaseModel):
     periodo: Optional[str]
 
 
-# ─── Helpers ─────────────────────────────────────────────────
+class RegisterRequest(BaseModel):
+    email: str
+    password: str
+    nombre: Optional[str] = None
+    rfc: str
+    razon_social: str
+    regimen_fiscal: Optional[str] = None
+    cp_fiscal: Optional[str] = None
+    curp: Optional[str] = None
+    obligaciones: Optional[list] = None
+
+    @field_validator("rfc")
+    @classmethod
+    def rfc_upper(cls, v: str) -> str:
+        return v.strip().upper()
+
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+# ─── Helpers JWT ─────────────────────────────────────────────
+
+def _crear_token(payload: dict) -> str:
+    if not JWT_OK:
+        raise HTTPException(status_code=500, detail="python-jose no instalado")
+    data = payload.copy()
+    data["exp"] = datetime.utcnow() + timedelta(hours=JWT_EXP_HOURS)
+    return jwt.encode(data, JWT_SECRET, algorithm=JWT_ALGORITHM)
+
+
+def _verificar_token(token: str) -> dict:
+    if not JWT_OK:
+        raise HTTPException(status_code=500, detail="python-jose no instalado")
+    try:
+        return jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Token inválido o expirado")
+
+
+def _get_current_user(creds: HTTPAuthorizationCredentials = Depends(_bearer)) -> dict:
+    if not creds:
+        raise HTTPException(status_code=401, detail="Se requiere autenticación")
+    return _verificar_token(creds.credentials)
+
+
+def _hash_password(plain: str) -> str:
+    if not BCRYPT_OK:
+        raise HTTPException(status_code=500, detail="bcrypt no instalado")
+    return _bcrypt.hashpw(plain.encode(), _bcrypt.gensalt()).decode()
+
+
+def _verify_password(plain: str, hashed: str) -> bool:
+    if not BCRYPT_OK:
+        return False
+    return _bcrypt.checkpw(plain.encode(), hashed.encode())
+
+
+# ─── Helpers DB ──────────────────────────────────────────────
 
 def _empresa_or_404(empresa_id: str) -> dict:
     row = db.query_one("SELECT * FROM empresas WHERE id = %s", (empresa_id,))
@@ -83,6 +168,127 @@ async def raiz():
         "version": "1.0.0",
         "estado": "operativo",
     }
+
+
+# ── Auth ─────────────────────────────────────────────────────
+
+@app.post("/api/v1/auth/register", status_code=status.HTTP_201_CREATED, tags=["Auth"])
+async def registrar(data: RegisterRequest):
+    """Crea una empresa y su usuario asociado. Retorna JWT."""
+    # Validar que RFC no exista
+    existente = db.query_one("SELECT id FROM empresas WHERE rfc = %s", (data.rfc,))
+    if existente:
+        raise HTTPException(status_code=409, detail=f"El RFC {data.rfc} ya está registrado")
+
+    email_existente = db.query_one("SELECT id FROM usuarios WHERE email = %s", (data.email,))
+    if email_existente:
+        raise HTTPException(status_code=409, detail="El correo ya está registrado")
+
+    try:
+        empresa = db.execute(
+            """
+            INSERT INTO empresas (rfc, razon_social, regimen_fiscal, email, cp_fiscal, curp, obligaciones)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            RETURNING *
+            """,
+            (
+                data.rfc, data.razon_social, data.regimen_fiscal,
+                data.email, data.cp_fiscal, data.curp,
+                json.dumps(data.obligaciones) if data.obligaciones else None,
+            ),
+            returning=True,
+        )
+    except psycopg2.errors.UniqueViolation:
+        raise HTTPException(status_code=409, detail=f"RFC {data.rfc} ya existe")
+
+    password_hash = _hash_password(data.password)
+    usuario = db.execute(
+        """
+        INSERT INTO usuarios (empresa_id, email, password_hash, nombre)
+        VALUES (%s, %s, %s, %s)
+        RETURNING *
+        """,
+        (str(empresa["id"]), data.email, password_hash, data.nombre),
+        returning=True,
+    )
+
+    token = _crear_token({
+        "user_id":    str(usuario["id"]),
+        "empresa_id": str(empresa["id"]),
+        "email":      data.email,
+    })
+
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "empresa_id": str(empresa["id"]),
+        "rfc": empresa["rfc"],
+        "razon_social": empresa["razon_social"],
+    }
+
+
+@app.post("/api/v1/auth/login", tags=["Auth"])
+async def login(data: LoginRequest):
+    """Autentica un usuario y retorna JWT."""
+    usuario = db.query_one(
+        "SELECT u.*, e.rfc, e.razon_social FROM usuarios u JOIN empresas e ON e.id = u.empresa_id WHERE u.email = %s AND u.activo = TRUE",
+        (data.email,),
+    )
+    if not usuario or not _verify_password(data.password, usuario["password_hash"]):
+        raise HTTPException(status_code=401, detail="Credenciales incorrectas")
+
+    token = _crear_token({
+        "user_id":    str(usuario["id"]),
+        "empresa_id": str(usuario["empresa_id"]),
+        "email":      data.email,
+    })
+
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "empresa_id": str(usuario["empresa_id"]),
+        "rfc": usuario["rfc"],
+        "razon_social": usuario["razon_social"],
+    }
+
+
+@app.get("/api/v1/auth/me", tags=["Auth"])
+async def me(current_user: dict = Depends(_get_current_user)):
+    """Retorna info del usuario autenticado."""
+    usuario = db.query_one(
+        "SELECT u.id, u.email, u.nombre, u.empresa_id, e.rfc, e.razon_social, e.regimen_fiscal FROM usuarios u JOIN empresas e ON e.id = u.empresa_id WHERE u.id = %s",
+        (current_user["user_id"],),
+    )
+    if not usuario:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    return _serializar(usuario)
+
+
+# ── Constancia ────────────────────────────────────────────────
+
+@app.post("/api/v1/constancia/parsear", tags=["Constancia"])
+async def parsear_constancia_pdf(archivo: UploadFile = File(...)):
+    """Extrae datos fiscales de la Constancia de Situación Fiscal (PDF SAT)."""
+    if not archivo.filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="El archivo debe ser PDF")
+
+    contenido = await archivo.read()
+
+    try:
+        from constancia_parser import parsear_constancia
+        datos = parsear_constancia(contenido)
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f"No se pudo leer el PDF: {str(e)}")
+
+    # Guardar PDF
+    nombre_archivo = f"{_uuid.uuid4()}.pdf"
+    ruta = UPLOADS_DIR / nombre_archivo
+    ruta.write_bytes(contenido)
+    datos["constancia_path"] = nombre_archivo
+
+    return datos
 
 
 # ── Empresas ─────────────────────────────────────────────────

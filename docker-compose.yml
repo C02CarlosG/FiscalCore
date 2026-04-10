@@ -1,0 +1,17 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: fiscalcore2024
+      POSTGRES_DB: auditoria_fiscal
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./001_schema_inicial.sql:/docker-entrypoint-initdb.d/001_schema_inicial.sql:ro
+      - ./002_usuarios.sql:/docker-entrypoint-initdb.d/002_usuarios.sql:ro
+
+volumes:
+  pg_data:

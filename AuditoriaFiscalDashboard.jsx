@@ -1,92 +1,56 @@
 import { useState, useEffect, useRef } from "react";
+import { Button }   from "./src/components/ui/button";
+import { Badge }    from "./src/components/ui/badge";
+import { Card, CardContent, CardHeader, CardTitle } from "./src/components/ui/card";
+import { Alert, AlertDescription } from "./src/components/ui/alert";
+import { Avatar, AvatarFallback } from "./src/components/ui/avatar";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./src/components/ui/dialog";
+import { cn } from "./src/lib/utils";
 
 const API_URL = "http://localhost:8000";
 
-// ─── Design tokens — warm parchment editorial ─────────────────
-const C = {
-  bg:          "#EDE9E1",
-  surface:     "#FAFAF7",
-  surfaceHigh: "#FFFFFF",
-  border:      "#D8D3CA",
-  borderSoft:  "#EAE6E0",
-  text:        "#1C1917",
-  muted:       "#7A746C",
-  dim:         "#B5AFA8",
-  ink:         "#00574B",
-  inkLight:    "#E8F2F0",
-  inkDark:     "#003D34",
-  rouge:       "#9B1C1C",
-  rougeLight:  "#FEF2F2",
-  amber:       "#92400E",
-  amberLight:  "#FFFBEB",
-  mustard:     "#713F12",
-  mustardLight:"#FEFCE8",
-  sage:        "#14532D",
-  sageLight:   "#F0FDF4",
-  sky:         "#1E3A8A",
-  skyLight:    "#EFF6FF",
-};
-
-const SEV = {
-  critico: { c:C.rouge,   bg:C.rougeLight,   label:"CRÍTICO" },
-  alto:    { c:C.amber,   bg:C.amberLight,   label:"ALTO"    },
-  medio:   { c:C.mustard, bg:C.mustardLight, label:"MEDIO"   },
-  bajo:    { c:C.sage,    bg:C.sageLight,    label:"BAJO"    },
-};
-
-// ─── Catálogos SAT ────────────────────────────────────────────
+/* ── SAT Catalogs ─────────────────────────────────────────── */
 const FORMA_PAGO = {
-  "01":"Efectivo",           "02":"Cheque nominativo",
-  "03":"Transferencia",      "04":"Tarjeta de crédito",
+  "01":"Efectivo",            "02":"Cheque nominativo",
+  "03":"Transferencia",       "04":"Tarjeta de crédito",
   "05":"Monedero electrónico","06":"Dinero electrónico",
-  "08":"Vales de despensa",  "12":"Dación en pago",
-  "13":"Subrogación",        "14":"Consignación",
-  "15":"Condonación",        "17":"Compensación",
-  "23":"Novación",           "24":"Confusión",
-  "25":"Remisión de deuda",  "26":"Prescripción",
+  "08":"Vales de despensa",   "12":"Dación en pago",
+  "13":"Subrogación",         "14":"Consignación",
+  "15":"Condonación",         "17":"Compensación",
+  "23":"Novación",            "24":"Confusión",
+  "25":"Remisión de deuda",   "26":"Prescripción",
   "27":"A satisfacción acreedor",
-  "28":"Tarjeta de débito",  "29":"Tarjeta de servicios",
-  "30":"Anticipos",          "31":"Intermediario pagos",
+  "28":"Tarjeta de débito",   "29":"Tarjeta de servicios",
+  "30":"Anticipos",           "31":"Intermediario pagos",
   "99":"Por definir",
 };
-
 const TIPO_LABEL = { I:"Ingreso", E:"Egreso", T:"Traslado", N:"Nómina", P:"Pago" };
-const TIPO_C     = { I:C.sage,  E:C.amber,  T:C.sky,  N:C.muted,  P:C.mustard };
-const TIPO_BG    = { I:C.sageLight, E:C.amberLight, T:C.skyLight, N:C.surfaceHigh, P:C.mustardLight };
-const MET_C      = { PUE:C.sage, PPD:C.amber };
-const MET_BG     = { PUE:C.sageLight, PPD:C.amberLight };
+const TIPO_CLS   = {
+  I:"text-emerald-400 bg-emerald-400/10 border-emerald-400/20",
+  E:"text-amber-400  bg-amber-400/10  border-amber-400/20",
+  T:"text-sky-400    bg-sky-400/10    border-sky-400/20",
+  N:"text-slate-400  bg-slate-400/10  border-slate-400/20",
+  P:"text-yellow-400 bg-yellow-400/10 border-yellow-400/20",
+};
+const MET_CLS = {
+  PUE:"text-emerald-400 bg-emerald-400/10 border-emerald-400/20",
+  PPD:"text-amber-400  bg-amber-400/10  border-amber-400/20",
+};
 
-// ─── Namespaces CFDI ─────────────────────────────────────────
+/* ── CFDI XML Namespaces ──────────────────────────────────── */
 const NS4   = "http://www.sat.gob.mx/cfd/4";
 const NSTFD = "http://www.sat.gob.mx/TimbreFiscalDigital";
 
-const scoreColor  = (s) => s >= 85 ? C.sage : s >= 70 ? C.sky : s >= 50 ? C.amber : C.rouge;
+/* ── Severity ─────────────────────────────────────────────── */
+const SEV_VARIANT = { critico:"critical", alto:"high", medio:"medium", bajo:"low" };
+const SEV_LABEL   = { critico:"CRÍTICO",  alto:"ALTO",  medio:"MEDIO",  bajo:"BAJO" };
+const SEV_COLOR   = { critico:"#F87171",  alto:"#FB923C", medio:"#FBBF24", bajo:"#34D399" };
+
+/* ── Score helpers ───────────────────────────────────────── */
+const scoreColor  = (s) => s >= 85 ? "#34D399" : s >= 70 ? "#06B6D4" : s >= 50 ? "#FB923C" : "#F87171";
 const scoreClasif = (s) => s >= 85 ? "SALUDABLE" : s >= 70 ? "ACEPTABLE" : s >= 50 ? "EN RIESGO" : "CRÍTICO";
 
-// ─── Static styles ────────────────────────────────────────────
-const card = {
-  background: "#FFFFFF",
-  border: `1px solid ${C.border}`,
-  borderRadius: 4,
-  padding: "20px 24px",
-  boxShadow: "0 1px 4px rgba(0,0,0,0.05)",
-};
-const lbl = {
-  fontSize: 10, fontWeight: 700, letterSpacing: "0.18em",
-  textTransform: "uppercase", color: C.muted,
-  fontFamily: "'Syne', sans-serif",
-};
-
-// ─── Demo data ────────────────────────────────────────────────
-const DEMO = {
-  empresa: { rfc:"—", razon_social:"Cargando...", regimen:"" },
-  score: 0, clasificacion:"sin datos", periodo:"—",
-  riesgos: [],
-  tendencia: [{mes:"Ene",score:50},{mes:"Feb",score:50}],
-  indicadores: { ingresos_cfdi:0, egresos_cfdi:0, depositos_banco:0, cargos_banco:0, conciliacion:0 },
-  conciliacion: { exacto:0, parcial:0, sin_cfdi:0, sin_movimiento:0, total:0 },
-};
-
+/* ── Format helpers ──────────────────────────────────────── */
 const fmt  = (n) => new Intl.NumberFormat("es-MX",{style:"currency",currency:"MXN",maximumFractionDigits:0}).format(n??0);
 const fmtK = (n) => (n??0)>=1e6?`$${((n??0)/1e6).toFixed(1)}M`:`$${((n??0)/1e3).toFixed(0)}K`;
 const MESES = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
@@ -125,35 +89,48 @@ function mapApiToData(dash, concil) {
   };
 }
 
-// ─── Visual components ────────────────────────────────────────
+const DEMO = {
+  empresa: { rfc:"—", razon_social:"Cargando...", regimen:"" },
+  score: 0, clasificacion:"sin datos", periodo:"—",
+  riesgos: [],
+  tendencia: [{mes:"Ene",score:50},{mes:"Feb",score:50}],
+  indicadores: { ingresos_cfdi:0, egresos_cfdi:0, depositos_banco:0, cargos_banco:0, conciliacion:0 },
+  conciliacion: { exacto:0, parcial:0, sin_cfdi:0, sin_movimiento:0, total:0 },
+};
 
+const ACCIONES = {
+  INGRESO_NO_FACTURADO:   "Emitir CFDI de ingreso por el monto depositado o documentar la razón de la operación exenta. Plazo: inmediato.",
+  GASTO_SIN_CFDI:         "Solicitar CFDI al proveedor. Si no es posible, documentar el gasto y evaluar deducibilidad. Plazo: esta semana.",
+  CFDI_NO_COBRADO:        "Gestionar cobro o emitir complemento de pago. Considerar provisión de cartera vencida para ISR.",
+  CFDI_NO_PAGADO:         "Revisar situación con proveedor y registrar complemento de pago si ya se liquidó.",
+  DIFERENCIA_IVA:         "Revisar declaración de IVA del período y conciliar contra DIOT. Posible declaración complementaria.",
+  RFC_INVALIDO:           "Verificar RFC con emisor/receptor y solicitar reexpedición del CFDI con datos correctos.",
+  CFDI_CANCELADO_COBRADO: "Verificar si el cobro fue devuelto. Si no, re-expedir CFDI vigente por el mismo monto.",
+  DIFERENCIA_TIPO_CAMBIO: "Actualizar tipo de cambio del día de emisión según publicación del Banxico.",
+};
+
+/* ── SVG visual components (colors are hex — SVG no supports CSS vars) ── */
 function ScoreGauge({ score }) {
-  const color = scoreColor(score);
-  // Semicircle: M 20 96 A 80 80 0 0 1 180 96 — length = π×80 ≈ 251.3
+  const color  = scoreColor(score);
   const circum = Math.PI * 80;
   const offset = circum * (1 - score / 100);
-
   return (
-    <div style={{ display:"flex", flexDirection:"column", alignItems:"center" }}>
+    <div className="flex flex-col items-center">
       <svg width={200} height={108} viewBox="0 0 200 108">
-        {/* Track */}
-        <path d={`M 20 96 A 80 80 0 0 1 180 96`}
-          fill="none" stroke={C.borderSoft} strokeWidth={8} strokeLinecap="round"/>
-        {/* Value arc */}
-        <path d={`M 20 96 A 80 80 0 0 1 180 96`}
+        <path d="M 20 96 A 80 80 0 0 1 180 96"
+          fill="none" stroke="#1F2937" strokeWidth={8} strokeLinecap="round"/>
+        <path d="M 20 96 A 80 80 0 0 1 180 96"
           fill="none" stroke={color} strokeWidth={8} strokeLinecap="round"
-          strokeDasharray={`${circum} ${circum}`}
-          strokeDashoffset={offset}
+          strokeDasharray={`${circum} ${circum}`} strokeDashoffset={offset}
           style={{ transition:"stroke-dashoffset 1.4s cubic-bezier(0.16,1,0.3,1), stroke 0.5s ease" }}
         />
-        {/* Score number, inside arc */}
         <text x={100} y={84} textAnchor="middle" fill={color}
-          fontFamily="'Playfair Display', serif" fontSize="58" fontWeight="900"
+          fontFamily="'JetBrains Mono', monospace" fontSize="58" fontWeight="900"
           style={{ transition:"fill 0.5s ease" }}>
           {score}
         </text>
       </svg>
-      <div style={{ fontFamily:"'Syne', sans-serif", fontSize:10, fontWeight:700, letterSpacing:"0.2em", color:C.muted, textTransform:"uppercase", marginTop:0 }}>
+      <div className="font-mono text-[10px] text-muted-foreground tracking-widest uppercase">
         {scoreClasif(score)}
       </div>
     </div>
@@ -162,7 +139,7 @@ function ScoreGauge({ score }) {
 
 function TrendLine({ data }) {
   if (!data || data.length < 2) return (
-    <div style={{ height:80, display:"flex", alignItems:"center", justifyContent:"center", color:C.dim, fontSize:11, fontFamily:"'Syne', sans-serif" }}>
+    <div className="h-20 flex items-center justify-center text-xs text-muted-foreground font-mono">
       Sin historial disponible
     </div>
   );
@@ -171,60 +148,51 @@ function TrendLine({ data }) {
   const pts = data.map((d,i) => ({ x:i*xStep, y:h-((d.score-min)/(max-min))*h, score:d.score, mes:d.mes }));
   const pathD = pts.map((p,i)=>`${i===0?"M":"L"} ${p.x} ${p.y}`).join(" ");
   const areaD = `${pathD} L ${w} ${h} L 0 ${h} Z`;
-  const last = pts[pts.length-1];
-  const color = scoreColor(last.score);
-
+  const color = scoreColor(pts[pts.length-1].score);
   return (
     <svg width="100%" viewBox={`0 0 ${w} ${h+18}`} style={{ overflow:"visible" }}>
       <defs>
         <linearGradient id="tg" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor={color} stopOpacity="0.12"/>
+          <stop offset="0%" stopColor={color} stopOpacity="0.15"/>
           <stop offset="100%" stopColor={color} stopOpacity="0"/>
         </linearGradient>
       </defs>
       {[60,70,80,90].map(v=>{
         const yy = h-((v-min)/(max-min))*h;
-        return <line key={v} x1={0} y1={yy} x2={w} y2={yy} stroke={C.borderSoft} strokeWidth={1} strokeDasharray="3,4"/>;
+        return <line key={v} x1={0} y1={yy} x2={w} y2={yy} stroke="#1F2937" strokeWidth={1} strokeDasharray="3,4"/>;
       })}
       <path d={areaD} fill="url(#tg)"/>
       <path d={pathD} fill="none" stroke={color} strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round"/>
       {pts.map((p,i)=>(
-        <circle key={i} cx={p.x} cy={p.y} r={3} fill={C.surfaceHigh} stroke={color} strokeWidth={1.5}/>
+        <circle key={i} cx={p.x} cy={p.y} r={3} fill="#0D1526" stroke={color} strokeWidth={1.5}/>
       ))}
       {pts.map((p,i)=>(
-        <text key={i} x={p.x} y={h+14} textAnchor="middle" fill={C.muted} fontSize={9} fontFamily="'IBM Plex Mono', monospace">{p.mes}</text>
+        <text key={i} x={p.x} y={h+14} textAnchor="middle" fill="#6B7280" fontSize={9} fontFamily="'JetBrains Mono', monospace">{p.mes}</text>
       ))}
     </svg>
   );
 }
 
-function Sev({ s }) {
-  const { c, bg, label } = SEV[s] ?? SEV.bajo;
-  return (
-    <span style={{ display:"inline-block", padding:"2px 8px", borderRadius:2, fontSize:9, fontWeight:700, letterSpacing:"0.14em", fontFamily:"'Syne', sans-serif", color:c, background:bg, border:`1px solid ${c}25` }}>
-      {label}
-    </span>
-  );
-}
-
 function ConciliacionBar({ data }) {
   const segs = [
-    { label:"Exacto",         val:data.exacto,         color:C.sage  },
-    { label:"Parcial",        val:data.parcial,         color:C.sky   },
-    { label:"Sin CFDI",       val:data.sin_cfdi,        color:C.rouge },
-    { label:"Sin Movimiento", val:data.sin_movimiento,  color:C.amber },
+    { label:"Exacto",         val:data.exacto,         color:"#34D399" },
+    { label:"Parcial",        val:data.parcial,         color:"#06B6D4" },
+    { label:"Sin CFDI",       val:data.sin_cfdi,        color:"#F87171" },
+    { label:"Sin Movimiento", val:data.sin_movimiento,  color:"#FB923C" },
   ];
   return (
     <div>
-      <div style={{ display:"flex", height:8, borderRadius:1, overflow:"hidden", gap:1 }}>
-        {segs.map(s=><div key={s.label} style={{ flex:s.val||0.001, background:s.color, transition:"flex 0.9s ease" }}/>)}
-      </div>
-      <div style={{ display:"flex", flexWrap:"wrap", gap:"6px 18px", marginTop:10 }}>
+      <div className="flex h-2 rounded overflow-hidden gap-px">
         {segs.map(s=>(
-          <div key={s.label} style={{ display:"flex", alignItems:"center", gap:6 }}>
+          <div key={s.label} style={{ flex:s.val||0.001, background:s.color, transition:"flex 0.9s ease" }}/>
+        ))}
+      </div>
+      <div className="flex flex-wrap gap-x-5 gap-y-1 mt-3">
+        {segs.map(s=>(
+          <div key={s.label} className="flex items-center gap-1.5">
             <div style={{ width:10, height:2, background:s.color, borderRadius:1 }}/>
-            <span style={{ fontSize:11, color:C.muted, fontFamily:"'IBM Plex Mono', monospace" }}>
-              {s.label}: <span style={{ color:C.text, fontWeight:600 }}>{s.val}</span>
+            <span className="font-mono text-[11px] text-muted-foreground">
+              {s.label}: <span className="text-foreground font-semibold">{s.val}</span>
             </span>
           </div>
         ))}
@@ -233,81 +201,68 @@ function ConciliacionBar({ data }) {
   );
 }
 
-// ─── Parser CFDI 4.0 (client-side, DOMParser) ────────────────
+/* ── CFDI client-side parser (DOMParser, no server needed) ── */
 function parseCFDI(xmlText, filename) {
   try {
     const doc = new DOMParser().parseFromString(xmlText, "application/xml");
     if (doc.querySelector("parsererror")) return null;
-
     const comp = doc.documentElement;
     const a  = (el, k) => el?.getAttribute(k) ?? "";
     const nf = (el, k) => parseFloat(el?.getAttribute(k) ?? "0") || 0;
-
     const emisor    = doc.getElementsByTagNameNS(NS4,   "Emisor")[0];
     const receptor  = doc.getElementsByTagNameNS(NS4,   "Receptor")[0];
     const tfd       = doc.getElementsByTagNameNS(NSTFD, "TimbreFiscalDigital")[0];
     const infGlobal = doc.getElementsByTagNameNS(NS4,   "InformacionGlobal")[0];
-
-    // Root-level Impuestos = direct child of Comprobante
-    const allImp  = [...doc.getElementsByTagNameNS(NS4, "Impuestos")];
-    const rootImp = allImp.find(el => el.parentNode === comp) ?? null;
-
-    // IVA 16% trasladado (Impuesto 002, Tasa)
+    const allImp    = [...doc.getElementsByTagNameNS(NS4, "Impuestos")];
+    const rootImp   = allImp.find(el => el.parentNode === comp) ?? null;
     const traslados = rootImp
       ? [...rootImp.getElementsByTagNameNS(NS4, "Traslado")]
           .filter(t => a(t,"Impuesto")==="002" && a(t,"TipoFactor")==="Tasa")
       : [];
     const iva16     = traslados.reduce((s,t) => s + nf(t,"Importe"), 0);
     const baseIva16 = traslados.reduce((s,t) => s + nf(t,"Base"),    0);
-
-    // Retenciones (ISR=001, IVA=002)
     const rets      = rootImp ? [...rootImp.getElementsByTagNameNS(NS4,"Retencion")] : [];
     const isrRet    = rets.filter(r=>a(r,"Impuesto")==="001").reduce((s,r)=>s+nf(r,"Importe"),0);
     const ivaRet    = rets.filter(r=>a(r,"Impuesto")==="002").reduce((s,r)=>s+nf(r,"Importe"),0);
-
     return {
       filename,
-      tipo:             a(comp,"TipoDeComprobante"),   // I E T N P
-      fecha:            a(comp,"Fecha"),
-      serie:            a(comp,"Serie"),
-      folio:            a(comp,"Folio"),
-      uuid:             a(tfd,"UUID"),
-      rfcEmisor:        a(emisor,"Rfc"),
-      nombreEmisor:     a(emisor,"Nombre"),
-      regimenEmisor:    a(emisor,"RegimenFiscal"),
-      rfcReceptor:      a(receptor,"Rfc"),
-      nombreReceptor:   a(receptor,"Nombre"),
-      usoCFDI:          a(receptor,"UsoCFDI"),
-      subtotal:         nf(comp,"SubTotal"),
-      descuento:        nf(comp,"Descuento"),
-      total:            nf(comp,"Total"),
-      moneda:           a(comp,"Moneda"),
-      baseIva16,
-      iva16,
-      isrRet,
-      ivaRet,
+      tipo: a(comp,"TipoDeComprobante"),
+      fecha: a(comp,"Fecha"),
+      serie: a(comp,"Serie"),
+      folio: a(comp,"Folio"),
+      uuid: a(tfd,"UUID"),
+      rfcEmisor: a(emisor,"Rfc"),
+      nombreEmisor: a(emisor,"Nombre"),
+      regimenEmisor: a(emisor,"RegimenFiscal"),
+      rfcReceptor: a(receptor,"Rfc"),
+      nombreReceptor: a(receptor,"Nombre"),
+      usoCFDI: a(receptor,"UsoCFDI"),
+      subtotal: nf(comp,"SubTotal"),
+      descuento: nf(comp,"Descuento"),
+      total: nf(comp,"Total"),
+      moneda: a(comp,"Moneda"),
+      baseIva16, iva16, isrRet, ivaRet,
       totalImpTrasladados: nf(rootImp,"TotalImpuestosTrasladados"),
       totalImpRetenidos:   nf(rootImp,"TotalImpuestosRetenidos"),
-      metodoPago:       a(comp,"MetodoPago"),           // PUE PPD
-      formaPago:        a(comp,"FormaPago"),            // 01 03 99 …
-      exportacion:      a(comp,"Exportacion"),
-      lugarExpedicion:  a(comp,"LugarExpedicion"),
-      // CFDI Global (público en general)
-      esGlobal:         !!infGlobal,
+      metodoPago: a(comp,"MetodoPago"),
+      formaPago:  a(comp,"FormaPago"),
+      exportacion: a(comp,"Exportacion"),
+      lugarExpedicion: a(comp,"LugarExpedicion"),
+      esGlobal: !!infGlobal,
       globalPeriodicidad: a(infGlobal,"Periodicidad"),
-      globalMeses:      a(infGlobal,"Meses"),
-      globalAno:        a(infGlobal,"Año"),
+      globalMeses: a(infGlobal,"Meses"),
+      globalAno:   a(infGlobal,"Año"),
       esPublicoGeneral: a(receptor,"Rfc") === "XAXX010101000",
     };
   } catch(_) { return null; }
 }
 
-// ─── Main component ───────────────────────────────────────────
-export default function AuditoriaFiscal() {
+/* ── Main Component ──────────────────────────────────────── */
+export default function AuditoriaFiscal({ empresaId: empresaIdProp = null, empresaData = null, onLogout = null }) {
   const [tab, setTab]                     = useState("dashboard");
   const [detalle, setDetalle]             = useState(null);
   const [data, setData]                   = useState(DEMO);
-  const [empresaId, setEmpresaId]         = useState(null);
+  const [empresaId, setEmpresaId]         = useState(empresaIdProp);
   const [loading, setLoading]             = useState(false);
   const [uploadState, setUploadState]     = useState({ cfdi:false, banco:false });
   const [uploadMsg, setUploadMsg]         = useState("");
@@ -315,13 +270,11 @@ export default function AuditoriaFiscal() {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
   });
-  const [mounted, setMounted]         = useState(false);
   const [diagnostico, setDiagnostico] = useState([]);
-
   const cfdiRef  = useRef(null);
   const bancoRef = useRef(null);
 
-  useEffect(() => { setMounted(true); fetchDashboard(); }, []);
+  useEffect(() => { fetchDashboard(empresaIdProp ?? undefined); }, []);
 
   const fetchDashboard = async (id) => {
     setLoading(true);
@@ -354,22 +307,12 @@ export default function AuditoriaFiscal() {
   const uploadCfdi = async (e) => {
     const files = e.target.files;
     if (!files.length) return;
-
-    // ── Parsing client-side (siempre, independiente de la API) ──
-    const parsed = await Promise.all(
-      [...files].map(async f => parseCFDI(await f.text(), f.name))
-    );
+    const parsed = await Promise.all([...files].map(async f => parseCFDI(await f.text(), f.name)));
     const valid = parsed.filter(Boolean);
-    if (valid.length > 0) {
-      setDiagnostico(prev => [...prev, ...valid]);
-      setTab("diagnostico");
-    }
-
-    // ── Upload a la API (requiere empresa activa) ──
+    if (valid.length > 0) { setDiagnostico(prev => [...prev, ...valid]); setTab("diagnostico"); }
     if (!empresaId) {
-      setUploadMsg("Sin empresa activa — diagnóstico disponible en la pestaña «Diagnóstico CFDI»");
-      e.target.value = "";
-      return;
+      setUploadMsg("Sin empresa activa — diagnóstico disponible en «Diagnóstico CFDI»");
+      e.target.value = ""; return;
     }
     setUploadState(p=>({...p,cfdi:true})); setUploadMsg("");
     const fd = new FormData();
@@ -398,7 +341,6 @@ export default function AuditoriaFiscal() {
     finally { setUploadState(p=>({...p,banco:false})); e.target.value=""; }
   };
 
-  const sc = scoreColor(data.score);
   const TABS = [
     ["dashboard","Resumen"],
     ["riesgos","Riesgos"],
@@ -407,316 +349,265 @@ export default function AuditoriaFiscal() {
     ["diagnostico", diagnostico.length > 0 ? `Diagnóstico (${diagnostico.length})` : "Diagnóstico CFDI"],
   ];
 
+  const rfc = data.empresa.rfc !== "—" ? data.empresa.rfc : (empresaData?.rfc ?? "FC");
+
   return (
-    <div style={{
-      fontFamily:"'Syne', sans-serif",
-      background: C.bg,
-      backgroundImage: `radial-gradient(circle, ${C.dim}44 1px, transparent 1px)`,
-      backgroundSize: "28px 28px",
-      minHeight: "100vh",
-      color: C.text,
-      opacity: mounted ? 1 : 0,
-      transition: "opacity 0.5s ease",
-    }}>
-      <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=Syne:wght@600;700;800&family=IBM+Plex+Mono:wght@400;600;700&display=swap" rel="stylesheet"/>
-      <style>{`@keyframes blink{0%,100%{opacity:1}50%{opacity:0.25}} * { box-sizing:border-box; }`}</style>
+    <div className="min-h-screen bg-background text-foreground">
 
       {/* ── Header ── */}
-      <header style={{ background:C.surfaceHigh, borderBottom:`1px solid ${C.border}`, position:"sticky", top:0, zIndex:50, boxShadow:"0 1px 6px rgba(0,0,0,0.07)" }}>
-        <div style={{ height:3, background:`linear-gradient(90deg, ${C.ink}, ${C.inkDark})` }}/>
-        <div style={{ maxWidth:1240, margin:"0 auto", padding:"0 28px", display:"flex", alignItems:"center", gap:24, height:54 }}>
+      <header className="sticky top-0 z-50 bg-card/95 backdrop-blur-sm border-b border-border">
+        <div className="h-px bg-gradient-to-r from-transparent via-primary/50 to-transparent" />
+        <div className="max-w-screen-xl mx-auto px-7 flex items-center gap-6 h-14">
 
           {/* Logo */}
-          <div style={{ display:"flex", alignItems:"center", gap:10, flexShrink:0 }}>
-            <svg width={28} height={28} viewBox="0 0 28 28">
-              <rect width={28} height={28} rx={4} fill={C.ink}/>
-              <path d="M 7 20 L 7 10 L 14 7 L 21 10 L 21 20 L 14 23 Z" fill="none" stroke="white" strokeWidth={1.5} strokeLinejoin="round"/>
-              <circle cx={14} cy={15} r={2.5} fill="white"/>
-            </svg>
-            <div>
-              <div style={{ fontFamily:"'Syne', sans-serif", fontSize:14, fontWeight:800, color:C.text, letterSpacing:"-0.02em" }}>
-                Fiscal<span style={{ color:C.ink }}>Core</span>
+          <div className="flex items-center gap-2.5 flex-shrink-0">
+            <div className="w-7 h-7 rounded-md bg-primary/20 border border-primary/30 flex items-center justify-center">
+              <div className="grid grid-cols-2 gap-0.5">
+                {[0.9,0.4,0.4,0.9].map((o,i)=>(
+                  <div key={i} className="w-1.5 h-1.5 rounded-sm bg-primary" style={{ opacity:o }}/>
+                ))}
               </div>
-              <div style={{ fontFamily:"'IBM Plex Mono', monospace", fontSize:8, color:C.dim, letterSpacing:"0.1em" }}>AUDITORÍA · SAT MX</div>
+            </div>
+            <div>
+              <div className="font-display font-bold text-sm text-foreground tracking-tight">
+                Fiscal<span className="text-primary">Core</span>
+              </div>
+              <div className="font-mono text-[8px] text-muted-foreground tracking-widest uppercase">AUDITORÍA · SAT MX</div>
             </div>
           </div>
 
           {/* Nav */}
-          <nav style={{ display:"flex", gap:0, flex:1, justifyContent:"center" }}>
+          <nav className="flex flex-1 justify-center">
             {TABS.map(([k,l])=>(
-              <button key={k} onClick={()=>setTab(k)} style={{
-                padding:"6px 22px", border:"none", background:"none", cursor:"pointer",
-                fontFamily:"'Syne', sans-serif", fontSize:12, fontWeight:tab===k?700:600,
-                color: tab===k ? C.ink : C.muted,
-                borderBottom: `2px solid ${tab===k ? C.ink : "transparent"}`,
-                letterSpacing:"0.04em", transition:"all 0.15s", lineHeight:"42px",
-              }}>{l}</button>
+              <button key={k} onClick={()=>setTab(k)}
+                className={cn(
+                  "px-5 h-14 text-[11px] font-semibold tracking-wider font-mono border-b-2 transition-colors whitespace-nowrap",
+                  tab===k ? "text-primary border-primary" : "text-muted-foreground border-transparent hover:text-foreground"
+                )}
+              >{l}</button>
             ))}
           </nav>
 
-          {/* RFC + period */}
-          <div style={{ flexShrink:0, textAlign:"right" }}>
-            <div style={{ fontFamily:"'IBM Plex Mono', monospace", fontSize:11, fontWeight:600, color:C.text }}>{data.empresa.rfc}</div>
-            <div style={{ display:"flex", alignItems:"center", gap:5, justifyContent:"flex-end", marginTop:1 }}>
-              {loading && <div style={{ width:5, height:5, borderRadius:"50%", background:C.ink, animation:"blink 1.4s infinite" }}/>}
-              <span style={{ fontFamily:"'IBM Plex Mono', monospace", fontSize:9, color:C.dim, letterSpacing:"0.06em" }}>
-                {data.periodo || "SIN PERÍODO"}
-              </span>
+          {/* Right side */}
+          <div className="flex items-center gap-3 flex-shrink-0">
+            <div className="text-right">
+              <div className="font-mono text-[11px] font-semibold text-foreground">{rfc}</div>
+              <div className="flex items-center gap-1 justify-end mt-0.5">
+                {loading && <div className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse"/>}
+                <span className="font-mono text-[9px] text-muted-foreground tracking-wider">{data.periodo || "SIN PERÍODO"}</span>
+              </div>
             </div>
+            <Avatar className="w-8 h-8">
+              <AvatarFallback className="text-[10px]">{rfc.slice(0,2)}</AvatarFallback>
+            </Avatar>
+            {onLogout && (
+              <Button variant="outline" size="sm" onClick={onLogout}
+                className="font-mono text-[10px] tracking-widest uppercase h-7 px-3">
+                Salir
+              </Button>
+            )}
           </div>
         </div>
       </header>
 
-      <main style={{ maxWidth:1240, margin:"0 auto", padding:"28px 28px" }}>
+      <main className="max-w-screen-xl mx-auto px-7 py-7">
 
         {/* ─── DASHBOARD ─── */}
         {tab === "dashboard" && (
-          <div>
+          <div className="space-y-4">
+
             {resumen.critico > 0 && (
-              <div style={{
-                background:C.rougeLight, border:`1px solid ${C.rouge}30`, borderLeft:`4px solid ${C.rouge}`,
-                borderRadius:4, padding:"11px 18px", marginBottom:20,
-                display:"flex", alignItems:"center", gap:12,
-              }}>
-                <span style={{ fontSize:12, color:C.rouge, fontWeight:700 }}>▲</span>
-                <span style={{ fontFamily:"'Syne', sans-serif", fontSize:12, fontWeight:700, color:C.rouge }}>
-                  {resumen.critico} riesgo{resumen.critico>1?"s":""} crítico{resumen.critico>1?"s":""} activo{resumen.critico>1?"s":""}
-                </span>
-                <span style={{ fontSize:12, color:C.muted }}>
-                  Exposición estimada:{" "}
-                  <span style={{ fontFamily:"'IBM Plex Mono', monospace", fontWeight:600, color:C.text }}>{fmt(resumen.montoTotal)}</span>
-                </span>
-              </div>
+              <Alert variant="destructive">
+                <AlertDescription className="flex items-center gap-3 flex-wrap">
+                  <span className="font-bold">
+                    {resumen.critico} riesgo{resumen.critico>1?"s":""} crítico{resumen.critico>1?"s":""} activo{resumen.critico>1?"s":""}
+                  </span>
+                  <span className="text-muted-foreground">
+                    Exposición estimada:{" "}
+                    <span className="font-mono font-semibold text-foreground">{fmt(resumen.montoTotal)}</span>
+                  </span>
+                </AlertDescription>
+              </Alert>
             )}
 
             {/* Score + KPIs */}
-            <div style={{ display:"grid", gridTemplateColumns:"272px 1fr", gap:16, marginBottom:16 }}>
-              <div style={{ ...card, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:14, borderLeft:`4px solid ${sc}`, padding:"28px 20px" }}>
-                <div style={{ ...lbl }}>Score de Cumplimiento</div>
-                <ScoreGauge score={data.score}/>
-                <div style={{ width:"100%", borderTop:`1px solid ${C.borderSoft}`, paddingTop:12, textAlign:"center" }}>
-                  <div style={{ fontFamily:"'IBM Plex Mono', monospace", fontSize:11, color:C.muted, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
-                    {data.empresa.razon_social}
+            <div className="grid gap-4" style={{ gridTemplateColumns:"272px 1fr" }}>
+              <Card style={{ borderLeftWidth:4, borderLeftColor:scoreColor(data.score) }}>
+                <CardContent className="pt-6 flex flex-col items-center gap-3">
+                  <div className="font-mono text-[10px] text-muted-foreground tracking-widest uppercase">Score de Cumplimiento</div>
+                  <ScoreGauge score={data.score}/>
+                  <div className="w-full border-t border-border pt-3 text-center">
+                    <div className="font-mono text-[11px] text-muted-foreground truncate">{data.empresa.razon_social}</div>
+                    {data.empresa.regimen && (
+                      <div className="font-mono text-[9px] text-muted-foreground/60 mt-1 tracking-wider">{data.empresa.regimen}</div>
+                    )}
                   </div>
-                  {data.empresa.regimen && (
-                    <div style={{ fontFamily:"'IBM Plex Mono', monospace", fontSize:9, color:C.dim, marginTop:2, letterSpacing:"0.06em" }}>{data.empresa.regimen}</div>
-                  )}
-                </div>
-              </div>
+                </CardContent>
+              </Card>
 
-              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gridTemplateRows:"1fr 1fr", gap:16 }}>
+              <div className="grid grid-cols-2 grid-rows-2 gap-4">
                 {[
-                  { label:"Ingresos CFDI",  val:fmtK(data.indicadores.ingresos_cfdi),  sub:`Depósitos: ${fmtK(data.indicadores.depositos_banco)}`, delta:data.indicadores.depositos_banco-data.indicadores.ingresos_cfdi, warn:true },
-                  { label:"Egresos CFDI",   val:fmtK(data.indicadores.egresos_cfdi),   sub:`Cargos: ${fmtK(data.indicadores.cargos_banco)}`, delta:data.indicadores.cargos_banco-data.indicadores.egresos_cfdi, warn:true },
+                  { label:"Ingresos CFDI",  val:fmtK(data.indicadores.ingresos_cfdi),  sub:`Depósitos: ${fmtK(data.indicadores.depositos_banco)}`,  delta:data.indicadores.depositos_banco-data.indicadores.ingresos_cfdi },
+                  { label:"Egresos CFDI",   val:fmtK(data.indicadores.egresos_cfdi),   sub:`Cargos: ${fmtK(data.indicadores.cargos_banco)}`,          delta:data.indicadores.cargos_banco-data.indicadores.egresos_cfdi   },
                   { label:"Conciliación",   val:`${data.indicadores.conciliacion}%`,    sub:`${data.conciliacion.exacto+data.conciliacion.parcial}/${data.conciliacion.total} movimientos`, delta:null },
                   { label:"Monto en Riesgo",val:fmt(resumen.montoTotal),                sub:`${data.riesgos.filter(r=>r.estado==="abierto").length} detecciones abiertas`, delta:null },
                 ].map((k,i)=>(
-                  <div key={i} style={{ ...card, display:"flex", flexDirection:"column", gap:6 }}>
-                    <div style={lbl}>{k.label}</div>
-                    <div style={{ fontFamily:"'IBM Plex Mono', monospace", fontSize:22, fontWeight:700, color:C.text, lineHeight:1, marginTop:4 }}>{k.val}</div>
-                    {k.delta!==null && k.delta!==0 && (
-                      <div style={{ fontFamily:"'IBM Plex Mono', monospace", fontSize:10, color:k.warn&&k.delta>0?C.rouge:C.sage }}>
-                        {k.delta>0?"▲":"▼"} Brecha {fmtK(Math.abs(k.delta))}
-                      </div>
-                    )}
-                    <div style={{ fontSize:11, color:C.muted }}>{k.sub}</div>
-                  </div>
+                  <Card key={i}>
+                    <CardContent className="pt-5 space-y-1">
+                      <div className="font-mono text-[10px] text-muted-foreground tracking-widest uppercase">{k.label}</div>
+                      <div className="font-mono text-2xl font-bold text-foreground">{k.val}</div>
+                      {k.delta!==null && k.delta!==0 && (
+                        <div className={cn("font-mono text-[10px]", k.delta>0?"text-red-400":"text-emerald-400")}>
+                          {k.delta>0?"▲":"▼"} Brecha {fmtK(Math.abs(k.delta))}
+                        </div>
+                      )}
+                      <div className="text-[11px] text-muted-foreground">{k.sub}</div>
+                    </CardContent>
+                  </Card>
                 ))}
               </div>
             </div>
 
-            {/* Trend + Risk summary */}
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:16, marginBottom:16 }}>
-              <div style={card}>
-                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:16 }}>
-                  <div>
-                    <div style={lbl}>Tendencia del Score</div>
-                    <div style={{ fontSize:11, color:C.muted, marginTop:3 }}>Historial de períodos</div>
-                  </div>
-                  {data.tendencia.length>=2 && (() => {
-                    const last = data.tendencia[data.tendencia.length-1];
-                    const prev = data.tendencia[data.tendencia.length-2];
-                    const diff = last.score - prev.score;
-                    return (
-                      <div style={{ textAlign:"right" }}>
-                        <div style={{ fontFamily:"'IBM Plex Mono', monospace", fontSize:13, fontWeight:700, color:diff>=0?C.sage:C.rouge }}>
-                          {diff>=0?"▲":"▼"} {Math.abs(diff)} pts
-                        </div>
-                        <div style={{ fontSize:9, color:C.dim, marginTop:1 }}>vs anterior</div>
-                      </div>
-                    );
-                  })()}
-                </div>
-                <TrendLine data={data.tendencia}/>
-              </div>
-
-              <div style={card}>
-                <div style={lbl}>Riesgos por Severidad</div>
-                <div style={{ marginTop:14, display:"flex", flexDirection:"column", gap:12 }}>
-                  {[
-                    { sev:"critico", label:"Crítico", count:resumen.critico,                                                                                    color:C.rouge  },
-                    { sev:"alto",    label:"Alto",    count:resumen.alto,                                                                                       color:C.amber  },
-                    { sev:"medio",   label:"Medio",   count:resumen.medio,                                                                                      color:C.mustard},
-                    { sev:"bajo",    label:"Bajo",    count:data.riesgos.filter(r=>r.severidad==="bajo"&&r.estado==="abierto").length,                           color:C.sage   },
-                  ].map(r=>(
-                    <div key={r.sev} style={{ display:"flex", alignItems:"center", gap:10 }}>
-                      <span style={{ fontSize:11, color:C.muted, fontFamily:"'Syne', sans-serif", width:50, flexShrink:0 }}>{r.label}</span>
-                      <div style={{ flex:1, height:4, background:C.borderSoft, borderRadius:2, overflow:"hidden" }}>
-                        <div style={{ height:"100%", borderRadius:2, background:r.color, width:`${(r.count/Math.max(data.riesgos.length,1))*100}%`, transition:"width 0.9s ease", minWidth:r.count>0?4:0 }}/>
-                      </div>
-                      <span style={{ fontFamily:"'IBM Plex Mono', monospace", fontSize:13, fontWeight:700, color:r.color, width:18, textAlign:"right" }}>{r.count}</span>
+            {/* Trend + Risk bars */}
+            <div className="grid grid-cols-2 gap-4">
+              <Card>
+                <CardHeader className="pb-0">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <div className="font-mono text-[10px] text-muted-foreground tracking-widest uppercase">Tendencia del Score</div>
+                      <div className="text-[11px] text-muted-foreground mt-1">Historial de períodos</div>
                     </div>
-                  ))}
-                </div>
-                <div style={{ marginTop:18, paddingTop:16, borderTop:`1px solid ${C.borderSoft}` }}>
-                  <div style={lbl}>Conciliación del Período</div>
-                  <div style={{ marginTop:10 }}><ConciliacionBar data={data.conciliacion}/></div>
-                </div>
-              </div>
+                    {data.tendencia.length>=2 && (() => {
+                      const last=data.tendencia[data.tendencia.length-1], prev=data.tendencia[data.tendencia.length-2];
+                      const diff=last.score-prev.score;
+                      return (
+                        <div className="text-right">
+                          <div className={cn("font-mono text-sm font-bold", diff>=0?"text-emerald-400":"text-red-400")}>
+                            {diff>=0?"▲":"▼"} {Math.abs(diff)} pts
+                          </div>
+                          <div className="text-[9px] text-muted-foreground mt-0.5">vs anterior</div>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                </CardHeader>
+                <CardContent className="pt-4"><TrendLine data={data.tendencia}/></CardContent>
+              </Card>
+
+              <Card>
+                <CardContent className="pt-5">
+                  <div className="font-mono text-[10px] text-muted-foreground tracking-widest uppercase mb-3">Riesgos por Severidad</div>
+                  <div className="space-y-3">
+                    {[
+                      { label:"Crítico", count:resumen.critico, color:"#F87171" },
+                      { label:"Alto",    count:resumen.alto,    color:"#FB923C" },
+                      { label:"Medio",   count:resumen.medio,   color:"#FBBF24" },
+                      { label:"Bajo",    count:data.riesgos.filter(r=>r.severidad==="bajo"&&r.estado==="abierto").length, color:"#34D399" },
+                    ].map(r=>(
+                      <div key={r.label} className="flex items-center gap-2.5">
+                        <span className="font-mono text-[11px] text-muted-foreground w-12 flex-shrink-0">{r.label}</span>
+                        <div className="flex-1 h-1 bg-border rounded overflow-hidden">
+                          <div style={{ height:"100%", borderRadius:2, background:r.color, width:`${(r.count/Math.max(data.riesgos.length,1))*100}%`, transition:"width 0.9s ease", minWidth:r.count>0?4:0 }}/>
+                        </div>
+                        <span className="font-mono text-sm font-bold w-5 text-right" style={{ color:r.color }}>{r.count}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="mt-4 pt-4 border-t border-border">
+                    <div className="font-mono text-[10px] text-muted-foreground tracking-widest uppercase mb-2.5">Conciliación del Período</div>
+                    <ConciliacionBar data={data.conciliacion}/>
+                  </div>
+                </CardContent>
+              </Card>
             </div>
 
             {/* Active detections */}
-            <div style={card}>
-              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
-                <div style={lbl}>Detecciones Activas</div>
-                <button onClick={()=>setTab("riesgos")} style={{ fontFamily:"'Syne', sans-serif", fontSize:11, fontWeight:700, color:C.ink, background:"none", border:"none", cursor:"pointer", letterSpacing:"0.04em" }}>
-                  Ver todas →
-                </button>
-              </div>
-              {data.riesgos.filter(r=>r.estado==="abierto").length===0 ? (
-                <div style={{ textAlign:"center", padding:"24px 0", color:C.dim, fontSize:12 }}>
-                  {loading?"Cargando datos…":"Sin riesgos activos · Carga CFDIs y estados de cuenta para comenzar"}
+            <Card>
+              <CardHeader className="pb-3">
+                <div className="flex justify-between items-center">
+                  <div className="font-mono text-[10px] text-muted-foreground tracking-widest uppercase">Detecciones Activas</div>
+                  <button onClick={()=>setTab("riesgos")} className="font-mono text-[11px] font-bold text-primary hover:underline underline-offset-2 bg-transparent border-none cursor-pointer">
+                    Ver todas →
+                  </button>
                 </div>
-              ) : (
-                <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
-                  {data.riesgos.filter(r=>r.estado==="abierto").slice(0,4).map(r=>(
-                    <div key={r.id} onClick={()=>{setDetalle(r);setTab("riesgos");}}
-                      style={{ display:"flex", alignItems:"center", gap:12, padding:"10px 14px", borderRadius:3, border:`1px solid ${C.borderSoft}`, background:C.surfaceHigh, cursor:"pointer", transition:"border-color 0.15s" }}
-                      onMouseEnter={e=>{e.currentTarget.style.borderColor=(SEV[r.severidad]?.c??"")+"55";}}
-                      onMouseLeave={e=>{e.currentTarget.style.borderColor=C.borderSoft;}}
-                    >
-                      <div style={{ width:3, height:32, borderRadius:2, background:SEV[r.severidad]?.c, flexShrink:0 }}/>
-                      <div style={{ flex:1, minWidth:0 }}>
-                        <div style={{ fontSize:13, fontWeight:700, color:C.text, fontFamily:"'Syne', sans-serif" }}>{r.nombre}</div>
-                        <div style={{ fontSize:11, color:C.muted, marginTop:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{r.descripcion}</div>
+              </CardHeader>
+              <CardContent>
+                {data.riesgos.filter(r=>r.estado==="abierto").length===0 ? (
+                  <div className="text-center py-6 text-sm text-muted-foreground">
+                    {loading?"Cargando datos…":"Sin riesgos activos · Carga CFDIs y estados de cuenta para comenzar"}
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {data.riesgos.filter(r=>r.estado==="abierto").slice(0,4).map(r=>(
+                      <div key={r.id} onClick={()=>{ setDetalle(r); setTab("riesgos"); }}
+                        className="flex items-center gap-3 p-3 rounded-md border border-border hover:border-primary/30 bg-background cursor-pointer transition-colors"
+                      >
+                        <div className="w-0.5 h-8 rounded flex-shrink-0" style={{ background:SEV_COLOR[r.severidad] }}/>
+                        <div className="flex-1 min-w-0">
+                          <div className="text-[13px] font-bold text-foreground">{r.nombre}</div>
+                          <div className="text-[11px] text-muted-foreground mt-0.5 truncate">{r.descripcion}</div>
+                        </div>
+                        <Badge variant={SEV_VARIANT[r.severidad]}>{SEV_LABEL[r.severidad]}</Badge>
+                        <div className="text-right flex-shrink-0">
+                          <div className="font-mono text-sm font-bold" style={{ color:SEV_COLOR[r.severidad] }}>{fmt(r.monto)}</div>
+                          <div className="font-mono text-[9px] text-muted-foreground mt-0.5">{r.fecha}</div>
+                        </div>
                       </div>
-                      <Sev s={r.severidad}/>
-                      <div style={{ textAlign:"right", flexShrink:0 }}>
-                        <div style={{ fontFamily:"'IBM Plex Mono', monospace", fontSize:13, fontWeight:700, color:SEV[r.severidad]?.c }}>{fmt(r.monto)}</div>
-                        <div style={{ fontSize:9, color:C.dim, marginTop:2 }}>{r.fecha}</div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
           </div>
         )}
 
         {/* ─── RIESGOS ─── */}
         {tab === "riesgos" && (
-          <div style={{ display:"grid", gridTemplateColumns:detalle?"1fr 364px":"1fr", gap:16 }}>
-            <div>
-              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-end", marginBottom:20 }}>
-                <div>
-                  <h2 style={{ fontFamily:"'Playfair Display', serif", fontSize:26, fontWeight:900, color:C.text, margin:0 }}>Detecciones Fiscales</h2>
-                  <div style={{ fontSize:12, color:C.muted, marginTop:4 }}>
-                    {data.riesgos.filter(r=>r.estado==="abierto").length} riesgos activos · {data.periodo}
-                  </div>
+          <div>
+            <div className="flex justify-between items-end mb-5">
+              <div>
+                <h2 className="font-display text-2xl font-bold text-foreground">Detecciones Fiscales</h2>
+                <div className="text-sm text-muted-foreground mt-1">
+                  {data.riesgos.filter(r=>r.estado==="abierto").length} riesgos activos · {data.periodo}
                 </div>
-                <button onClick={()=>fetchDashboard(empresaId)} style={{
-                  padding:"6px 14px", borderRadius:3, fontSize:11, cursor:"pointer",
-                  fontFamily:"'Syne', sans-serif", fontWeight:700, letterSpacing:"0.04em",
-                  border:`1px solid ${C.border}`, background:C.surfaceHigh, color:C.muted,
-                }}>↻ Actualizar</button>
               </div>
-
-              {data.riesgos.length===0 ? (
-                <div style={{ ...card, textAlign:"center", padding:"48px 20px", color:C.dim, fontSize:12 }}>
-                  {loading?"Cargando…":"Sin detecciones · Sube archivos en «Cargar»"}
-                </div>
-              ) : (
-                <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-                  {data.riesgos.map(r=>(
-                    <div key={r.id} onClick={()=>setDetalle(detalle?.id===r.id?null:r)}
-                      style={{
-                        ...card, cursor:"pointer", padding:"14px 20px",
-                        opacity: r.estado==="resuelto" ? 0.5 : 1,
-                        borderLeft:`4px solid ${SEV[r.severidad]?.c??C.border}`,
-                        outline: detalle?.id===r.id ? `2px solid ${SEV[r.severidad]?.c??C.border}44` : "none",
-                        outlineOffset: 1,
-                        transition:"opacity 0.2s, outline 0.15s",
-                      }}
-                    >
-                      <div style={{ display:"flex", alignItems:"center", gap:12 }}>
-                        <div style={{ flex:1 }}>
-                          <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:4 }}>
-                            <span style={{ fontFamily:"'Syne', sans-serif", fontSize:13, fontWeight:700, color:C.text }}>{r.nombre}</span>
-                            <Sev s={r.severidad}/>
-                            {r.estado==="resuelto" && (
-                              <span style={{ fontFamily:"'IBM Plex Mono', monospace", fontSize:9, color:C.sage, background:C.sageLight, border:`1px solid ${C.sage}25`, padding:"1px 7px", borderRadius:2 }}>RESUELTO</span>
-                            )}
-                            {r.estado==="en_revision" && (
-                              <span style={{ fontFamily:"'IBM Plex Mono', monospace", fontSize:9, color:C.sky, background:C.skyLight, border:`1px solid ${C.sky}25`, padding:"1px 7px", borderRadius:2 }}>EN REVISIÓN</span>
-                            )}
-                          </div>
-                          <div style={{ fontSize:12, color:C.muted }}>{r.descripcion}</div>
-                        </div>
-                        <div style={{ textAlign:"right", flexShrink:0 }}>
-                          <div style={{ fontFamily:"'IBM Plex Mono', monospace", fontSize:17, fontWeight:700, color:SEV[r.severidad]?.c }}>{fmt(r.monto)}</div>
-                          <div style={{ fontSize:10, color:C.dim, marginTop:2 }}>{r.fecha}</div>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
+              <Button variant="outline" size="sm" onClick={()=>fetchDashboard(empresaId)}>↻ Actualizar</Button>
             </div>
 
-            {/* Detail panel */}
-            {detalle && (
-              <div style={{ ...card, position:"sticky", top:72, alignSelf:"start", borderLeft:`4px solid ${SEV[detalle.severidad]?.c}` }}>
-                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:14 }}>
-                  <Sev s={detalle.severidad}/>
-                  <button onClick={()=>setDetalle(null)} style={{ background:"none", border:"none", color:C.dim, cursor:"pointer", fontSize:16, padding:2 }}>✕</button>
-                </div>
-                <h3 style={{ fontFamily:"'Playfair Display', serif", fontSize:18, fontWeight:700, color:C.text, margin:"0 0 4px" }}>{detalle.nombre}</h3>
-                <div style={{ fontFamily:"'IBM Plex Mono', monospace", fontSize:9, color:C.dim, letterSpacing:"0.12em", marginBottom:16 }}>{detalle.codigo}</div>
-
-                <div style={{ padding:"14px 16px", background:SEV[detalle.severidad]?.bg, borderRadius:3, border:`1px solid ${SEV[detalle.severidad]?.c}20`, marginBottom:16 }}>
-                  <div style={{ fontSize:11, color:C.muted, marginBottom:6 }}>{detalle.descripcion}</div>
-                  <div style={{ fontFamily:"'IBM Plex Mono', monospace", fontSize:24, fontWeight:700, color:SEV[detalle.severidad]?.c }}>
-                    {fmt(detalle.monto)}
+            {data.riesgos.length===0 ? (
+              <Card>
+                <CardContent className="text-center py-12 text-sm text-muted-foreground pt-12">
+                  {loading?"Cargando…":"Sin detecciones · Sube archivos en «Cargar»"}
+                </CardContent>
+              </Card>
+            ) : (
+              <div className="space-y-2">
+                {data.riesgos.map(r=>(
+                  <div key={r.id} onClick={()=>setDetalle(detalle?.id===r.id?null:r)}
+                    className={cn(
+                      "cursor-pointer p-4 rounded-lg border bg-card transition-all",
+                      r.estado==="resuelto"?"opacity-50":"hover:border-primary/30",
+                      detalle?.id===r.id&&"ring-1 ring-primary/40"
+                    )}
+                    style={{ borderLeftWidth:4, borderLeftColor:SEV_COLOR[r.severidad]??"#6B7280" }}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-1 flex-wrap">
+                          <span className="text-sm font-bold text-foreground">{r.nombre}</span>
+                          <Badge variant={SEV_VARIANT[r.severidad]}>{SEV_LABEL[r.severidad]}</Badge>
+                          {r.estado==="resuelto"    && <Badge variant="low"     className="text-[9px]">RESUELTO</Badge>}
+                          {r.estado==="en_revision" && <Badge variant="default" className="text-[9px]">EN REVISIÓN</Badge>}
+                        </div>
+                        <div className="text-xs text-muted-foreground">{r.descripcion}</div>
+                      </div>
+                      <div className="text-right flex-shrink-0">
+                        <div className="font-mono text-lg font-bold" style={{ color:SEV_COLOR[r.severidad] }}>{fmt(r.monto)}</div>
+                        <div className="font-mono text-[10px] text-muted-foreground mt-0.5">{r.fecha}</div>
+                      </div>
+                    </div>
                   </div>
-                </div>
-
-                <div style={{ marginBottom:16 }}>
-                  <div style={{ ...lbl, marginBottom:8 }}>Acción Recomendada</div>
-                  <div style={{ padding:"12px 14px", background:C.surfaceHigh, borderRadius:3, border:`1px solid ${C.border}`, fontSize:12, color:C.text, lineHeight:1.65 }}>
-                    {detalle.codigo==="INGRESO_NO_FACTURADO"   && "Emitir CFDI de ingreso por el monto depositado o documentar la razón de la operación exenta. Plazo: inmediato."}
-                    {detalle.codigo==="GASTO_SIN_CFDI"         && "Solicitar CFDI al proveedor. Si no es posible, documentar el gasto y evaluar deducibilidad. Plazo: esta semana."}
-                    {detalle.codigo==="CFDI_NO_COBRADO"        && "Gestionar cobro o emitir complemento de pago. Considerar provisión de cartera vencida para ISR."}
-                    {detalle.codigo==="CFDI_NO_PAGADO"         && "Revisar situación con proveedor y registrar complemento de pago si ya se liquidó."}
-                    {detalle.codigo==="DIFERENCIA_IVA"         && "Revisar declaración de IVA del período y conciliar contra DIOT. Posible declaración complementaria."}
-                    {detalle.codigo==="RFC_INVALIDO"           && "Verificar RFC con emisor/receptor y solicitar reexpedición del CFDI con datos correctos."}
-                    {detalle.codigo==="CFDI_CANCELADO_COBRADO" && "Verificar si el cobro fue devuelto. Si no, re-expedir CFDI vigente por el mismo monto."}
-                    {detalle.codigo==="DIFERENCIA_TIPO_CAMBIO" && "Actualizar tipo de cambio del día de emisión según publicación del Banxico."}
-                  </div>
-                </div>
-
-                {detalle.estado==="abierto" && (
-                  <div style={{ display:"flex", gap:8 }}>
-                    <button onClick={()=>resolver(detalle.id)} style={{
-                      flex:1, padding:"9px 0", borderRadius:3, fontSize:12, fontWeight:700, cursor:"pointer",
-                      border:"none", fontFamily:"'Syne', sans-serif", letterSpacing:"0.04em",
-                      background:C.ink, color:"white",
-                    }}>✓ Marcar Resuelta</button>
-                    <button onClick={()=>setDetalle(null)} style={{
-                      padding:"9px 14px", borderRadius:3, fontSize:12, fontWeight:600, cursor:"pointer",
-                      background:C.surfaceHigh, color:C.muted, border:`1px solid ${C.border}`, fontFamily:"'Syne', sans-serif",
-                    }}>Cerrar</button>
-                  </div>
-                )}
+                ))}
               </div>
             )}
           </div>
@@ -725,210 +616,210 @@ export default function AuditoriaFiscal() {
         {/* ─── CONCILIACIÓN ─── */}
         {tab === "conciliacion" && (
           <div>
-            <h2 style={{ fontFamily:"'Playfair Display', serif", fontSize:26, fontWeight:900, color:C.text, marginBottom:6 }}>Conciliación Banco ↔ CFDI</h2>
-            <div style={{ fontSize:12, color:C.muted, marginBottom:24 }}>{data.periodo} · {data.conciliacion.total} movimientos analizados</div>
+            <h2 className="font-display text-2xl font-bold text-foreground mb-1">Conciliación Banco ↔ CFDI</h2>
+            <div className="text-sm text-muted-foreground mb-6">{data.periodo} · {data.conciliacion.total} movimientos analizados</div>
 
-            <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:12, marginBottom:16 }}>
+            <div className="grid grid-cols-4 gap-3 mb-4">
               {[
-                { label:"Match Exacto",   val:data.conciliacion.exacto,         pct:data.conciliacion.total?Math.round(data.conciliacion.exacto/data.conciliacion.total*100):0,         color:C.sage  },
-                { label:"Match Parcial",  val:data.conciliacion.parcial,        pct:data.conciliacion.total?Math.round(data.conciliacion.parcial/data.conciliacion.total*100):0,        color:C.sky   },
-                { label:"Sin CFDI",       val:data.conciliacion.sin_cfdi,       pct:data.conciliacion.total?Math.round(data.conciliacion.sin_cfdi/data.conciliacion.total*100):0,       color:C.rouge },
-                { label:"Sin Movimiento", val:data.conciliacion.sin_movimiento, pct:data.conciliacion.total?Math.round(data.conciliacion.sin_movimiento/data.conciliacion.total*100):0, color:C.amber },
+                { label:"Match Exacto",   val:data.conciliacion.exacto,         pct:data.conciliacion.total?Math.round(data.conciliacion.exacto/data.conciliacion.total*100):0,         color:"#34D399" },
+                { label:"Match Parcial",  val:data.conciliacion.parcial,        pct:data.conciliacion.total?Math.round(data.conciliacion.parcial/data.conciliacion.total*100):0,        color:"#06B6D4" },
+                { label:"Sin CFDI",       val:data.conciliacion.sin_cfdi,       pct:data.conciliacion.total?Math.round(data.conciliacion.sin_cfdi/data.conciliacion.total*100):0,       color:"#F87171" },
+                { label:"Sin Movimiento", val:data.conciliacion.sin_movimiento, pct:data.conciliacion.total?Math.round(data.conciliacion.sin_movimiento/data.conciliacion.total*100):0, color:"#FB923C" },
               ].map(k=>(
-                <div key={k.label} style={{ ...card, textAlign:"center", borderTop:`3px solid ${k.color}`, padding:"18px 20px" }}>
-                  <div style={lbl}>{k.label}</div>
-                  <div style={{ fontFamily:"'Playfair Display', serif", fontSize:42, fontWeight:900, color:k.color, marginTop:8, lineHeight:1 }}>{k.val}</div>
-                  <div style={{ fontSize:11, color:C.muted, marginTop:4 }}>{k.pct}% del total</div>
-                </div>
+                <Card key={k.label} className="text-center" style={{ borderTopWidth:3, borderTopColor:k.color }}>
+                  <CardContent className="pt-5">
+                    <div className="font-mono text-[10px] text-muted-foreground tracking-widest uppercase">{k.label}</div>
+                    <div className="font-mono text-4xl font-bold mt-2 leading-none" style={{ color:k.color }}>{k.val}</div>
+                    <div className="text-[11px] text-muted-foreground mt-1">{k.pct}% del total</div>
+                  </CardContent>
+                </Card>
               ))}
             </div>
 
-            <div style={card}>
-              <div style={{ ...lbl, marginBottom:14 }}>Distribución Visual</div>
-              <ConciliacionBar data={data.conciliacion}/>
-              <div style={{ marginTop:20, paddingTop:18, borderTop:`1px solid ${C.borderSoft}`, display:"grid", gridTemplateColumns:"1fr 1fr", gap:16 }}>
-                <div>
-                  <div style={lbl}>Brecha de Ingresos</div>
-                  <div style={{ fontFamily:"'IBM Plex Mono', monospace", fontSize:22, fontWeight:700, color:C.rouge, marginTop:6 }}>
-                    {fmt(data.indicadores.depositos_banco-data.indicadores.ingresos_cfdi)}
+            <Card>
+              <CardContent className="pt-5">
+                <div className="font-mono text-[10px] text-muted-foreground tracking-widest uppercase mb-3">Distribución Visual</div>
+                <ConciliacionBar data={data.conciliacion}/>
+                <div className="mt-5 pt-5 border-t border-border grid grid-cols-2 gap-4">
+                  <div>
+                    <div className="font-mono text-[10px] text-muted-foreground tracking-widest uppercase">Brecha de Ingresos</div>
+                    <div className="font-mono text-2xl font-bold text-red-400 mt-1.5">{fmt(data.indicadores.depositos_banco-data.indicadores.ingresos_cfdi)}</div>
+                    <div className="text-[11px] text-muted-foreground mt-1">Depósitos no facturados</div>
                   </div>
-                  <div style={{ fontSize:11, color:C.muted, marginTop:2 }}>Depósitos no facturados</div>
-                </div>
-                <div>
-                  <div style={lbl}>Brecha de Egresos</div>
-                  <div style={{ fontFamily:"'IBM Plex Mono', monospace", fontSize:22, fontWeight:700, color:C.amber, marginTop:6 }}>
-                    {fmt(data.indicadores.cargos_banco-data.indicadores.egresos_cfdi)}
+                  <div>
+                    <div className="font-mono text-[10px] text-muted-foreground tracking-widest uppercase">Brecha de Egresos</div>
+                    <div className="font-mono text-2xl font-bold text-amber-400 mt-1.5">{fmt(data.indicadores.cargos_banco-data.indicadores.egresos_cfdi)}</div>
+                    <div className="text-[11px] text-muted-foreground mt-1">Cargos sin CFDI de soporte</div>
                   </div>
-                  <div style={{ fontSize:11, color:C.muted, marginTop:2 }}>Cargos sin CFDI de soporte</div>
                 </div>
-              </div>
-            </div>
+              </CardContent>
+            </Card>
           </div>
         )}
 
         {/* ─── INGESTA ─── */}
         {tab === "ingesta" && (
           <div>
-            <h2 style={{ fontFamily:"'Playfair Display', serif", fontSize:26, fontWeight:900, color:C.text, marginBottom:6 }}>Cargar Documentos</h2>
-            <div style={{ fontSize:12, color:C.muted, marginBottom:24 }}>CFDI XML y estados de cuenta bancarios</div>
+            <h2 className="font-display text-2xl font-bold text-foreground mb-1">Cargar Documentos</h2>
+            <div className="text-sm text-muted-foreground mb-6">CFDI XML y estados de cuenta bancarios</div>
 
-            <div style={{ ...card, marginBottom:16, display:"flex", alignItems:"center", gap:16, flexWrap:"wrap" }}>
-              <div style={lbl}>Período de ingesta</div>
-              <input type="month" value={periodoUpload} onChange={e=>setPeriodoUpload(e.target.value)}
-                style={{ background:C.surfaceHigh, border:`1px solid ${C.border}`, borderRadius:3, padding:"6px 12px", color:C.text, fontFamily:"'IBM Plex Mono', monospace", fontSize:12 }}/>
-              {!empresaId && (
-                <span style={{ fontFamily:"'IBM Plex Mono', monospace", fontSize:11, color:C.rouge }}>
-                  ⚠ Sin empresa activa — crea una desde la API primero
-                </span>
-              )}
-              {uploadMsg && (
-                <span style={{ fontFamily:"'IBM Plex Mono', monospace", fontSize:11, color:uploadMsg.startsWith("✓")?C.sage:C.rouge }}>
-                  {uploadMsg}
-                </span>
-              )}
-            </div>
+            <Card className="mb-4">
+              <CardContent className="pt-4 flex items-center gap-4 flex-wrap">
+                <div className="font-mono text-[10px] text-muted-foreground tracking-widest uppercase">Período de ingesta</div>
+                <input type="month" value={periodoUpload} onChange={e=>setPeriodoUpload(e.target.value)}
+                  className="bg-background border border-border rounded px-3 py-1.5 text-foreground font-mono text-sm focus:outline-none focus:border-primary transition-colors"
+                />
+                {!empresaId && <span className="font-mono text-[11px] text-red-400">⚠ Sin empresa activa — crea una desde la API primero</span>}
+                {uploadMsg && (
+                  <span className={cn("font-mono text-[11px]", uploadMsg.startsWith("✓")?"text-emerald-400":"text-red-400")}>{uploadMsg}</span>
+                )}
+              </CardContent>
+            </Card>
 
-            <input ref={cfdiRef}  type="file" multiple accept=".xml"       style={{ display:"none" }} onChange={uploadCfdi}/>
-            <input ref={bancoRef} type="file"          accept=".csv,.xlsx" style={{ display:"none" }} onChange={uploadBanco}/>
+            <input ref={cfdiRef}  type="file" multiple accept=".xml"       className="hidden" onChange={uploadCfdi}/>
+            <input ref={bancoRef} type="file"          accept=".csv,.xlsx" className="hidden" onChange={uploadBanco}/>
 
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:16 }}>
+            <div className="grid grid-cols-2 gap-4">
               {/* CFDI */}
-              <div style={card}>
-                <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:18 }}>
-                  <div style={{ width:36, height:36, borderRadius:3, background:C.skyLight, border:`1px solid ${C.sky}20`, display:"flex", alignItems:"center", justifyContent:"center" }}>
-                    <svg width={18} height={18} viewBox="0 0 18 18" fill="none">
-                      <rect x="2" y="1" width="10" height="15" rx="1" stroke={C.sky} strokeWidth="1.5"/>
-                      <path d="M 12 1 L 16 5 V 16 H 12" stroke={C.sky} strokeWidth="1.5" strokeLinejoin="round"/>
-                      <path d="M 5 6 H 9 M 5 9 H 11 M 5 12 H 8" stroke={C.sky} strokeWidth="1.2" strokeLinecap="round"/>
-                    </svg>
-                  </div>
-                  <div>
-                    <div style={{ fontFamily:"'Syne', sans-serif", fontSize:14, fontWeight:700, color:C.text }}>CFDI XML</div>
-                    <div style={{ fontSize:11, color:C.muted, marginTop:1 }}>Versión 3.3 y 4.0 · Ingresos y egresos</div>
-                  </div>
-                </div>
-                <div onClick={()=>cfdiRef.current?.click()} style={{
-                  border:`2px dashed ${uploadState.cfdi?C.sage:C.border}`, borderRadius:3,
-                  padding:"32px 20px", textAlign:"center", cursor:"pointer",
-                  background:uploadState.cfdi?C.sageLight:C.surfaceHigh, transition:"all 0.3s",
-                }}>
-                  {uploadState.cfdi ? (
-                    <div style={{ fontFamily:"'Syne', sans-serif", fontSize:13, color:C.sage, fontWeight:700 }}>Procesando CFDI…</div>
-                  ) : (
-                    <>
-                      <svg width={28} height={28} viewBox="0 0 24 24" fill="none" style={{ margin:"0 auto 10px", display:"block" }}>
-                        <path d="M12 16V8M12 8L9 11M12 8L15 11" stroke={C.dim} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                        <path d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5" stroke={C.dim} strokeWidth="1.5" strokeLinecap="round"/>
+              <Card>
+                <CardHeader>
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-md bg-sky-400/10 border border-sky-400/20 flex items-center justify-center flex-shrink-0">
+                      <svg width={18} height={18} viewBox="0 0 18 18" fill="none">
+                        <rect x="2" y="1" width="10" height="15" rx="1" stroke="#38BDF8" strokeWidth="1.5"/>
+                        <path d="M 12 1 L 16 5 V 16 H 12" stroke="#38BDF8" strokeWidth="1.5" strokeLinejoin="round"/>
+                        <path d="M 5 6 H 9 M 5 9 H 11 M 5 12 H 8" stroke="#38BDF8" strokeWidth="1.2" strokeLinecap="round"/>
                       </svg>
-                      <div style={{ fontFamily:"'Syne', sans-serif", fontSize:13, fontWeight:700, color:C.text, marginBottom:3 }}>Arrastra archivos XML</div>
-                      <div style={{ fontSize:11, color:C.muted }}>o haz clic para seleccionar</div>
-                    </>
-                  )}
-                </div>
-                <div style={{ marginTop:12, padding:"10px 14px", background:C.surfaceHigh, borderRadius:3, border:`1px solid ${C.borderSoft}` }}>
-                  <div style={{ ...lbl, marginBottom:6 }}>Campos extraídos automáticamente</div>
-                  {["UUID · Timbre fiscal","RFC emisor y receptor","Subtotal / IVA / Total","Tipo: Ingreso / Egreso","Método de pago PUE/PPD"].map(f=>(
-                    <div key={f} style={{ display:"flex", alignItems:"center", gap:6, marginBottom:3 }}>
-                      <span style={{ color:C.sage, fontSize:9 }}>✓</span>
-                      <span style={{ fontSize:11, color:C.muted, fontFamily:"'IBM Plex Mono', monospace" }}>{f}</span>
                     </div>
-                  ))}
-                </div>
-              </div>
+                    <div>
+                      <CardTitle className="text-sm">CFDI XML</CardTitle>
+                      <div className="text-[11px] text-muted-foreground mt-0.5">Versión 3.3 y 4.0 · Ingresos y egresos</div>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <div onClick={()=>cfdiRef.current?.click()}
+                    className={cn("border-2 border-dashed rounded-md p-8 text-center cursor-pointer transition-all",
+                      uploadState.cfdi?"border-emerald-400 bg-emerald-400/5":"border-border hover:border-primary/40 hover:bg-primary/5"
+                    )}
+                  >
+                    {uploadState.cfdi ? (
+                      <div className="text-sm font-bold text-emerald-400">Procesando CFDI…</div>
+                    ) : (
+                      <>
+                        <svg width={28} height={28} viewBox="0 0 24 24" fill="none" className="mx-auto mb-2.5">
+                          <path d="M12 16V8M12 8L9 11M12 8L15 11" stroke="#6B7280" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                          <path d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5" stroke="#6B7280" strokeWidth="1.5" strokeLinecap="round"/>
+                        </svg>
+                        <div className="text-sm font-bold text-foreground mb-1">Arrastra archivos XML</div>
+                        <div className="text-[11px] text-muted-foreground">o haz clic para seleccionar</div>
+                      </>
+                    )}
+                  </div>
+                  <div className="mt-3 p-3 bg-muted/20 rounded-md border border-border">
+                    <div className="font-mono text-[9px] text-muted-foreground tracking-widest uppercase mb-2">Campos extraídos automáticamente</div>
+                    {["UUID · Timbre fiscal","RFC emisor y receptor","Subtotal / IVA / Total","Tipo: Ingreso / Egreso","Método de pago PUE/PPD"].map(f=>(
+                      <div key={f} className="flex items-center gap-1.5 mb-1">
+                        <span className="text-emerald-400 text-[9px]">✓</span>
+                        <span className="font-mono text-[11px] text-muted-foreground">{f}</span>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
 
               {/* Banco */}
-              <div style={card}>
-                <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:18 }}>
-                  <div style={{ width:36, height:36, borderRadius:3, background:C.inkLight, border:`1px solid ${C.ink}20`, display:"flex", alignItems:"center", justifyContent:"center" }}>
-                    <svg width={18} height={18} viewBox="0 0 18 18" fill="none">
-                      <rect x="1" y="5" width="16" height="11" rx="2" stroke={C.ink} strokeWidth="1.5"/>
-                      <path d="M 1 9 H 17" stroke={C.ink} strokeWidth="1.5"/>
-                      <path d="M 4 13 H 7 M 10 13 H 11" stroke={C.ink} strokeWidth="1.5" strokeLinecap="round"/>
-                      <path d="M 3 5 L 9 2 L 15 5" stroke={C.ink} strokeWidth="1.2" strokeLinejoin="round"/>
-                    </svg>
-                  </div>
-                  <div>
-                    <div style={{ fontFamily:"'Syne', sans-serif", fontSize:14, fontWeight:700, color:C.text }}>Estado de Cuenta</div>
-                    <div style={{ fontSize:11, color:C.muted, marginTop:1 }}>CSV o XLSX · Todos los bancos</div>
-                  </div>
-                </div>
-                <div onClick={()=>bancoRef.current?.click()} style={{
-                  border:`2px dashed ${uploadState.banco?C.sage:C.border}`, borderRadius:3,
-                  padding:"32px 20px", textAlign:"center", cursor:"pointer",
-                  background:uploadState.banco?C.sageLight:C.surfaceHigh, transition:"all 0.3s",
-                }}>
-                  {uploadState.banco ? (
-                    <div style={{ fontFamily:"'Syne', sans-serif", fontSize:13, color:C.sage, fontWeight:700 }}>Procesando movimientos…</div>
-                  ) : (
-                    <>
-                      <svg width={28} height={28} viewBox="0 0 24 24" fill="none" style={{ margin:"0 auto 10px", display:"block" }}>
-                        <path d="M12 16V8M12 8L9 11M12 8L15 11" stroke={C.dim} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                        <path d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5" stroke={C.dim} strokeWidth="1.5" strokeLinecap="round"/>
+              <Card>
+                <CardHeader>
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-md bg-primary/10 border border-primary/20 flex items-center justify-center flex-shrink-0">
+                      <svg width={18} height={18} viewBox="0 0 18 18" fill="none">
+                        <rect x="1" y="5" width="16" height="11" rx="2" stroke="#06B6D4" strokeWidth="1.5"/>
+                        <path d="M 1 9 H 17" stroke="#06B6D4" strokeWidth="1.5"/>
+                        <path d="M 4 13 H 7 M 10 13 H 11" stroke="#06B6D4" strokeWidth="1.5" strokeLinecap="round"/>
+                        <path d="M 3 5 L 9 2 L 15 5" stroke="#06B6D4" strokeWidth="1.2" strokeLinejoin="round"/>
                       </svg>
-                      <div style={{ fontFamily:"'Syne', sans-serif", fontSize:13, fontWeight:700, color:C.text, marginBottom:3 }}>Arrastra CSV o XLSX</div>
-                      <div style={{ fontSize:11, color:C.muted }}>Detección automática de columnas</div>
-                    </>
-                  )}
-                </div>
-                <div style={{ marginTop:12, padding:"10px 14px", background:C.surfaceHigh, borderRadius:3, border:`1px solid ${C.borderSoft}` }}>
-                  <div style={{ ...lbl, marginBottom:6 }}>Bancos soportados</div>
-                  {["BBVA · Santander · Banamex","HSBC · Banorte · Scotiabank","BanBajío · Inbursa · Afirme","Formato personalizado con mapeo"].map(f=>(
-                    <div key={f} style={{ display:"flex", alignItems:"center", gap:6, marginBottom:3 }}>
-                      <span style={{ color:C.ink, fontSize:9 }}>✓</span>
-                      <span style={{ fontSize:11, color:C.muted, fontFamily:"'IBM Plex Mono', monospace" }}>{f}</span>
+                    </div>
+                    <div>
+                      <CardTitle className="text-sm">Estado de Cuenta</CardTitle>
+                      <div className="text-[11px] text-muted-foreground mt-0.5">CSV o XLSX · Todos los bancos</div>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <div onClick={()=>bancoRef.current?.click()}
+                    className={cn("border-2 border-dashed rounded-md p-8 text-center cursor-pointer transition-all",
+                      uploadState.banco?"border-emerald-400 bg-emerald-400/5":"border-border hover:border-primary/40 hover:bg-primary/5"
+                    )}
+                  >
+                    {uploadState.banco ? (
+                      <div className="text-sm font-bold text-emerald-400">Procesando movimientos…</div>
+                    ) : (
+                      <>
+                        <svg width={28} height={28} viewBox="0 0 24 24" fill="none" className="mx-auto mb-2.5">
+                          <path d="M12 16V8M12 8L9 11M12 8L15 11" stroke="#6B7280" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                          <path d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5" stroke="#6B7280" strokeWidth="1.5" strokeLinecap="round"/>
+                        </svg>
+                        <div className="text-sm font-bold text-foreground mb-1">Arrastra CSV o XLSX</div>
+                        <div className="text-[11px] text-muted-foreground">Detección automática de columnas</div>
+                      </>
+                    )}
+                  </div>
+                  <div className="mt-3 p-3 bg-muted/20 rounded-md border border-border">
+                    <div className="font-mono text-[9px] text-muted-foreground tracking-widest uppercase mb-2">Bancos soportados</div>
+                    {["BBVA · Santander · Banamex","HSBC · Banorte · Scotiabank","BanBajío · Inbursa · Afirme","Formato personalizado con mapeo"].map(f=>(
+                      <div key={f} className="flex items-center gap-1.5 mb-1">
+                        <span className="text-primary text-[9px]">✓</span>
+                        <span className="font-mono text-[11px] text-muted-foreground">{f}</span>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+
+            <Card className="mt-4">
+              <CardContent className="pt-5">
+                <div className="font-mono text-[10px] text-muted-foreground tracking-widest uppercase mb-5">Flujo de procesamiento</div>
+                <div className="flex items-start">
+                  {[
+                    { label:"Carga",        desc:"XML / CSV / XLSX"     },
+                    { label:"Parseo",       desc:"Extracción de campos" },
+                    { label:"Conciliación", desc:"Banco ↔ CFDI"         },
+                    { label:"Detección",    desc:"Motor de riesgos"     },
+                    { label:"Score",        desc:"Cálculo 0–100"        },
+                    { label:"Dashboard",    desc:"Resultados"           },
+                  ].map((s,i,arr)=>(
+                    <div key={i} className="flex items-center">
+                      <div className="text-center min-w-[96px] px-1.5">
+                        <div className="w-7 h-7 rounded-full bg-primary/10 border-2 border-primary text-primary font-mono text-[11px] font-bold flex items-center justify-center mx-auto mb-2">
+                          {i+1}
+                        </div>
+                        <div className="text-[11px] font-bold text-foreground">{s.label}</div>
+                        <div className="text-[10px] text-muted-foreground mt-0.5">{s.desc}</div>
+                      </div>
+                      {i<arr.length-1 && <div className="text-muted-foreground text-sm flex-shrink-0 mb-5">→</div>}
                     </div>
                   ))}
                 </div>
-              </div>
-            </div>
-
-            {/* Processing flow */}
-            <div style={{ ...card, marginTop:16 }}>
-              <div style={{ ...lbl, marginBottom:18 }}>Flujo de procesamiento</div>
-              <div style={{ display:"flex", alignItems:"flex-start" }}>
-                {[
-                  { label:"Carga",        desc:"XML / CSV / XLSX"     },
-                  { label:"Parseo",       desc:"Extracción de campos" },
-                  { label:"Conciliación", desc:"Banco ↔ CFDI"         },
-                  { label:"Detección",    desc:"Motor de riesgos"     },
-                  { label:"Score",        desc:"Cálculo 0–100"        },
-                  { label:"Dashboard",    desc:"Resultados"           },
-                ].map((s,i,arr)=>(
-                  <div key={i} style={{ display:"flex", alignItems:"center" }}>
-                    <div style={{ textAlign:"center", minWidth:96, padding:"0 6px" }}>
-                      <div style={{
-                        width:28, height:28, borderRadius:"50%",
-                        background:C.inkLight, border:`2px solid ${C.ink}`,
-                        color:C.ink, fontFamily:"'Syne', sans-serif",
-                        fontSize:11, fontWeight:800,
-                        display:"flex", alignItems:"center", justifyContent:"center",
-                        margin:"0 auto 8px",
-                      }}>{i+1}</div>
-                      <div style={{ fontFamily:"'Syne', sans-serif", fontSize:11, fontWeight:700, color:C.text }}>{s.label}</div>
-                      <div style={{ fontSize:10, color:C.muted, marginTop:2 }}>{s.desc}</div>
-                    </div>
-                    {i<arr.length-1 && <div style={{ color:C.dim, fontSize:14, flexShrink:0, marginBottom:18 }}>→</div>}
-                  </div>
-                ))}
-              </div>
-            </div>
+              </CardContent>
+            </Card>
           </div>
         )}
 
         {/* ─── DIAGNÓSTICO CFDI ─── */}
         {tab === "diagnostico" && (() => {
-          const empty = diagnostico.length === 0;
-          const ing   = diagnostico.filter(c=>c.tipo==="I");
-          const egr   = diagnostico.filter(c=>c.tipo==="E");
-          const pue   = diagnostico.filter(c=>c.metodoPago==="PUE");
-          const ppd   = diagnostico.filter(c=>c.metodoPago==="PPD");
-          const glob  = diagnostico.filter(c=>c.esGlobal);
+          const empty    = diagnostico.length === 0;
+          const ing      = diagnostico.filter(c=>c.tipo==="I");
+          const egr      = diagnostico.filter(c=>c.tipo==="E");
+          const pue      = diagnostico.filter(c=>c.metodoPago==="PUE");
+          const ppd      = diagnostico.filter(c=>c.metodoPago==="PPD");
+          const glob     = diagnostico.filter(c=>c.esGlobal);
           const totalSub = diagnostico.reduce((s,c)=>s+c.subtotal,0);
           const totalIva = diagnostico.reduce((s,c)=>s+c.iva16,0);
           const totalTot = diagnostico.reduce((s,c)=>s+c.total,0);
           const totalIsr = diagnostico.reduce((s,c)=>s+c.isrRet,0);
           const totalIvaR= diagnostico.reduce((s,c)=>s+c.ivaRet,0);
-
           const byFP = Object.entries(
             diagnostico.reduce((acc,c)=>{
               const k=c.formaPago||"99";
@@ -941,186 +832,192 @@ export default function AuditoriaFiscal() {
 
           return (
             <div>
-              {/* Header */}
-              <div style={{display:"flex", justifyContent:"space-between", alignItems:"flex-end", marginBottom:20}}>
+              <div className="flex justify-between items-end mb-5">
                 <div>
-                  <h2 style={{fontFamily:"'Playfair Display', serif", fontSize:26, fontWeight:900, color:C.text, margin:0}}>Diagnóstico CFDI</h2>
-                  <div style={{fontSize:12, color:C.muted, marginTop:4}}>
-                    {empty ? "Sin datos — carga archivos XML en la pestaña «Cargar»"
-                           : `${diagnostico.length} CFDI${diagnostico.length>1?"s":""} analizados · ${ing.length} ingresos · ${egr.length} egresos`}
+                  <h2 className="font-display text-2xl font-bold text-foreground">Diagnóstico CFDI</h2>
+                  <div className="text-sm text-muted-foreground mt-1">
+                    {empty
+                      ? "Sin datos — carga archivos XML en la pestaña «Cargar»"
+                      : `${diagnostico.length} CFDI${diagnostico.length>1?"s":""} analizados · ${ing.length} ingresos · ${egr.length} egresos`}
                   </div>
                 </div>
                 {!empty && (
-                  <button onClick={()=>setDiagnostico([])} style={{padding:"6px 14px", borderRadius:3, fontSize:11, cursor:"pointer", fontFamily:"'Syne', sans-serif", fontWeight:700, letterSpacing:"0.04em", border:`1px solid ${C.border}`, background:C.surfaceHigh, color:C.muted}}>
-                    × Limpiar análisis
-                  </button>
+                  <Button variant="outline" size="sm" onClick={()=>setDiagnostico([])}>× Limpiar análisis</Button>
                 )}
               </div>
 
               {empty ? (
-                <div style={{...card, textAlign:"center", padding:"64px 20px"}}>
-                  <div style={{fontFamily:"'Playfair Display', serif", fontSize:20, fontWeight:700, color:C.dim, marginBottom:8}}>Sin CFDIs analizados</div>
-                  <div style={{fontSize:12, color:C.dim, marginBottom:20}}>Carga archivos XML en la pestaña «Cargar» para ver el diagnóstico fiscal</div>
-                  <button onClick={()=>setTab("ingesta")} style={{padding:"8px 20px", borderRadius:3, fontSize:12, fontWeight:700, cursor:"pointer", border:"none", fontFamily:"'Syne', sans-serif", background:C.ink, color:"white"}}>
-                    Ir a Cargar →
-                  </button>
-                </div>
+                <Card>
+                  <CardContent className="text-center py-16 pt-16">
+                    <div className="font-display text-xl font-bold text-muted-foreground mb-2">Sin CFDIs analizados</div>
+                    <div className="text-sm text-muted-foreground mb-5">Carga archivos XML en la pestaña «Cargar» para ver el diagnóstico fiscal</div>
+                    <Button onClick={()=>setTab("ingesta")}>Ir a Cargar →</Button>
+                  </CardContent>
+                </Card>
               ) : (
                 <>
-                  {/* KPI summary */}
-                  <div style={{display:"grid", gridTemplateColumns:"repeat(5,1fr)", gap:12, marginBottom:16}}>
+                  {/* KPIs */}
+                  <div className="grid grid-cols-5 gap-3 mb-4">
                     {[
-                      {label:"Total CFDIs", val:<span style={{fontFamily:"'Playfair Display', serif", fontSize:40, fontWeight:900, color:C.ink, lineHeight:1}}>{diagnostico.length}</span>, sub:`${ing.length} ingresos · ${egr.length} egresos`},
-                      {label:"Subtotal",     val:<span style={{fontFamily:"'IBM Plex Mono', monospace", fontSize:18, fontWeight:700, color:C.text, lineHeight:1.2}}>{fmt(totalSub)}</span>, sub:"Suma de subtotales"},
-                      {label:"IVA 16% Trasladado", val:<span style={{fontFamily:"'IBM Plex Mono', monospace", fontSize:18, fontWeight:700, color:C.sky, lineHeight:1.2}}>{fmt(totalIva)}</span>, sub:"Total IVA 002 Tasa"},
-                      {label:"Retenciones",  val:<span style={{fontFamily:"'IBM Plex Mono', monospace", fontSize:18, fontWeight:700, color:C.amber, lineHeight:1.2}}>{fmt(totalIsr+totalIvaR)}</span>, sub:`ISR ${fmt(totalIsr)} · IVA ${fmt(totalIvaR)}`},
-                      {label:"Total General",val:<span style={{fontFamily:"'IBM Plex Mono', monospace", fontSize:18, fontWeight:700, color:C.text, lineHeight:1.2}}>{fmt(totalTot)}</span>, sub:"Suma de totales"},
+                      { label:"Total CFDIs",        val:diagnostico.length, valCls:"font-mono text-4xl font-bold text-primary",  sub:`${ing.length} ingresos · ${egr.length} egresos` },
+                      { label:"Subtotal",           val:fmt(totalSub),      valCls:"font-mono text-lg font-bold text-foreground", sub:"Suma de subtotales" },
+                      { label:"IVA 16% Trasladado", val:fmt(totalIva),      valCls:"font-mono text-lg font-bold text-sky-400",    sub:"Total IVA 002 Tasa" },
+                      { label:"Retenciones",        val:fmt(totalIsr+totalIvaR), valCls:"font-mono text-lg font-bold text-amber-400", sub:`ISR ${fmt(totalIsr)} · IVA ${fmt(totalIvaR)}` },
+                      { label:"Total General",      val:fmt(totalTot),      valCls:"font-mono text-lg font-bold text-foreground", sub:"Suma de totales" },
                     ].map((k,i)=>(
-                      <div key={i} style={{...card, padding:"16px 18px"}}>
-                        <div style={lbl}>{k.label}</div>
-                        <div style={{marginTop:8, marginBottom:4}}>{k.val}</div>
-                        <div style={{fontSize:10, color:C.muted}}>{k.sub}</div>
-                      </div>
+                      <Card key={i}>
+                        <CardContent className="pt-4">
+                          <div className="font-mono text-[9px] text-muted-foreground tracking-widest uppercase mb-2">{k.label}</div>
+                          <div className={k.valCls}>{k.val}</div>
+                          <div className="text-[10px] text-muted-foreground mt-1">{k.sub}</div>
+                        </CardContent>
+                      </Card>
                     ))}
                   </div>
 
-                  {/* Método de pago + Forma de pago */}
-                  <div style={{display:"grid", gridTemplateColumns:"1fr 1fr", gap:16, marginBottom:16}}>
-                    {/* Método de pago */}
-                    <div style={card}>
-                      <div style={lbl}>Método de Pago</div>
-                      <div style={{marginTop:14, display:"flex", flexDirection:"column", gap:10}}>
-                        {[{k:"PUE", label:"PUE — Una sola exhibición", items:pue}, {k:"PPD", label:"PPD — Parcialidades / diferido", items:ppd}].map(({k,label,items})=>(
-                          <div key={k} style={{padding:"12px 14px", borderRadius:3, background:MET_BG[k]||C.surfaceHigh, border:`1px solid ${(MET_C[k]||C.border)}22`}}>
-                            <div style={{display:"flex", justifyContent:"space-between", alignItems:"baseline", marginBottom:8}}>
-                              <span style={{fontFamily:"'Syne', sans-serif", fontSize:12, fontWeight:700, color:MET_C[k]||C.muted}}>{label}</span>
-                              <span style={{fontFamily:"'Playfair Display', serif", fontSize:30, fontWeight:900, color:MET_C[k]||C.muted, lineHeight:1}}>{items.length}</span>
-                            </div>
-                            <div style={{height:4, background:`${(MET_C[k]||C.border)}22`, borderRadius:2, overflow:"hidden", marginBottom:6}}>
-                              <div style={{height:"100%", borderRadius:2, background:MET_C[k]||C.muted, width:diagnostico.length>0?`${(items.length/diagnostico.length)*100}%`:"0%", transition:"width 0.9s ease"}}/>
-                            </div>
-                            <div style={{display:"flex", justifyContent:"space-between"}}>
-                              <span style={{fontSize:10, color:C.muted}}>{diagnostico.length>0?Math.round(items.length/diagnostico.length*100):0}% del total</span>
-                              <span style={{fontFamily:"'IBM Plex Mono', monospace", fontSize:11, fontWeight:600, color:C.text}}>{fmt(items.reduce((s,c)=>s+c.total,0))}</span>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Forma de pago */}
-                    <div style={card}>
-                      <div style={lbl}>Forma de Pago (Catálogo SAT)</div>
-                      <div style={{marginTop:14, display:"flex", flexDirection:"column", gap:8, maxHeight:220, overflowY:"auto"}}>
-                        {byFP.length === 0
-                          ? <div style={{fontSize:11, color:C.dim}}>Sin datos de forma de pago</div>
-                          : byFP.map(([code,{count,total}])=>(
-                            <div key={code} style={{display:"flex", alignItems:"center", gap:8}}>
-                              <span style={{fontFamily:"'IBM Plex Mono', monospace", fontSize:10, fontWeight:700, color:C.ink, background:C.inkLight, border:`1px solid ${C.ink}18`, padding:"1px 6px", borderRadius:2, flexShrink:0, minWidth:26, textAlign:"center"}}>{code}</span>
-                              <div style={{flex:1, minWidth:0}}>
-                                <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:2}}>
-                                  <span style={{fontSize:11, color:C.text, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap"}}>{FORMA_PAGO[code]||"Desconocido"}</span>
-                                  <span style={{fontFamily:"'IBM Plex Mono', monospace", fontSize:10, color:C.muted, flexShrink:0, marginLeft:8}}>{count}</span>
-                                </div>
-                                <div style={{height:3, background:C.borderSoft, borderRadius:2, overflow:"hidden"}}>
-                                  <div style={{height:"100%", borderRadius:2, background:C.ink, width:`${(count/maxFP)*100}%`, transition:"width 0.9s ease"}}/>
-                                </div>
+                  {/* Método + Forma de pago */}
+                  <div className="grid grid-cols-2 gap-4 mb-4">
+                    <Card>
+                      <CardContent className="pt-5">
+                        <div className="font-mono text-[10px] text-muted-foreground tracking-widest uppercase mb-3">Método de Pago</div>
+                        <div className="space-y-2.5">
+                          {[{k:"PUE",label:"PUE — Una sola exhibición",items:pue},{k:"PPD",label:"PPD — Parcialidades / diferido",items:ppd}].map(({k,label,items})=>(
+                            <div key={k} className="p-3 rounded-md border border-border bg-background">
+                              <div className="flex justify-between items-baseline mb-2">
+                                <span className={cn("text-sm font-bold", k==="PUE"?"text-emerald-400":"text-amber-400")}>{label}</span>
+                                <span className="font-mono text-3xl font-bold leading-none" style={{ color:k==="PUE"?"#34D399":"#FB923C" }}>{items.length}</span>
                               </div>
-                              <span style={{fontFamily:"'IBM Plex Mono', monospace", fontSize:10, color:C.muted, flexShrink:0, minWidth:72, textAlign:"right"}}>{fmt(total)}</span>
+                              <div className="h-1 bg-border rounded overflow-hidden mb-1.5">
+                                <div className="h-full rounded transition-all duration-700"
+                                  style={{ background:k==="PUE"?"#34D399":"#FB923C", width:diagnostico.length>0?`${(items.length/diagnostico.length)*100}%`:"0%" }}
+                                />
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-[10px] text-muted-foreground">{diagnostico.length>0?Math.round(items.length/diagnostico.length*100):0}% del total</span>
+                                <span className="font-mono text-[11px] font-semibold text-foreground">{fmt(items.reduce((s,c)=>s+c.total,0))}</span>
+                              </div>
                             </div>
-                          ))
-                        }
-                      </div>
-                    </div>
+                          ))}
+                        </div>
+                      </CardContent>
+                    </Card>
+
+                    <Card>
+                      <CardContent className="pt-5">
+                        <div className="font-mono text-[10px] text-muted-foreground tracking-widest uppercase mb-3">Forma de Pago (Catálogo SAT)</div>
+                        <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                          {byFP.length===0
+                            ? <div className="text-[11px] text-muted-foreground">Sin datos de forma de pago</div>
+                            : byFP.map(([code,{count,total}])=>(
+                              <div key={code} className="flex items-center gap-2">
+                                <span className="font-mono text-[10px] font-bold text-primary bg-primary/10 border border-primary/20 px-1.5 py-0.5 rounded flex-shrink-0 min-w-[26px] text-center">{code}</span>
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex justify-between items-center mb-0.5">
+                                    <span className="text-[11px] text-foreground truncate">{FORMA_PAGO[code]||"Desconocido"}</span>
+                                    <span className="font-mono text-[10px] text-muted-foreground flex-shrink-0 ml-2">{count}</span>
+                                  </div>
+                                  <div className="h-0.5 bg-border rounded overflow-hidden">
+                                    <div className="h-full bg-primary rounded transition-all duration-700" style={{ width:`${(count/maxFP)*100}%` }}/>
+                                  </div>
+                                </div>
+                                <span className="font-mono text-[10px] text-muted-foreground flex-shrink-0 min-w-[72px] text-right">{fmt(total)}</span>
+                              </div>
+                            ))
+                          }
+                        </div>
+                      </CardContent>
+                    </Card>
                   </div>
 
                   {/* CFDIs Globales */}
-                  {glob.length > 0 && (
-                    <div style={{...card, marginBottom:16}}>
-                      <div style={{display:"flex", alignItems:"center", gap:10, marginBottom:14}}>
-                        <div style={lbl}>CFDIs Globales — Público en General</div>
-                        <span style={{fontFamily:"'IBM Plex Mono', monospace", fontSize:9, fontWeight:700, color:C.ink, background:C.inkLight, border:`1px solid ${C.ink}18`, padding:"1px 8px", borderRadius:2}}>{glob.length}</span>
-                      </div>
-                      <div style={{display:"flex", flexDirection:"column", gap:6}}>
-                        {glob.map((c,i)=>(
-                          <div key={c.uuid||i} style={{display:"flex", alignItems:"center", gap:12, padding:"10px 14px", borderRadius:3, background:C.surfaceHigh, border:`1px solid ${C.borderSoft}`}}>
-                            {/* Periodicidad / Mes / Año chips */}
-                            <div style={{display:"flex", gap:6, flexShrink:0}}>
-                              {[["Periodicidad",c.globalPeriodicidad],["Meses",c.globalMeses],["Año",c.globalAno]].map(([k,v])=>(
-                                <div key={k} style={{textAlign:"center", padding:"4px 10px", background:C.inkLight, borderRadius:3, border:`1px solid ${C.ink}15`}}>
-                                  <div style={{fontFamily:"'IBM Plex Mono', monospace", fontSize:8, color:C.muted, letterSpacing:"0.08em", textTransform:"uppercase"}}>{k}</div>
-                                  <div style={{fontFamily:"'IBM Plex Mono', monospace", fontSize:14, fontWeight:700, color:C.ink, marginTop:1}}>{v||"—"}</div>
-                                </div>
-                              ))}
+                  {glob.length>0 && (
+                    <Card className="mb-4">
+                      <CardContent className="pt-5">
+                        <div className="flex items-center gap-2.5 mb-3">
+                          <div className="font-mono text-[10px] text-muted-foreground tracking-widest uppercase">CFDIs Globales — Público en General</div>
+                          <Badge variant="default" className="text-[9px]">{glob.length}</Badge>
+                        </div>
+                        <div className="space-y-2">
+                          {glob.map((c,i)=>(
+                            <div key={c.uuid||i} className="flex items-center gap-3 p-2.5 rounded-md bg-background border border-border">
+                              <div className="flex gap-1.5 flex-shrink-0">
+                                {[["Periodicidad",c.globalPeriodicidad],["Meses",c.globalMeses],["Año",c.globalAno]].map(([k,v])=>(
+                                  <div key={k} className="text-center px-2 py-1 bg-primary/10 rounded border border-primary/15">
+                                    <div className="font-mono text-[8px] text-muted-foreground tracking-wider uppercase">{k}</div>
+                                    <div className="font-mono text-sm font-bold text-primary mt-0.5">{v||"—"}</div>
+                                  </div>
+                                ))}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="text-xs font-bold text-foreground">RFC: {c.rfcEmisor}</div>
+                                <div className="text-[11px] text-muted-foreground mt-0.5 truncate">{c.nombreEmisor}</div>
+                              </div>
+                              <div className="text-right flex-shrink-0">
+                                <div className="font-mono text-sm font-bold text-foreground">{fmt(c.total)}</div>
+                                <div className="font-mono text-[9px] text-muted-foreground mt-0.5">{c.fecha?.substring(0,10)||"—"}</div>
+                              </div>
                             </div>
-                            <div style={{flex:1, minWidth:0}}>
-                              <div style={{fontFamily:"'Syne', sans-serif", fontSize:12, fontWeight:700, color:C.text}}>RFC: {c.rfcEmisor}</div>
-                              <div style={{fontSize:11, color:C.muted, marginTop:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap"}}>{c.nombreEmisor}</div>
-                            </div>
-                            <div style={{textAlign:"right", flexShrink:0}}>
-                              <div style={{fontFamily:"'IBM Plex Mono', monospace", fontSize:14, fontWeight:700, color:C.text}}>{fmt(c.total)}</div>
-                              <div style={{fontSize:9, color:C.dim, marginTop:2}}>{c.fecha?.substring(0,10)||"—"}</div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
+                          ))}
+                        </div>
+                      </CardContent>
+                    </Card>
                   )}
 
-                  {/* Tabla completa */}
-                  <div style={{...card, padding:0}}>
-                    <div style={{padding:"14px 20px", borderBottom:`1px solid ${C.border}`, display:"flex", justifyContent:"space-between", alignItems:"center"}}>
-                      <div style={lbl}>Detalle de CFDIs Procesados</div>
-                      <div style={{fontFamily:"'IBM Plex Mono', monospace", fontSize:10, color:C.dim}}>{diagnostico.length} registros</div>
+                  {/* Full table */}
+                  <Card className="overflow-hidden">
+                    <div className="px-5 py-3.5 border-b border-border flex justify-between items-center">
+                      <div className="font-mono text-[10px] text-muted-foreground tracking-widest uppercase">Detalle de CFDIs Procesados</div>
+                      <div className="font-mono text-[10px] text-muted-foreground">{diagnostico.length} registros</div>
                     </div>
-                    <div style={{overflowX:"auto"}}>
-                      <table style={{width:"100%", borderCollapse:"collapse", fontSize:11, minWidth:1100}}>
+                    <div className="overflow-x-auto">
+                      <table className="w-full border-collapse text-[11px] min-w-[1100px]">
                         <thead>
-                          <tr style={{background:C.surfaceHigh}}>
+                          <tr className="bg-muted/20">
                             {["#","Tipo","UUID","Fecha","RFC Emisor","RFC Receptor","SubTotal","Base IVA 16%","IVA 16%","Total","Método","Forma Pago","Global"].map(h=>(
-                              <th key={h} style={{padding:"8px 10px", textAlign:["#","SubTotal","Base IVA 16%","IVA 16%","Total"].includes(h)?"right":"left", whiteSpace:"nowrap", fontFamily:"'Syne', sans-serif", fontSize:9, fontWeight:700, letterSpacing:"0.1em", color:C.muted, textTransform:"uppercase", borderBottom:`2px solid ${C.border}`}}>{h}</th>
+                              <th key={h} className={cn(
+                                "px-2.5 py-2 font-mono text-[9px] font-bold tracking-widest text-muted-foreground uppercase border-b-2 border-border whitespace-nowrap",
+                                ["#","SubTotal","Base IVA 16%","IVA 16%","Total"].includes(h)?"text-right":"text-left"
+                              )}>{h}</th>
                             ))}
                           </tr>
                         </thead>
                         <tbody>
                           {diagnostico.map((c,i)=>(
-                            <tr key={c.uuid||i} style={{borderBottom:`1px solid ${C.borderSoft}`, background:i%2===0?C.surfaceHigh:C.surface}}>
-                              <td style={{padding:"7px 10px", fontFamily:"'IBM Plex Mono', monospace", fontSize:10, color:C.dim, textAlign:"right"}}>{i+1}</td>
-                              <td style={{padding:"7px 10px", whiteSpace:"nowrap"}}>
-                                <span style={{fontFamily:"'Syne', sans-serif", fontSize:9, fontWeight:700, letterSpacing:"0.1em", color:TIPO_C[c.tipo]||C.muted, background:TIPO_BG[c.tipo]||C.surfaceHigh, border:`1px solid ${(TIPO_C[c.tipo]||C.border)}22`, padding:"1px 7px", borderRadius:2}}>
+                            <tr key={c.uuid||i} className={cn("border-b border-border/50", i%2===0?"bg-card":"bg-background")}>
+                              <td className="px-2.5 py-1.5 font-mono text-[10px] text-muted-foreground text-right">{i+1}</td>
+                              <td className="px-2.5 py-1.5 whitespace-nowrap">
+                                <span className={cn("font-mono text-[9px] font-bold tracking-wider px-1.5 py-0.5 rounded border", TIPO_CLS[c.tipo]||"text-muted-foreground bg-muted/10 border-muted/20")}>
                                   {TIPO_LABEL[c.tipo]||c.tipo||"—"}
                                 </span>
                               </td>
-                              <td style={{padding:"7px 10px", fontFamily:"'IBM Plex Mono', monospace", fontSize:10, color:C.muted, whiteSpace:"nowrap"}} title={c.uuid}>
-                                {c.uuid ? c.uuid.substring(0,8)+"…" : "—"}
+                              <td className="px-2.5 py-1.5 font-mono text-[10px] text-muted-foreground whitespace-nowrap" title={c.uuid}>
+                                {c.uuid?c.uuid.substring(0,8)+"…":"—"}
                               </td>
-                              <td style={{padding:"7px 10px", fontFamily:"'IBM Plex Mono', monospace", fontSize:10, color:C.text, whiteSpace:"nowrap"}}>{c.fecha?.substring(0,10)||"—"}</td>
-                              <td style={{padding:"7px 10px", fontFamily:"'IBM Plex Mono', monospace", fontSize:10, color:C.text, whiteSpace:"nowrap"}}>{c.rfcEmisor||"—"}</td>
-                              <td style={{padding:"7px 10px", fontFamily:"'IBM Plex Mono', monospace", fontSize:10, color:C.text, whiteSpace:"nowrap"}}>{c.rfcReceptor||"—"}</td>
-                              <td style={{padding:"7px 10px", fontFamily:"'IBM Plex Mono', monospace", fontSize:10, color:C.text, textAlign:"right", whiteSpace:"nowrap"}}>{fmt(c.subtotal)}</td>
-                              <td style={{padding:"7px 10px", fontFamily:"'IBM Plex Mono', monospace", fontSize:10, color:C.sky, textAlign:"right", whiteSpace:"nowrap"}}>{fmt(c.baseIva16)}</td>
-                              <td style={{padding:"7px 10px", fontFamily:"'IBM Plex Mono', monospace", fontSize:10, color:C.sky, textAlign:"right", whiteSpace:"nowrap"}}>{fmt(c.iva16)}</td>
-                              <td style={{padding:"7px 10px", fontFamily:"'IBM Plex Mono', monospace", fontSize:11, fontWeight:700, color:C.text, textAlign:"right", whiteSpace:"nowrap"}}>{fmt(c.total)}</td>
-                              <td style={{padding:"7px 10px", whiteSpace:"nowrap"}}>
+                              <td className="px-2.5 py-1.5 font-mono text-[10px] text-foreground whitespace-nowrap">{c.fecha?.substring(0,10)||"—"}</td>
+                              <td className="px-2.5 py-1.5 font-mono text-[10px] text-foreground whitespace-nowrap">{c.rfcEmisor||"—"}</td>
+                              <td className="px-2.5 py-1.5 font-mono text-[10px] text-foreground whitespace-nowrap">{c.rfcReceptor||"—"}</td>
+                              <td className="px-2.5 py-1.5 font-mono text-[10px] text-foreground text-right whitespace-nowrap">{fmt(c.subtotal)}</td>
+                              <td className="px-2.5 py-1.5 font-mono text-[10px] text-sky-400 text-right whitespace-nowrap">{fmt(c.baseIva16)}</td>
+                              <td className="px-2.5 py-1.5 font-mono text-[10px] text-sky-400 text-right whitespace-nowrap">{fmt(c.iva16)}</td>
+                              <td className="px-2.5 py-1.5 font-mono text-[11px] font-bold text-foreground text-right whitespace-nowrap">{fmt(c.total)}</td>
+                              <td className="px-2.5 py-1.5 whitespace-nowrap">
                                 {c.metodoPago
-                                  ? <span style={{fontFamily:"'IBM Plex Mono', monospace", fontSize:9, fontWeight:700, color:MET_C[c.metodoPago]||C.muted, background:MET_BG[c.metodoPago]||C.surfaceHigh, border:`1px solid ${(MET_C[c.metodoPago]||C.border)}22`, padding:"1px 7px", borderRadius:2}}>{c.metodoPago}</span>
-                                  : <span style={{color:C.dim}}>—</span>
+                                  ? <span className={cn("font-mono text-[9px] font-bold px-1.5 py-0.5 rounded border", MET_CLS[c.metodoPago]||"text-muted-foreground")}>{c.metodoPago}</span>
+                                  : <span className="text-muted-foreground">—</span>
                                 }
                               </td>
-                              <td style={{padding:"7px 10px", color:C.muted, whiteSpace:"nowrap", fontSize:10}} title={FORMA_PAGO[c.formaPago]||""}>
-                                {c.formaPago ? `${c.formaPago} · ${(FORMA_PAGO[c.formaPago]||"").substring(0,15)}` : "—"}
+                              <td className="px-2.5 py-1.5 text-muted-foreground whitespace-nowrap text-[10px]" title={FORMA_PAGO[c.formaPago]||""}>
+                                {c.formaPago?`${c.formaPago} · ${(FORMA_PAGO[c.formaPago]||"").substring(0,15)}`:"—"}
                               </td>
-                              <td style={{padding:"7px 10px", textAlign:"center"}}>
-                                {c.esGlobal && (
-                                  <span style={{fontFamily:"'IBM Plex Mono', monospace", fontSize:8, fontWeight:700, color:C.ink, background:C.inkLight, border:`1px solid ${C.ink}18`, padding:"1px 6px", borderRadius:2}}>GLOBAL</span>
-                                )}
+                              <td className="px-2.5 py-1.5 text-center">
+                                {c.esGlobal && <Badge variant="default" className="text-[8px] px-1.5">GLOBAL</Badge>}
                               </td>
                             </tr>
                           ))}
                         </tbody>
                       </table>
                     </div>
-                  </div>
+                  </Card>
                 </>
               )}
             </div>
@@ -1129,11 +1026,48 @@ export default function AuditoriaFiscal() {
 
       </main>
 
-      <footer style={{ borderTop:`1px solid ${C.border}`, padding:"14px 28px", textAlign:"center", marginTop:28 }}>
-        <span style={{ fontFamily:"'IBM Plex Mono', monospace", fontSize:9, color:C.dim, letterSpacing:"0.14em" }}>
+      <footer className="border-t border-border py-4 text-center mt-7">
+        <span className="font-mono text-[9px] text-muted-foreground/40 tracking-widest">
           FISCALCORE v1.0 · AUDITORÍA SAT MX · DETECCIÓN PREVENTIVA
         </span>
       </footer>
+
+      {/* ─── Risk Detail Dialog ─── */}
+      <Dialog open={!!detalle} onOpenChange={(o)=>!o&&setDetalle(null)}>
+        {detalle && (
+          <DialogContent className="max-w-md border-l-4" style={{ borderLeftColor:SEV_COLOR[detalle.severidad]??"#6B7280" }}>
+            <DialogHeader>
+              <div className="flex items-center gap-2 mb-1">
+                <Badge variant={SEV_VARIANT[detalle.severidad]}>{SEV_LABEL[detalle.severidad]}</Badge>
+                <span className="font-mono text-[9px] text-muted-foreground tracking-widest">{detalle.codigo}</span>
+              </div>
+              <DialogTitle className="text-base leading-snug">{detalle.nombre}</DialogTitle>
+            </DialogHeader>
+
+            <div className="p-4 rounded-md border mb-4"
+              style={{ borderColor:(SEV_COLOR[detalle.severidad]??"#6B7280")+"30", background:(SEV_COLOR[detalle.severidad]??"#6B7280")+"0D" }}>
+              <p className="text-sm text-muted-foreground mb-3 leading-relaxed">{detalle.descripcion}</p>
+              <div className="font-mono text-2xl font-bold" style={{ color:SEV_COLOR[detalle.severidad] }}>
+                {fmt(detalle.monto)}
+              </div>
+            </div>
+
+            <div className="mb-4">
+              <div className="font-mono text-[10px] text-muted-foreground tracking-widest uppercase mb-2">Acción Recomendada</div>
+              <div className="p-3 bg-muted/20 rounded-md border border-border text-sm text-foreground leading-relaxed">
+                {ACCIONES[detalle.codigo] ?? "Revisar el caso con el área contable y evaluar impacto fiscal."}
+              </div>
+            </div>
+
+            {detalle.estado==="abierto" && (
+              <div className="flex gap-2">
+                <Button className="flex-1" onClick={()=>resolver(detalle.id)}>✓ Marcar Resuelta</Button>
+                <Button variant="outline" onClick={()=>setDetalle(null)}>Cerrar</Button>
+              </div>
+            )}
+          </DialogContent>
+        )}
+      </Dialog>
     </div>
   );
 }

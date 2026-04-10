@@ -8,58 +8,80 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Comandos
 
-### Backend (Python/FastAPI)
+### Levantar con Docker (recomendado)
 ```bash
-# Instalar dependencias
-pip install fastapi uvicorn python-multipart psycopg2-binary openpyxl pydantic
-
-# Inicializar base de datos
-psql -U postgres -c "CREATE DATABASE auditoria_fiscal;"
-psql -U postgres -d auditoria_fiscal -f 001_schema_inicial.sql
-
-# Ejecutar API
-uvicorn main_api:app --reload --port 8000
-
-# Ver docs interactivos
-# http://localhost:8000/docs
+docker-compose up -d        # levanta PostgreSQL 16 + inicializa schema automáticamente
+python -m uvicorn main_api:app --reload --port 8000
 ```
 
-### Frontend (React)
+### Backend manual (Python/FastAPI)
 ```bash
-# El archivo AuditoriaFiscalDashboard.jsx requiere entorno React con bundler
+pip install fastapi uvicorn python-multipart psycopg2-binary openpyxl pydantic python-jose bcrypt pdfplumber
+
+# La DB se inicializa sola con docker-compose.
+# Scripts SQL en orden: 001_schema_inicial.sql → 002_usuarios.sql
+python -m uvicorn main_api:app --reload --port 8000
+# Docs interactivos: http://localhost:8000/docs
+```
+
+### Frontend (React + Vite)
+```bash
 npm install
-npm run dev  # → http://localhost:3000
+npm run dev   # → http://localhost:5173
 ```
-
-> **Nota**: No existe `package.json` ni `requirements.txt` aún. Los módulos están todos en la raíz del proyecto.
 
 ## Arquitectura
 
-Todos los módulos principales viven en la raíz del proyecto (sin separación backend/frontend de carpetas). El flujo de datos es lineal:
-
 ```
-Archivos usuario (XML/CSV/XLSX)
-    → Parser Layer        cfdi_parser.py / banco_parser.py
+Archivos usuario (XML/CSV/XLSX / Constancia PDF)
+    → Parser Layer        cfdi_parser.py / banco_parser.py / constancia_parser.py
     → Motor Fiscal        motor_fiscal.py
-    → API REST            main_api.py
-    → Base de datos       PostgreSQL (schema en 001_schema_inicial.sql)
-    → Dashboard           AuditoriaFiscalDashboard.jsx
+    → API REST            main_api.py  (FastAPI, puerto 8000)
+    → Base de datos       PostgreSQL 16 (Docker) — schema en 001_schema_inicial.sql + 002_usuarios.sql
+    → Frontend            React 18 + Vite 5 (src/)
 ```
 
-### Módulos clave
+### Módulos backend
 
 | Módulo | Responsabilidad |
 |--------|-----------------|
-| `cfdi_parser.py` | Parsea CFDI XML 3.3 y 4.0. Valida RFC (regex SAT), cuadre matemático, detecta namespace dinámicamente |
-| `banco_parser.py` | Parsea CSV/XLSX bancarios. Auto-detecta encoding (UTF-8/Latin-1/CP1252) y columnas (6+ alias soportados). Extrae RFC de conceptos |
-| `motor_fiscal.py` | Tres motores: **Conciliación** (matching banco↔CFDI), **Riesgos** (8 tipos), **Scoring** (0-100) |
-| `main_api.py` | FastAPI con endpoints para empresas, ingesta de archivos, dashboard, riesgos y scoring |
-| `001_schema_inicial.sql` | DDL completo PostgreSQL con 8 tablas + extensiones `uuid-ossp`, `pg_trgm` |
+| `cfdi_parser.py` | Parsea CFDI XML 3.3 y 4.0. Valida RFC, cuadre matemático, detecta namespace |
+| `banco_parser.py` | Parsea CSV/XLSX bancarios. Auto-detecta encoding y columnas (6+ alias) |
+| `motor_fiscal.py` | Tres motores: Conciliación (banco↔CFDI), Riesgos (8 tipos), Scoring (0–100) |
+| `constancia_parser.py` | Extrae RFC, razón social, régimen, obligaciones, CP, CURP de la Constancia de Situación Fiscal PDF (pdfplumber) |
+| `main_api.py` | FastAPI: auth JWT, empresas, ingesta CFDI/banco, dashboard, riesgos, scoring, parseo constancia |
+| `001_schema_inicial.sql` | DDL PostgreSQL: 8 tablas + extensiones `uuid-ossp`, `pg_trgm` |
+| `002_usuarios.sql` | Tabla `usuarios` + columnas extra en `empresas` (constancia_path, obligaciones JSONB, cp_fiscal, curp) |
+
+### Módulos frontend (`src/`)
+
+| Archivo | Responsabilidad |
+|---------|-----------------|
+| `main.jsx` | Raíz: enrutamiento login / register / dashboard basado en estado |
+| `auth.js` | JWT en localStorage: `saveAuth`, `getToken`, `getEmpresaData`, `isLoggedIn` (verifica exp), `clearAuth` |
+| `LoginPage.jsx` | Split-screen: branding izquierdo + formulario shadcn derecho. Llama `POST /api/v1/auth/login` |
+| `RegisterPage.jsx` | Wizard 3 pasos: credenciales → constancia PDF → confirmación. Llama `POST /api/v1/auth/register` + `POST /api/v1/constancia/parsear` |
+| `../AuditoriaFiscalDashboard.jsx` | Dashboard principal: 5 tabs (Resumen, Riesgos, Conciliación, Cargar, Diagnóstico CFDI). Parseo CFDI client-side con DOMParser |
+| `components/ui/` | Componentes shadcn/ui: button, input, card, badge, label, alert, avatar, dialog, tabs, separator |
+| `lib/utils.js` | Helper `cn()` (clsx + tailwind-merge) |
+| `index.css` | Variables CSS dark theme (navy + cyan) + directivas Tailwind |
+
+### Autenticación
+- **JWT** con `python-jose`. Tokens con 8h de expiración.
+- **Bcrypt** directo (`import bcrypt as _bcrypt`) — **NO usar passlib** (incompatibilidad con bcrypt moderno).
+- Un usuario por empresa. El token contiene `empresa_id`, `rfc`, `razon_social`.
+- Endpoints: `POST /api/v1/auth/register`, `POST /api/v1/auth/login`, `GET /api/v1/auth/me`.
+
+### Frontend — stack y tema
+- **React 18 + Vite 5 + Tailwind CSS v3 + shadcn/ui** (componentes instalados manualmente en `src/components/ui/`).
+- **Paleta dark navy + cyan**: `--background: #0A0F1E`, `--primary: #06B6D4`, `--card: #0D1526`.
+- **Fuentes**: Bricolage Grotesque (`font-display`), Outfit (`font-sans`), JetBrains Mono (`font-mono`) — cargadas en `index.html`.
+- Variantes de `Badge` por severidad: `critical` (rojo), `high` (naranja), `medium` (amarillo), `low` (verde).
 
 ### Lógica de conciliación (`MotorConciliacion`)
 - Prioridad: RFC + monto exacto → monto exacto → tolerancia ±2%
 - Tolerancia exacta: ±$0.05 MXN
-- Cuatro resultados posibles: `exacto`, `parcial`, `sin_cfdi`, `sin_movimiento`
+- Resultados: `exacto`, `parcial`, `sin_cfdi`, `sin_movimiento`
 
 ### Riesgos detectados (`MotorRiesgos`) — 8 tipos
 | Clave | Severidad |
@@ -76,21 +98,26 @@ Archivos usuario (XML/CSV/XLSX)
 ### Fórmula de scoring (`MotorScoring`)
 ```
 score = 100
-score -= Σ penalizaciones_por_riesgo   (Crítico=-15, Alto=-8, Medio=-4, Bajo=-1)
-score -= int((1 - %_conciliado) * 20)  # hasta -20 por baja conciliación
+score -= Σ penalizaciones  (Crítico=-15, Alto=-8, Medio=-4, Bajo=-1)
+score -= int((1 - %_conciliado) * 20)   # hasta -20 por baja conciliación
 score ∈ [0, 100]
 ```
 
 ## Estado actual del proyecto
 
-- ✅ Schema DB, parsers, motor fiscal y API diseñados (8 iteraciones completas)
-- **La API devuelve datos mock** — no está conectada a PostgreSQL
-- **El dashboard no hace llamadas a la API** — es demo-driven con datos hardcoded
-- Pendiente: integración end-to-end (DB → API → Frontend)
+- ✅ Schema DB, parsers, motor fiscal y API — diseñados y funcionales
+- ✅ Auth JWT multiempresa — registro con Constancia PDF, login, token
+- ✅ Docker Compose — PostgreSQL 16 con auto-init de scripts SQL
+- ✅ Frontend migrado a Tailwind CSS v3 + shadcn/ui (tema dark navy + cyan)
+- ⚠️ **La API aún devuelve datos mock** — no conectada a PostgreSQL real
+- ⚠️ **El dashboard no llama a la API** — demo con datos hardcoded
+- Pendiente: integración end-to-end (DB real → API → Frontend)
 
 ## Convenciones importantes
 
-- **Precisión financiera**: Usar siempre `Decimal` (no `float`) para montos monetarios
-- **RFC mexicano**: Formato `AAAA######XXX` — hay regex de validación en `cfdi_parser.py` y `main_api.py`; reutilizarlo siempre
-- **CFDI**: Pueden ser versión 3.3 o 4.0; los namespaces XML difieren — ver `CFDIParser._detect_namespace()`
-- **Severidades de riesgo**: Los 4 niveles (`critico`, `alto`, `medio`, `bajo`) tienen pesos fijos en `MotorScoring`; cambiarlos afecta todos los scores históricos
+- **Precisión financiera**: Usar siempre `Decimal` (no `float`) para montos
+- **RFC mexicano**: `AAAA######XXX` — regex de validación en `cfdi_parser.py` y `main_api.py`; reutilizar siempre
+- **CFDI**: Versión 3.3 o 4.0; namespaces XML distintos — ver `CFDIParser._detect_namespace()`
+- **Severidades**: Los 4 niveles tienen pesos fijos en `MotorScoring`; cambiarlos afecta scores históricos
+- **bcrypt**: Usar siempre `import bcrypt as _bcrypt` directamente, nunca a través de passlib
+- **Tailwind**: Clases utilitarias en JSX; nunca `style={{}}` salvo para valores dinámicos (colores de severidad, SVG)

@@ -37,6 +37,9 @@ logs/
 *.zip
 *.tar.gz
 
+# Uploads de usuarios (PDFs de constancias)
+uploads/
+
 # IDEs y editores
 .vscode/settings.json
 .idea/
