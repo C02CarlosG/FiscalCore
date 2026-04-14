@@ -5,7 +5,7 @@ import { Input }  from "./components/ui/input";
 import { Label }  from "./components/ui/label";
 import { Alert, AlertDescription } from "./components/ui/alert";
 
-const API = "http://localhost:8000";
+const API = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
 const features = [
   { icon: FileText,   label: "CFDI 3.3 / 4.0",       desc: "Parseo automático XML SAT" },

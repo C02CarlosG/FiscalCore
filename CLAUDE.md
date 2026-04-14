@@ -1,16 +1,158 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Este archivo guía a Claude Code al trabajar en este repositorio.
 
 ## Proyecto
 
 **FiscalCore** es una plataforma de auditoría fiscal mexicana para conciliación de CFDIs con estados de cuenta bancarios y detección automática de riesgos. El dominio es 100% SAT/México: RFC, CFDI 3.3/4.0, régimen fiscal, IVA/ISR/IEPS.
+No es un sistema de visualización de datos fiscales.
+
+Es un sistema de decisión para contadores de despacho.
+
+El sistema debe ayudar a:
+
+- Preparar el cierre fiscal mensual
+- Reducir carga operativa
+- Prevenir inconsistencias ante el SAT
+- Mejorar flujo de efectivo del cliente
+
+Antes de proponer cualquier solución, Claude debe evaluar:
+
+1. ¿Reduce tiempo del contador?
+2. ¿Reduce riesgo fiscal?
+3. ¿Mejora flujo de efectivo?
+
+Si la respuesta es NO, la solución es inválida.
+
+Claude NO debe:
+
+- Diseñar dashboards genéricos
+- Usar tabs como eje principal de navegación — **decisión de producto, no preferencia de estilo**
+- Agregar features sin impacto operativo
+- Priorizar arquitectura sobre usabilidad
+
+## Estructura de pantalla principal (decisión de producto)
+
+La pantalla principal NO se organiza en tabs. Es una vista única que responde tres preguntas en orden:
+
+1. **¿Puedo cerrar el mes?** — bloqueadores críticos arriba, visibles sin scroll
+2. **¿Qué me falta?** — acciones pendientes priorizadas por impacto
+3. **¿Qué hago hoy?** — tareas concretas con monto y plazo
+
+La información se presenta en bloques verticales priorizados:
+- **Bloqueadores** — riesgos críticos/altos que impiden el cierre
+- **Acciones** — lista de tareas con impacto cuantificado en MXN
+- **Conciliación** — estado del período actual (barra + brechas)
+- **Score** — indicador de salud fiscal (secundario, no protagonista)
+
+Las tabs **solo existen como navegación de drill-down**: ver todos los riesgos, ver detalle de conciliación, cargar archivos, diagnóstico CFDI. El usuario las usa para profundizar, nunca para orientarse.
+
+**Criterio de validación del diseño:** Si el usuario necesita cambiar de tab para saber qué hacer, el diseño está mal.
+
+## Vista principal — reglas de interacción (decisión de producto)
+
+La vista principal es para **trabajar, no para navegar**. Es autocontenida.
+
+Cada ítem de acción en la vista principal debe exponer:
+- **Contexto mínimo** — qué pasó (ej. "Depósito $45,000 sin CFDI el 12/mar")
+- **Impacto** — monto afectado en MXN
+- **Acción clara** — qué debe hacer el contador (ej. "Emitir CFDI" / "Confirmar match" / "Marcar revisado")
+- **Interacción directa** — el contador puede ejecutar o avanzar sin salir de pantalla (marcar como revisado, clasificar, confirmar match, resolver)
+
+El drill-down solo se activa cuando:
+- Se necesita detalle adicional para tomar la decisión
+- El caso es ambiguo y requiere exploración
+- El usuario elige profundizar voluntariamente
+
+**Criterio de validación de interacción:** El 60–70% del trabajo del cierre mensual debe poder avanzarse desde la vista principal. Si el contador tiene que entrar a otra vista para resolver la mayoría de los casos, el diseño está mal.
+
+## Rediseño funcional — vertical slice (alcance acordado)
+
+Este no es un rediseño visual. Es un rediseño funcional mínimo que habilita interacción real desde la vista principal.
+
+### 1. Backend — riesgos
+
+Agregar campo `accion_sugerida` estructurado en riesgos (no strings en el frontend):
+```json
+{
+  "tipo": "solicitar_cfdi",
+  "label": "Solicitar CFDI",
+  "puede_resolverse_inline": true
+}
+```
+
+Introducir estados intermedios en `detecciones` (reemplaza el binario abierto/resuelto):
+- `pendiente`
+- `abierto`
+- `en_revision`
+- `en_espera_cfdi`
+- `confirmado`
+- `resuelto`
+- `descartado`
+- `falso_positivo`
+
+Mantener `PATCH /api/v1/riesgos/{id}/resolver` y complementar con:
+```
+POST /api/v1/acciones/{id}/ejecutar
+body: { "tipo": "confirmar_match" | "marcar_revisado" | "descartar" | ... }
+```
+
+### 2. Backend — conciliación (mínimo necesario)
+
+No se rehace el motor. Solo se exponen casos accionables:
+- Movimientos sin CFDI
+- Matches débiles (score bajo)
+
+Estructura de respuesta:
+```json
+{
+  "movimiento_bancario": { ... },
+  "cfdi_sugeridos": [ ... ],
+  "score": 85
+}
+```
+Con endpoint para confirmar/vincular desde la vista principal.
+
+### 3. Frontend — vista principal
+
+El bloque "Acciones del día" expone por cada ítem:
+- Contexto: qué pasó (movimiento, fecha, contrapartes)
+- Impacto: monto en MXN
+- Acción directa: botón inline (no navega)
+- Cambio de estado: visible e inmediato
+
+El drill-down es una opción secundaria para casos complejos, no el flujo principal.
+
+### Alcance intencional
+
+**No buscamos:**
+- Cobertura completa de todos los riesgos
+- Sistema perfecto de conciliación
+- Resolver todos los edge cases
+
+**Sí buscamos:**
+- Que el contador avance el 60–70% del cierre mensual desde la vista principal
+- Esa es la métrica que define si el rediseño fue exitoso
+
+Claude DEBE:
+
+- Proponer acciones concretas, no solo datos
+- Cuantificar el impacto en dinero
+- Priorizar las tareas del contador
+- Pensar en el flujo mensual del contador (cierre del 17, DIOT, declaraciones)
+
+Toda propuesta funcional debe incluir:
+
+- Impacto en carga operativa
+- Impacto en flujo de efectivo
+- Impacto en riesgo fiscal
+- Prioridad de implementación
 
 ## Comandos
 
 ### Levantar con Docker (recomendado)
 ```bash
-docker-compose up -d        # levanta PostgreSQL 16 + inicializa schema automáticamente
+docker-compose up -d        # levanta PostgreSQL 16 + inicializa schema automáticamente (001 → 002 → 003)
 python -m uvicorn main_api:app --reload --port 8000
 ```
 
@@ -18,10 +160,18 @@ python -m uvicorn main_api:app --reload --port 8000
 ```bash
 pip install fastapi uvicorn python-multipart psycopg2-binary openpyxl pydantic python-jose bcrypt pdfplumber
 
-# La DB se inicializa sola con docker-compose.
-# Scripts SQL en orden: 001_schema_inicial.sql → 002_usuarios.sql
+# La DB se inicializa sola con docker-compose (scripts SQL 001 → 002 → 003).
+# init_db() en db.py también aplica migraciones al startup en Railway.
 python -m uvicorn main_api:app --reload --port 8000
 # Docs interactivos: http://localhost:8000/docs
+```
+
+### Deploy en Railway
+```bash
+# Railway detecta Procfile automáticamente:
+# web: uvicorn main_api:app --host 0.0.0.0 --port $PORT
+# Variable de entorno requerida: DATABASE_URL (Railway la inyecta al vincular PostgreSQL)
+# init_db() aplica las 3 migraciones SQL al startup si el schema no existe
 ```
 
 ### Frontend (React + Vite)
@@ -37,7 +187,8 @@ Archivos usuario (XML/CSV/XLSX / Constancia PDF)
     → Parser Layer        cfdi_parser.py / banco_parser.py / constancia_parser.py
     → Motor Fiscal        motor_fiscal.py
     → API REST            main_api.py  (FastAPI, puerto 8000)
-    → Base de datos       PostgreSQL 16 (Docker) — schema en 001_schema_inicial.sql + 002_usuarios.sql
+    → DB Layer            db.py  (connection pool + init_db con auto-migración)
+    → Base de datos       PostgreSQL 16 (Docker / Railway) — 001 + 002 + 003 SQL
     → Frontend            React 18 + Vite 5 (src/)
 ```
 
@@ -49,9 +200,14 @@ Archivos usuario (XML/CSV/XLSX / Constancia PDF)
 | `banco_parser.py` | Parsea CSV/XLSX bancarios. Auto-detecta encoding y columnas (6+ alias) |
 | `motor_fiscal.py` | Tres motores: Conciliación (banco↔CFDI), Riesgos (8 tipos), Scoring (0–100) |
 | `constancia_parser.py` | Extrae RFC, razón social, régimen, obligaciones, CP, CURP de la Constancia de Situación Fiscal PDF (pdfplumber) |
-| `main_api.py` | FastAPI: auth JWT, empresas, ingesta CFDI/banco, dashboard, riesgos, scoring, parseo constancia |
+| `main_api.py` | FastAPI: auth JWT, empresas, ingesta CFDI/banco, dashboard, riesgos, scoring, parseo constancia, acciones inline, cierre mensual |
+| `db.py` | Connection pool psycopg2 + helpers (`query_all`, `query_one`, `execute`) + `init_db()` con auto-migración al startup |
 | `001_schema_inicial.sql` | DDL PostgreSQL: 8 tablas + extensiones `uuid-ossp`, `pg_trgm` |
 | `002_usuarios.sql` | Tabla `usuarios` + columnas extra en `empresas` (constancia_path, obligaciones JSONB, cp_fiscal, curp) |
+| `003_acciones.sql` | `accion_sugerida` JSONB en catálogo `riesgos` + estados intermedios en `detecciones` (idempotente) |
+| `004_pagos_cfdi.sql` | Tablas `pagos_cfdi` y `pagos_relaciones`; agrega `complemento_pago` a `conciliaciones.tipo_match`; agrega `estado_pago` en `cfdi` (idempotente) |
+| `009_ppd_estados.sql` | Extiende `tipo_match` con `pendiente_rep`/`pagado_parcial`; extiende `cfdi.estado_pago` con `pendiente_rep` (idempotente) |
+| `010_complemento_tipos.sql` | Agrega `complemento_pago_total`/`complemento_pago_parcial` a `tipo_match`; columnas `pago_id` y `saldo_insoluto` en `conciliaciones` (idempotente) |
 
 ### Módulos frontend (`src/`)
 
@@ -71,6 +227,28 @@ Archivos usuario (XML/CSV/XLSX / Constancia PDF)
 - **Bcrypt** directo (`import bcrypt as _bcrypt`) — **NO usar passlib** (incompatibilidad con bcrypt moderno).
 - Un usuario por empresa. El token contiene `empresa_id`, `rfc`, `razon_social`.
 - Endpoints: `POST /api/v1/auth/register`, `POST /api/v1/auth/login`, `GET /api/v1/auth/me`.
+
+### Endpoints principales (`main_api.py`)
+
+| Método | Ruta | Tag |
+|--------|------|-----|
+| POST | `/api/v1/auth/register` | Auth |
+| POST | `/api/v1/auth/login` | Auth |
+| GET | `/api/v1/auth/me` | Auth |
+| POST | `/api/v1/constancia/parsear` | Constancia |
+| GET/POST | `/api/v1/empresas` | Empresas |
+| GET | `/api/v1/empresas/{id}` | Empresas |
+| GET | `/api/v1/dashboard/{empresa_id}` | Dashboard |
+| POST | `/api/v1/empresas/{id}/cfdi/upload` | Ingesta |
+| POST | `/api/v1/empresas/{id}/banco/upload` | Ingesta |
+| GET | `/api/v1/empresas/{id}/riesgos` | Riesgos |
+| PATCH | `/api/v1/riesgos/{id}/resolver` | Riesgos |
+| GET | `/api/v1/empresas/{id}/scoring` | Scoring |
+| GET | `/api/v1/empresas/{id}/scoring/historial` | Scoring |
+| GET | `/api/v1/empresas/{id}/conciliaciones` | Conciliación |
+| GET | `/api/v1/empresas/{id}/conciliaciones/accionables` | Conciliación |
+| POST | `/api/v1/acciones/{deteccion_id}/ejecutar` | Acciones |
+| GET | `/api/v1/empresas/{id}/cierre/{periodo}` | Cierre |
 
 ### Frontend — stack y tema
 - **React 18 + Vite 5 + Tailwind CSS v3 + shadcn/ui** (componentes instalados manualmente en `src/components/ui/`).
@@ -107,11 +285,24 @@ score ∈ [0, 100]
 
 - ✅ Schema DB, parsers, motor fiscal y API — diseñados y funcionales
 - ✅ Auth JWT multiempresa — registro con Constancia PDF, login, token
-- ✅ Docker Compose — PostgreSQL 16 con auto-init de scripts SQL
+- ✅ Docker Compose — PostgreSQL 16 con auto-init de scripts SQL (001 → 002 → 003)
 - ✅ Frontend migrado a Tailwind CSS v3 + shadcn/ui (tema dark navy + cyan)
-- ⚠️ **La API aún devuelve datos mock** — no conectada a PostgreSQL real
-- ⚠️ **El dashboard no llama a la API** — demo con datos hardcoded
-- Pendiente: integración end-to-end (DB real → API → Frontend)
+- ✅ **API conectada a PostgreSQL real** — pipeline ingesta → conciliación → riesgos → scoring persiste
+- ✅ **Dashboard conectado a la API** — llama a endpoints reales, sin datos hardcoded
+- ✅ **Vertical slice implementado** — vista principal accionable sin tabs como eje de navegación
+  - `003_acciones.sql` — `accion_sugerida` JSONB en catálogo + estados intermedios en `detecciones`
+  - `POST /api/v1/acciones/{id}/ejecutar` — actualiza estado con update optimista en frontend
+  - `GET /api/v1/empresas/{id}/cierre/{periodo}` — vista consolidada: bloqueadores + acciones + conciliación
+  - `GET /api/v1/empresas/{id}/conciliaciones/accionables` — pares sin_cfdi y parciales con contexto
+- ✅ **`db.py` modularizado** — connection pool psycopg2 + `init_db()` con auto-migración al startup (Railway-ready)
+- ✅ **`Procfile` añadido** — listo para deploy en Railway (`uvicorn main_api:app --host 0.0.0.0 --port $PORT`)
+- ✅ **Complemento de Pago 2.0 (CFDI tipo P)** — parser, persistencia y conciliación con prioridad sobre heurística
+- ✅ **Conciliación PPD completa con REP** — `enriquecer_estados_ppd()` clasifica cada CFDI PPD antes de conciliar; elimina falsos positivos en `CFDI_NO_COBRADO`/`CFDI_NO_PAGADO`; nuevos `tipo_match`: `pendiente_rep`, `pagado_parcial`; umbral PPD sin REP elevado a 60 días
+- ✅ **Paso 1 score-based banco→REP** — `_conciliar_con_rep()` reemplaza el loop con `break`; scoring monto (exacto=10, ±2%=5) + fecha (exacta=+4, ≤2d=+2, ≤5d=+1); dedup de REPs por `pago.id`; emite `complemento_pago_total`/`complemento_pago_parcial` según `saldo_insoluto`; `TOLERANCIA_FECHA_REP=5d`; trazabilidad `pago_id` + `saldo_insoluto` en `ResultadoConciliacion`
+  - `cfdi_parser.py` — `PagoCFDI`, `DoctoRelacionado`, `_extraer_pagos()`, `es_pago` property; validación de cuadre omitida para tipo P
+  - `004_pagos_cfdi.sql` — tablas `pagos_cfdi` + `pagos_relaciones`; `estado_pago` en `cfdi`; `complemento_pago` en tipo_match
+  - `motor_fiscal.py` — `PagoResumen`; `MotorConciliacion.conciliar()` acepta `pagos=`; regla: si existe complemento → NO usar heurística; output `{tipo_match:"complemento_pago", cfdis_relacionados:[], confianza:"alta"}`
+  - `main_api.py` — `_persistir_complemento_pago()` actualiza `monto_cobrado` y `estado_pago` en CFDIs relacionados; pipeline carga `pagos_cfdi` y pasa a motor
 
 ## Convenciones importantes
 

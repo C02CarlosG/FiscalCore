@@ -20,6 +20,10 @@ NS = {
     "implocal": "http://www.sat.gob.mx/implocal",
 }
 
+# Namespaces Complemento de Pago
+NS_PAGO20 = "{http://www.sat.gob.mx/Pagos20}"
+NS_PAGO10 = "{http://www.sat.gob.mx/Pagos}"
+
 RFC_REGEX = re.compile(
     r'^([A-ZÑ&]{3,4})(\d{6})([A-Z\d]{3})$', re.IGNORECASE
 )
@@ -27,6 +31,24 @@ RFC_REGEX = re.compile(
 
 def validar_rfc(rfc: str) -> bool:
     return bool(RFC_REGEX.match(rfc.strip().upper())) if rfc else False
+
+
+@dataclass
+class DoctoRelacionado:
+    uuid: str
+    num_parcialidad: Optional[int]
+    imp_pagado: Decimal
+    imp_saldo_ant: Decimal
+    imp_saldo_insoluto: Decimal
+
+
+@dataclass
+class PagoCFDI:
+    fecha_pago: Optional[datetime]
+    monto: Decimal
+    moneda: str
+    tipo_cambio: Decimal
+    doctos_relacionados: list["DoctoRelacionado"] = field(default_factory=list)
 
 
 @dataclass
@@ -83,10 +105,19 @@ class CFDIParsed:
     # Condiciones
     condiciones_pago: Optional[str] = None
 
+    # Campos requeridos en CFDI 4.0 (opcionales para 3.3)
+    exportacion: Optional[str] = None           # c_Exportacion: 01=no exportación, 02-04=exportación
+    lugar_expedicion: Optional[str] = None      # CP donde se expide
+    domicilio_fiscal_receptor: Optional[str] = None  # CP del receptor (requerido en 4.0)
+    regimen_fiscal_receptor: Optional[str] = None    # c_RegimenFiscal del receptor (requerido en 4.0)
+
     # Validaciones
     rfc_emisor_valido: bool = False
     rfc_receptor_valido: bool = False
     errores: list[str] = field(default_factory=list)
+
+    # Complemento de Pago (solo si tipo_comprobante == "P")
+    pagos: list[PagoCFDI] = field(default_factory=list)
 
     @property
     def es_ingreso(self) -> bool:
@@ -95,6 +126,15 @@ class CFDIParsed:
     @property
     def es_egreso(self) -> bool:
         return self.tipo_comprobante == "E"
+
+    @property
+    def es_pago(self) -> bool:
+        return self.tipo_comprobante == "P"
+
+    @property
+    def es_exportacion(self) -> bool:
+        """True cuando Exportacion != '01' (01 = no exportación)."""
+        return bool(self.exportacion and self.exportacion != "01")
 
     @property
     def total_mxn(self) -> Decimal:
@@ -166,12 +206,21 @@ class CFDIParser:
             moneda=self._attr(root, "Moneda", "MXN"),
             tipo_cambio=self._decimal(root, "TipoCambio", "1"),
             condiciones_pago=self._attr(root, "CondicionesDePago"),
+            # Campos requeridos en CFDI 4.0
+            exportacion=self._attr(root, "Exportacion"),
+            lugar_expedicion=self._attr(root, "LugarExpedicion"),
+            domicilio_fiscal_receptor=self._attr(receptor, "DomicilioFiscalReceptor"),
+            regimen_fiscal_receptor=self._attr(receptor, "RegimenFiscalReceptor"),
         )
 
         # Validaciones
         parsed.rfc_emisor_valido = validar_rfc(rfc_emisor)
         parsed.rfc_receptor_valido = validar_rfc(rfc_receptor)
         parsed.errores = self._validar(parsed)
+
+        # Extraer Complemento de Pago si es tipo P
+        if parsed.tipo_comprobante == "P":
+            parsed.pagos = self._extraer_pagos(root)
 
         return parsed
 
@@ -251,21 +300,89 @@ class CFDIParser:
 
     def _validar(self, p: CFDIParsed) -> list[str]:
         errores = []
+
         if not p.rfc_emisor_valido:
             errores.append(f"RFC emisor inválido: {p.rfc_emisor}")
         if not p.rfc_receptor_valido:
             errores.append(f"RFC receptor inválido: {p.rfc_receptor}")
-        if p.total <= 0:
-            errores.append("Total debe ser mayor a 0")
         if p.tipo_comprobante not in ("I", "E", "T", "N", "P"):
             errores.append(f"Tipo comprobante desconocido: {p.tipo_comprobante}")
-        # Verificar cuadre matemático (tolerancia 1 centavo)
-        calculado = p.subtotal - p.descuento + p.iva_trasladado - p.iva_retenido - p.isr_retenido
-        if abs(calculado - p.total) > Decimal("0.02"):
-            errores.append(
-                f"Cuadre fiscal: calculado={calculado}, declarado={p.total}"
-            )
+
+        # Para CFDI tipo P, total=0 y Moneda=XXX es correcto según el SAT
+        # (los importes residen en pago20:Pago/MontoTotal, no en el nodo raíz)
+        if p.tipo_comprobante != "P":
+            if p.total <= 0:
+                errores.append("Total debe ser mayor a 0")
+            calculado = p.subtotal - p.descuento + p.iva_trasladado - p.iva_retenido - p.isr_retenido
+            if abs(calculado - p.total) > Decimal("0.02"):
+                errores.append(
+                    f"Cuadre fiscal: calculado={calculado}, declarado={p.total}"
+                )
+
+        # Campos requeridos en CFDI 4.0 — advertencia (no bloquea la ingesta)
+        if p.version.startswith("4"):
+            if not p.exportacion:
+                errores.append("AVISO: Falta atributo Exportacion (requerido en CFDI 4.0)")
+            if not p.lugar_expedicion:
+                errores.append("AVISO: Falta atributo LugarExpedicion (requerido en CFDI 4.0)")
+            if p.tipo_comprobante != "P":
+                if not p.domicilio_fiscal_receptor:
+                    errores.append("AVISO: Falta DomicilioFiscalReceptor (requerido en CFDI 4.0)")
+                if not p.regimen_fiscal_receptor:
+                    errores.append("AVISO: Falta RegimenFiscalReceptor (requerido en CFDI 4.0)")
+
         return errores
+
+    def _extraer_pagos(self, root) -> list[PagoCFDI]:
+        """Extrae nodos pago20:Pago del Complemento de Pago 2.0 (fallback a 1.0)."""
+        pagos: list[PagoCFDI] = []
+
+        # Intentar pago20 primero, luego pago10 (legacy)
+        pagos_node = root.find(f".//{NS_PAGO20}Pagos")
+        ns_pago = NS_PAGO20
+        if pagos_node is None:
+            pagos_node = root.find(f".//{NS_PAGO10}Pagos")
+            ns_pago = NS_PAGO10
+        if pagos_node is None:
+            return pagos
+
+        for pago_node in pagos_node.findall(f"{ns_pago}Pago"):
+            fecha_str = pago_node.get("FechaPago", "")
+            # pago20 usa MontoTotal; pago10 usa Monto
+            monto_attr = "MontoTotal" if ns_pago == NS_PAGO20 else "Monto"
+            try:
+                monto = Decimal(pago_node.get(monto_attr, "0"))
+            except Exception:
+                monto = Decimal("0")
+            moneda = pago_node.get("MonedaP", "MXN")
+            try:
+                tipo_cambio = Decimal(pago_node.get("TipoCambioP", "1") or "1")
+            except Exception:
+                tipo_cambio = Decimal("1")
+
+            doctos: list[DoctoRelacionado] = []
+            for docto in pago_node.findall(f"{ns_pago}DoctoRelacionado"):
+                parcialidad_str = docto.get("NumParcialidad")
+                try:
+                    doctos.append(DoctoRelacionado(
+                        uuid=docto.get("IdDocumento", ""),
+                        num_parcialidad=int(parcialidad_str) if parcialidad_str else None,
+                        imp_pagado=Decimal(docto.get("ImpPagado", "0")),
+                        imp_saldo_ant=Decimal(docto.get("ImpSaldoAnt", "0")),
+                        imp_saldo_insoluto=Decimal(docto.get("ImpSaldoInsoluto", "0")),
+                    ))
+                except Exception:
+                    continue
+
+            pagos.append(PagoCFDI(
+                fecha_pago=self._parse_fecha(fecha_str),
+                monto=monto,
+                moneda=moneda,
+                tipo_cambio=tipo_cambio,
+                doctos_relacionados=doctos,
+            ))
+
+        return pagos
 
     @staticmethod
     def _attr(node, attr: str, default: Optional[str] = None) -> Optional[str]:

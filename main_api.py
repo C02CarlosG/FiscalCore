@@ -5,6 +5,7 @@ Conectada a PostgreSQL via db.py
 from __future__ import annotations
 
 import json
+import logging
 import os
 import uuid as _uuid
 from datetime import datetime, timedelta
@@ -13,10 +14,17 @@ from pathlib import Path
 from typing import Optional
 
 import psycopg2
+import psycopg2.extras
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, field_validator
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
+_log = logging.getLogger(__name__)
 
 try:
     from jose import JWTError, jwt
@@ -33,7 +41,8 @@ except ImportError:
 import db
 
 # ─── JWT config ──────────────────────────────────────────────
-JWT_SECRET    = os.environ.get("JWT_SECRET", "fiscalcore-dev-secret-change-in-prod")
+_JWT_INSECURE_DEFAULT = "fiscalcore-dev-secret-change-in-prod"
+JWT_SECRET    = os.environ.get("JWT_SECRET", _JWT_INSECURE_DEFAULT)
 JWT_ALGORITHM = "HS256"
 JWT_EXP_HOURS = 8
 
@@ -41,6 +50,18 @@ _bearer = HTTPBearer(auto_error=False)
 
 UPLOADS_DIR = Path("uploads/constancias")
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+
+# ─── CORS ────────────────────────────────────────────────────
+# Configura ALLOWED_ORIGINS en Railway con los dominios del frontend separados por coma.
+# Ejemplo: https://fiscalcore.vercel.app,https://app.fiscalcore.mx
+_ALLOWED_ORIGINS = [
+    o.strip()
+    for o in os.getenv(
+        "ALLOWED_ORIGINS",
+        "http://localhost:5173,http://localhost:3000",
+    ).split(",")
+    if o.strip()
+]
 
 # ─── App ─────────────────────────────────────────────────────
 app = FastAPI(
@@ -51,10 +72,20 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "https://auditoria-fiscal.vercel.app"],
+    allow_origins=_ALLOWED_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.on_event("startup")
+async def _startup() -> None:
+    if JWT_SECRET == _JWT_INSECURE_DEFAULT:
+        _log.warning("JWT_SECRET no configurado — usando clave de desarrollo (inseguro en producción)")
+    _log.info("CORS permitido para: %s", _ALLOWED_ORIGINS)
+    _log.info("Inicializando schema de base de datos...")
+    db.init_db()
+    _log.info("FiscalCore API lista")
 
 
 # ─── Schemas ─────────────────────────────────────────────────
@@ -437,9 +468,14 @@ async def subir_cfdi(
         try:
             contenido = await archivo.read()
             resultado = parser.parse_xml(contenido)
-            if resultado.errores:
-                errores += [f"{archivo.filename}: {e}" for e in resultado.errores]
+            # Separar errores bloqueantes de advertencias (prefijo "AVISO:")
+            errores_bloqueantes = [e for e in resultado.errores if not e.startswith("AVISO:")]
+            avisos = [e for e in resultado.errores if e.startswith("AVISO:")]
+            if errores_bloqueantes:
+                errores += [f"{archivo.filename}: {e}" for e in errores_bloqueantes]
                 continue
+            if avisos:
+                errores += [f"{archivo.filename}: {e}" for e in avisos]
 
             # Insertar en DB (ignorar duplicados por UUID)
             db.execute(
@@ -449,13 +485,16 @@ async def subir_cfdi(
                     rfc_emisor, nombre_emisor, rfc_receptor, nombre_receptor,
                     fecha_emision, fecha_timbrado,
                     subtotal, descuento, iva_trasladado, iva_retenido, isr_retenido, total,
-                    metodo_pago, forma_pago, uso_cfdi, moneda, tipo_cambio, xml_raw
+                    metodo_pago, forma_pago, uso_cfdi, moneda, tipo_cambio, xml_raw,
+                    exportacion, lugar_expedicion,
+                    domicilio_fiscal_receptor, regimen_fiscal_receptor
                 ) VALUES (
                     %s,%s,%s,%s,%s,%s,
                     %s,%s,%s,%s,
                     %s,%s,
                     %s,%s,%s,%s,%s,%s,
-                    %s,%s,%s,%s,%s,%s
+                    %s,%s,%s,%s,%s,%s,
+                    %s,%s,%s,%s
                 )
                 ON CONFLICT (uuid) DO NOTHING
                 """,
@@ -472,8 +511,17 @@ async def subir_cfdi(
                     resultado.uso_cfdi, resultado.moneda,
                     str(resultado.tipo_cambio),
                     contenido.decode("utf-8", errors="replace"),
+                    resultado.exportacion,
+                    resultado.lugar_expedicion,
+                    resultado.domicilio_fiscal_receptor,
+                    resultado.regimen_fiscal_receptor,
                 ),
             )
+
+            # Si es Complemento de Pago, persistir pagos y actualizar CFDIs relacionados
+            if resultado.tipo_comprobante == "P" and resultado.pagos:
+                _persistir_complemento_pago(empresa_id, resultado)
+
             procesados += 1
         except Exception as e:
             errores.append(f"{archivo.filename}: {str(e)}")
@@ -487,6 +535,84 @@ async def subir_cfdi(
         errores=errores,
         periodo=periodo,
     )
+
+
+# ── Complemento de Pago 2.0 ──────────────────────────────────
+
+def _persistir_complemento_pago(empresa_id: str, resultado) -> None:
+    """
+    Persiste los nodos pago20:Pago de un CFDI tipo P:
+    - Inserta en pagos_cfdi y pagos_relaciones.
+    - Actualiza monto_cobrado y estado_pago en los CFDIs de ingreso/egreso relacionados.
+    """
+    cfdi_row = db.query_one("SELECT id FROM cfdi WHERE uuid = %s", (resultado.uuid,))
+    if not cfdi_row:
+        return
+    cfdi_db_id = str(cfdi_row["id"])
+
+    for pago in resultado.pagos:
+        if not pago.fecha_pago or pago.monto <= 0:
+            continue
+
+        pago_row = db.execute(
+            """
+            INSERT INTO pagos_cfdi (empresa_id, cfdi_id, uuid_cfdi_pago, fecha_pago, monto, moneda, tipo_cambio)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (cfdi_id, fecha_pago, monto) DO NOTHING
+            RETURNING id
+            """,
+            (
+                empresa_id, cfdi_db_id, resultado.uuid,
+                pago.fecha_pago, str(pago.monto),
+                pago.moneda, str(pago.tipo_cambio),
+            ),
+            returning=True,
+        )
+        if not pago_row:
+            # Ya existía (ON CONFLICT DO NOTHING) — recuperar id existente
+            pago_row = db.query_one(
+                "SELECT id FROM pagos_cfdi WHERE cfdi_id = %s AND fecha_pago = %s AND monto = %s",
+                (cfdi_db_id, pago.fecha_pago, str(pago.monto)),
+            )
+        if not pago_row:
+            continue
+        pago_db_id = str(pago_row["id"])
+
+        for docto in pago.doctos_relacionados:
+            if not docto.uuid:
+                continue
+            db.execute(
+                """
+                INSERT INTO pagos_relaciones (pago_id, cfdi_uuid, parcialidad, importe_pagado, saldo_anterior, saldo_restante)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                ON CONFLICT DO NOTHING
+                """,
+                (
+                    pago_db_id, docto.uuid, docto.num_parcialidad,
+                    str(docto.imp_pagado), str(docto.imp_saldo_ant), str(docto.imp_saldo_insoluto),
+                ),
+            )
+            # Actualizar monto_cobrado y estado_pago en el CFDI relacionado
+            db.execute(
+                """
+                UPDATE cfdi
+                SET
+                    monto_cobrado = LEAST(total, monto_cobrado + %s),
+                    estado_pago = CASE
+                        WHEN LEAST(total, monto_cobrado + %s) >= total THEN 'pagado_total'
+                        WHEN LEAST(total, monto_cobrado + %s) > 0     THEN 'pagado_parcial'
+                        ELSE 'pendiente'
+                    END
+                WHERE uuid = %s AND empresa_id = %s
+                """,
+                (
+                    str(docto.imp_pagado),
+                    str(docto.imp_pagado),
+                    str(docto.imp_pagado),
+                    docto.uuid,
+                    empresa_id,
+                ),
+            )
 
 
 # ── Ingesta bancaria ─────────────────────────────────────────
@@ -544,7 +670,7 @@ async def subir_estado_cuenta(
 def _correr_pipeline(empresa_id: str, periodo: str, rfc_empresa: str) -> None:
     """Ejecuta el motor fiscal completo para un período y persiste los resultados."""
     from motor_fiscal import (
-        CFDIResumen, MovResumen,
+        CFDIResumen, MovResumen, PagoResumen,
         MotorConciliacion, MotorRiesgos, MotorScoring,
     )
 
@@ -607,9 +733,46 @@ def _correr_pipeline(empresa_id: str, periodo: str, rfc_empresa: str) -> None:
     if not cfdis and not movimientos:
         return
 
+    # Cargar pagos_cfdi del período (±2 días para cubrir desfases entre depósito y fecha de pago)
+    import calendar as _cal
+    from datetime import timedelta as _td
+    _inicio_dt = datetime.strptime(inicio, "%Y-%m-%d") - _td(days=2)
+    _fin_dt = datetime.strptime(fin, "%Y-%m-%d") + _td(days=2)
+
+    pago_rows = db.query_all(
+        """
+        SELECT pc.id, pc.cfdi_id, pc.uuid_cfdi_pago,
+               pc.fecha_pago::date AS fecha_pago, pc.monto,
+               COALESCE(
+                   json_agg(pr.cfdi_uuid) FILTER (WHERE pr.cfdi_uuid IS NOT NULL),
+                   '[]'::json
+               ) AS cfdis_relacionados
+        FROM pagos_cfdi pc
+        LEFT JOIN pagos_relaciones pr ON pr.pago_id = pc.id
+        WHERE pc.empresa_id = %s
+          AND pc.fecha_pago::date BETWEEN %s AND %s
+        GROUP BY pc.id, pc.cfdi_id, pc.uuid_cfdi_pago, pc.fecha_pago, pc.monto
+        """,
+        (empresa_id, _inicio_dt.date(), _fin_dt.date()),
+    )
+    pagos = [
+        PagoResumen(
+            id=str(r["id"]),
+            cfdi_pago_id=str(r["cfdi_id"]),
+            uuid_cfdi_pago=r["uuid_cfdi_pago"],
+            fecha_pago=r["fecha_pago"],
+            monto=Decimal(str(r["monto"])),
+            cfdis_relacionados=list(r["cfdis_relacionados"]) if r["cfdis_relacionados"] else [],
+        )
+        for r in pago_rows
+    ]
+
+    # El motor solo procesa I/E — los tipo P ya fueron resueltos vía complemento
+    cfdis_motor = [c for c in cfdis if c.tipo not in ("P",)]
+
     # Conciliación
     motor_conc = MotorConciliacion()
-    conciliaciones = motor_conc.conciliar(movimientos, cfdis, rfc_empresa)
+    conciliaciones = motor_conc.conciliar(movimientos, cfdis_motor, rfc_empresa, pagos=pagos)
 
     # Guardar conciliaciones (limpiar las existentes del período primero)
     db.execute(
@@ -621,8 +784,9 @@ def _correr_pipeline(empresa_id: str, periodo: str, rfc_empresa: str) -> None:
             """
             INSERT INTO conciliaciones (
                 empresa_id, movimiento_id, cfdi_id,
-                tipo_match, monto_movimiento, monto_cfdi, diferencia, porcentaje_match, periodo, notas
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                tipo_match, monto_movimiento, monto_cfdi, diferencia, porcentaje_match,
+                periodo, notas, confianza
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 empresa_id,
@@ -635,12 +799,13 @@ def _correr_pipeline(empresa_id: str, periodo: str, rfc_empresa: str) -> None:
                 str(c.porcentaje_match),
                 periodo,
                 c.notas,
+                c.confianza if c.confianza else None,
             ),
         )
 
-    # Riesgos
+    # Riesgos (solo sobre CFDIs I/E — tipo P no genera riesgos directamente)
     motor_riesgos = MotorRiesgos()
-    riesgos = motor_riesgos.detectar_todos(movimientos, cfdis, conciliaciones, rfc_empresa)
+    riesgos = motor_riesgos.detectar_todos(movimientos, cfdis_motor, conciliaciones, rfc_empresa)
 
     # Guardar detecciones nuevas (no limpiar las existentes resueltas)
     db.execute(
@@ -671,7 +836,7 @@ def _correr_pipeline(empresa_id: str, periodo: str, rfc_empresa: str) -> None:
 
     # Scoring
     motor_scoring = MotorScoring()
-    score = motor_scoring.calcular(movimientos, cfdis, conciliaciones, riesgos)
+    score = motor_scoring.calcular(movimientos, cfdis_motor, conciliaciones, riesgos)
 
     total_ing = sum(Decimal(str(r["total"])) for r in cfdi_rows if r["tipo_comprobante"] == "I")
     total_egr = sum(Decimal(str(r["total"])) for r in cfdi_rows if r["tipo_comprobante"] == "E")
@@ -833,6 +998,217 @@ async def listar_conciliaciones(empresa_id: str, periodo: Optional[str] = None):
         "sin_movimiento": conteos.get("sin_movimiento", 0),
         "pct_conciliado": pct,
     }
+
+
+# ── Acciones granulares ───────────────────────────────────────
+
+ACCION_ESTADO = {
+    "marcar_revisado": "en_revision",
+    "solicitar_cfdi":  "en_espera_cfdi",
+    "emitir_cfdi":     "en_espera_cfdi",
+    "confirmar_match": "confirmado",
+    "descartar":       "descartado",
+    "resolver":        "resuelto",
+}
+
+
+class AccionRequest(BaseModel):
+    tipo: str
+    notas: Optional[str] = None
+
+
+@app.post("/api/v1/acciones/{deteccion_id}/ejecutar", tags=["Acciones"])
+async def ejecutar_accion(deteccion_id: str, body: AccionRequest):
+    """Ejecuta una acción sobre una detección y actualiza su estado."""
+    det = db.query_one("SELECT estado FROM detecciones WHERE id = %s", (deteccion_id,))
+    if not det:
+        raise HTTPException(status_code=404, detail="Detección no encontrada")
+
+    nuevo_estado = ACCION_ESTADO.get(body.tipo)
+    if not nuevo_estado:
+        raise HTTPException(status_code=400, detail=f"Tipo de acción desconocido: {body.tipo}")
+
+    db.execute(
+        """
+        UPDATE detecciones
+        SET estado = %s, updated_at = NOW(), notas_resolucion = %s,
+            resuelto_en = CASE WHEN %s IN ('resuelto','descartado','confirmado') THEN NOW() ELSE resuelto_en END
+        WHERE id = %s
+        """,
+        (nuevo_estado, body.notas or "", nuevo_estado, deteccion_id),
+    )
+
+    return {
+        "deteccion_id": deteccion_id,
+        "estado_anterior": det["estado"],
+        "estado_nuevo": nuevo_estado,
+    }
+
+
+# ── Vista de cierre mensual ───────────────────────────────────
+
+@app.get("/api/v1/empresas/{empresa_id}/cierre/{periodo}", tags=["Cierre"])
+async def vista_cierre(empresa_id: str, periodo: str):
+    """
+    Vista consolidada para el cierre mensual.
+    Responde: ¿Puedo cerrar? / ¿Qué me falta? / ¿Qué hago hoy?
+    """
+    _empresa_or_404(empresa_id)
+
+    # Detecciones accionables (abierto, pendiente, en_revision, en_espera_cfdi)
+    detecciones_rows = db.query_all(
+        """
+        SELECT
+            d.id, d.estado, d.monto_afectado, d.descripcion, d.periodo,
+            d.cfdi_id, d.movimiento_id, d.created_at,
+            r.codigo, r.nombre, r.severidad, r.accion_sugerida,
+            c.uuid        AS cfdi_uuid,
+            c.fecha_emision AS cfdi_fecha,
+            c.rfc_emisor  AS cfdi_rfc_emisor,
+            c.rfc_receptor AS cfdi_rfc_receptor,
+            c.total       AS cfdi_total,
+            m.fecha       AS mov_fecha,
+            m.concepto    AS mov_concepto,
+            m.monto       AS mov_monto,
+            m.rfc_detectado AS mov_rfc
+        FROM detecciones d
+        JOIN riesgos r ON r.id = d.riesgo_id
+        LEFT JOIN cfdi c ON c.id = d.cfdi_id
+        LEFT JOIN movimientos_bancarios m ON m.id = d.movimiento_id
+        WHERE d.empresa_id = %s
+          AND d.periodo = %s
+          AND d.estado IN ('abierto','pendiente','en_revision','en_espera_cfdi')
+        ORDER BY
+            CASE r.severidad WHEN 'critico' THEN 1 WHEN 'alto' THEN 2
+                             WHEN 'medio' THEN 3 ELSE 4 END,
+            d.monto_afectado DESC NULLS LAST
+        """,
+        (empresa_id, periodo),
+    )
+
+    acciones = []
+    for row in detecciones_rows:
+        item = _serializar(row)
+        # Contexto mínimo para el ítem de acción
+        item["contexto"] = {}
+        if row["cfdi_uuid"]:
+            item["contexto"] = {
+                "tipo": "cfdi",
+                "uuid":  row["cfdi_uuid"],
+                "fecha": row["cfdi_fecha"].isoformat() if row["cfdi_fecha"] else None,
+                "rfc":   row["cfdi_rfc_emisor"] or row["cfdi_rfc_receptor"],
+                "total": float(row["cfdi_total"] or 0),
+            }
+        elif row["mov_fecha"]:
+            item["contexto"] = {
+                "tipo":    "movimiento",
+                "fecha":   row["mov_fecha"].isoformat() if row["mov_fecha"] else None,
+                "concepto": (row["mov_concepto"] or "")[:80],
+                "monto":   float(row["mov_monto"] or 0),
+                "rfc":     row["mov_rfc"],
+            }
+        acciones.append(item)
+
+    bloqueadores = [a for a in acciones if a["severidad"] in ("critico", "alto")]
+
+    # Conciliación del período
+    conc_rows = db.query_all(
+        """
+        SELECT tipo_match, COUNT(*) AS total
+        FROM conciliaciones
+        WHERE empresa_id = %s AND periodo = %s
+        GROUP BY tipo_match
+        """,
+        (empresa_id, periodo),
+    )
+    conc = {r["tipo_match"]: r["total"] for r in conc_rows}
+    total_mov = sum(conc.values())
+
+    # Heurísticos de alta confianza: consulta separada porque necesitamos filtrar por confianza
+    heur_alta = db.query_one(
+        """
+        SELECT COUNT(*) AS total FROM conciliaciones
+        WHERE empresa_id = %s AND periodo = %s
+          AND tipo_match = 'heuristico' AND confianza = 'alta'
+        """,
+        (empresa_id, periodo),
+    )
+    conciliados = (
+        conc.get("exacto", 0)
+        + conc.get("parcial", 0)
+        + conc.get("complemento_pago", 0)
+        + conc.get("agrupado", 0)
+        + conc.get("parcial_multiple", 0)
+        + (heur_alta["total"] if heur_alta else 0)
+    )
+    pct_conciliado = round(conciliados / total_mov * 100, 1) if total_mov else 0.0
+    matches_debiles = conc.get("parcial", 0) + conc.get("parcial_multiple", 0)
+
+    # Score más reciente del período
+    score_row = db.query_one(
+        "SELECT score_total FROM scoring_fiscal WHERE empresa_id = %s AND periodo = %s",
+        (empresa_id, periodo),
+    )
+    score = float(score_row["score_total"]) if score_row else None
+
+    puede_cerrar = len(bloqueadores) == 0 and pct_conciliado >= 80.0
+
+    razon_bloqueo = None
+    if not puede_cerrar:
+        razones = []
+        if bloqueadores:
+            razones.append(f"{len(bloqueadores)} riesgo{'s' if len(bloqueadores)>1 else ''} crítico{'s' if len(bloqueadores)>1 else ''}/alto{'s' if len(bloqueadores)>1 else ''} abierto{'s' if len(bloqueadores)>1 else ''}")
+        if pct_conciliado < 80.0:
+            razones.append(f"conciliación al {pct_conciliado}% (mínimo 80%)")
+        razon_bloqueo = " · ".join(razones)
+
+    return {
+        "periodo": periodo,
+        "puede_cerrar": puede_cerrar,
+        "razon_bloqueo": razon_bloqueo,
+        "score": score,
+        "bloqueadores": bloqueadores,
+        "acciones": acciones,
+        "conciliacion": {
+            "sin_cfdi":       conc.get("sin_cfdi", 0),
+            "sin_movimiento": conc.get("sin_movimiento", 0),
+            "matches_debiles": matches_debiles,
+            "pct_conciliado": pct_conciliado,
+            "total":          total_mov,
+        },
+    }
+
+
+# ── Conciliaciones accionables ────────────────────────────────
+
+@app.get("/api/v1/empresas/{empresa_id}/conciliaciones/accionables", tags=["Conciliación"])
+async def conciliaciones_accionables(empresa_id: str, periodo: Optional[str] = None):
+    """Pares sin_cfdi y parciales con contexto del movimiento bancario."""
+    _empresa_or_404(empresa_id)
+
+    sql = """
+        SELECT
+            con.id, con.tipo_match, con.monto_movimiento, con.monto_cfdi,
+            con.diferencia, con.porcentaje_match, con.periodo,
+            m.id    AS movimiento_id,
+            m.fecha AS mov_fecha,
+            m.concepto,
+            m.monto AS mov_monto,
+            m.tipo  AS mov_tipo,
+            m.rfc_detectado
+        FROM conciliaciones con
+        LEFT JOIN movimientos_bancarios m ON m.id = con.movimiento_id
+        WHERE con.empresa_id = %s
+          AND con.tipo_match IN ('sin_cfdi','parcial')
+    """
+    params: list = [empresa_id]
+    if periodo:
+        sql += " AND con.periodo = %s"
+        params.append(periodo)
+    sql += " ORDER BY con.monto_movimiento DESC NULLS LAST LIMIT 100"
+
+    rows = db.query_all(sql, tuple(params))
+    return {"total": len(rows), "pares": [_serializar(r) for r in rows]}
 
 
 if __name__ == "__main__":

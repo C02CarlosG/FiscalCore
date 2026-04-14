@@ -7,7 +7,7 @@ import { Alert, AlertDescription } from "./components/ui/alert";
 import { Badge }  from "./components/ui/badge";
 import { cn }     from "./lib/utils";
 
-const API = "http://localhost:8000";
+const API = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
 function StepIndicator({ current }) {
   const steps = ["Credenciales", "Constancia", "Confirmar"];
