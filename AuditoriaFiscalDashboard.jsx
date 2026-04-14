@@ -6,8 +6,14 @@ import { Alert, AlertDescription } from "./src/components/ui/alert";
 import { Avatar, AvatarFallback } from "./src/components/ui/avatar";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./src/components/ui/dialog";
 import { cn } from "./src/lib/utils";
+import { getToken } from "./src/auth.js";
 
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
+
+function authHeaders() {
+  const token = getToken();
+  return token ? { "Authorization": `Bearer ${token}` } : {};
+}
 
 /* ── SAT Catalogs ────────────────────────────────────────────── */
 const FORMA_PAGO = {
@@ -243,7 +249,7 @@ function AccionItem({ item, onEjecutar, onDetalle, ejecutando }) {
 }
 
 /* ── Main Component ──────────────────────────────────────────── */
-export default function AuditoriaFiscal({ empresaId: empresaIdProp = null, empresaData = null, onLogout = null }) {
+export default function AuditoriaFiscal({ empresaId: empresaIdProp = null, empresaData = null, empresas: empresasProp = [], onLogout = null }) {
   const [tab, setTab]               = useState(null);      // null = vista principal
   const [detalle, setDetalle]       = useState(null);
   const [cierreData, setCierreData] = useState(null);
@@ -252,6 +258,7 @@ export default function AuditoriaFiscal({ empresaId: empresaIdProp = null, empre
   const [loading, setLoading]       = useState(false);
   const [ejecutando, setEjecutando] = useState(null);      // id de detección en proceso
   const [accionables, setAcisionables] = useState([]);     // pares sin_cfdi / parciales
+  const [empresas, setEmpresas]     = useState(empresasProp); // lista de empresas del contador
   const [uploadState, setUploadState] = useState({ cfdi:false, banco:false });
   const [uploadMsg, setUploadMsg]   = useState("");
   const [diagnostico, setDiagnostico] = useState([]);
@@ -269,7 +276,7 @@ export default function AuditoriaFiscal({ empresaId: empresaIdProp = null, empre
     if (!eid) return;
     setLoading(true);
     try {
-      const res = await fetch(`${API_URL}/api/v1/empresas/${eid}/cierre/${periodo}`);
+      const res = await fetch(`${API_URL}/api/v1/empresas/${eid}/cierre/${periodo}`, { headers: authHeaders() });
       if (res.ok) setCierreData(await res.json());
     } catch(_) {} finally { setLoading(false); }
   }, []);
@@ -278,8 +285,8 @@ export default function AuditoriaFiscal({ empresaId: empresaIdProp = null, empre
     if (!eid) return;
     try {
       const [dash, concil] = await Promise.all([
-        fetch(`${API_URL}/api/v1/dashboard/${eid}`).then(r=>r.json()),
-        fetch(`${API_URL}/api/v1/empresas/${eid}/conciliaciones`).then(r=>r.json()),
+        fetch(`${API_URL}/api/v1/dashboard/${eid}`, { headers: authHeaders() }).then(r=>r.json()),
+        fetch(`${API_URL}/api/v1/empresas/${eid}/conciliaciones`, { headers: authHeaders() }).then(r=>r.json()),
       ]);
       setLegacyData({ dash, concil });
     } catch(_) {}
@@ -288,7 +295,7 @@ export default function AuditoriaFiscal({ empresaId: empresaIdProp = null, empre
   const fetchAcisionables = useCallback(async (eid, periodo) => {
     if (!eid) return;
     try {
-      const res = await fetch(`${API_URL}/api/v1/empresas/${eid}/conciliaciones/accionables?periodo=${periodo}`);
+      const res = await fetch(`${API_URL}/api/v1/empresas/${eid}/conciliaciones/accionables?periodo=${periodo}`, { headers: authHeaders() });
       if (res.ok) {
         const data = await res.json();
         setAcisionables(data.pares ?? []);
@@ -300,7 +307,8 @@ export default function AuditoriaFiscal({ empresaId: empresaIdProp = null, empre
     const init = async () => {
       setLoading(true);
       try {
-        const empresas = await fetch(`${API_URL}/api/v1/empresas`).then(r=>r.json());
+        const empresas = await fetch(`${API_URL}/api/v1/empresas`, { headers: authHeaders() }).then(r=>r.json());
+        if (Array.isArray(empresas)) setEmpresas(empresas);
         if (!empresas.length) return;
         const eid = empresaIdProp ?? empresas[0].id;
         setEmpresaId(eid);
@@ -335,7 +343,7 @@ export default function AuditoriaFiscal({ empresaId: empresaIdProp = null, empre
     try {
       await fetch(`${API_URL}/api/v1/acciones/${deteccionId}/ejecutar`, {
         method: "POST",
-        headers: { "Content-Type":"application/json" },
+        headers: { "Content-Type":"application/json", ...authHeaders() },
         body: JSON.stringify({ tipo, notas }),
       });
       // Refrescar para consistencia
@@ -360,7 +368,7 @@ export default function AuditoriaFiscal({ empresaId: empresaIdProp = null, empre
     for(const f of files) fd.append("archivos",f);
     fd.append("periodo",periodoUpload);
     try {
-      const res = await fetch(`${API_URL}/api/v1/empresas/${empresaId}/cfdi/upload`,{method:"POST",body:fd}).then(r=>r.json());
+      const res = await fetch(`${API_URL}/api/v1/empresas/${empresaId}/cfdi/upload`,{method:"POST",body:fd,headers:authHeaders()}).then(r=>r.json());
       setUploadMsg(`✓ ${res.mensaje}`);
       await Promise.all([fetchCierre(empresaId, periodoActual), fetchAcisionables(empresaId, periodoActual)]);
     } catch(_) { setUploadMsg("✗ Error al subir CFDI."); }
@@ -374,15 +382,15 @@ export default function AuditoriaFiscal({ empresaId: empresaIdProp = null, empre
     const fd = new FormData();
     fd.append("archivo",file); fd.append("banco","desconocido"); fd.append("periodo",periodoUpload);
     try {
-      const res = await fetch(`${API_URL}/api/v1/empresas/${empresaId}/banco/upload`,{method:"POST",body:fd}).then(r=>r.json());
+      const res = await fetch(`${API_URL}/api/v1/empresas/${empresaId}/banco/upload`,{method:"POST",body:fd,headers:authHeaders()}).then(r=>r.json());
       setUploadMsg(`✓ ${res.mensaje}`);
       await Promise.all([fetchCierre(empresaId, periodoActual), fetchAcisionables(empresaId, periodoActual)]);
     } catch(_) { setUploadMsg("✗ Error al subir estado de cuenta."); }
     finally { setUploadState(p=>({...p,banco:false})); e.target.value=""; }
   };
 
-  const rfc = cierreData ? (legacyData?.dash?.empresa?.rfc ?? empresaData?.rfc ?? "FC")
-                         : (empresaData?.rfc ?? "FC");
+  const empresaActiva = empresas.find(e => e.empresa_id === empresaId) ?? empresaData ?? null;
+  const rfc = empresaActiva?.rfc ?? cierreData?.empresa?.rfc ?? "FC";
 
   const DRILL_TABS = [
     ["riesgos",       "Todos los riesgos"],
@@ -1012,6 +1020,28 @@ export default function AuditoriaFiscal({ empresaId: empresaIdProp = null, empre
               >{l}</button>
             ))}
           </nav>
+
+          {/* Selector de empresa (si hay más de una) */}
+          {empresas.length > 1 && (
+            <select
+              value={empresaId ?? ""}
+              onChange={e => {
+                setEmpresaId(e.target.value);
+                setCierreData(null);
+                setAcisionables([]);
+                fetchCierre(e.target.value, periodoActual);
+                fetchLegacy(e.target.value);
+                fetchAcisionables(e.target.value, periodoActual);
+              }}
+              className="font-mono text-[11px] bg-card border border-border rounded px-2 h-7 text-foreground focus:outline-none focus:border-primary transition-colors max-w-[200px] truncate"
+            >
+              {empresas.map(e => (
+                <option key={e.empresa_id} value={e.empresa_id}>
+                  {e.razon_social?.slice(0, 28) ?? e.rfc}
+                </option>
+              ))}
+            </select>
+          )}
 
           {/* User */}
           <div className="flex items-center gap-2.5 flex-shrink-0">

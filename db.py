@@ -141,6 +141,9 @@ def init_db() -> None:
         # 010 es idempotente — tipos específicos REP: complemento_pago_total/_parcial + columnas pago_id/saldo_insoluto
         _run_sql_file("010_complemento_tipos.sql")
 
+        # 011 es idempotente — tabla usuario_empresas (M:N), migra relaciones existentes
+        _run_sql_file("011_usuario_empresas.sql")
+
     except Exception as e:
         log.error("DB: init_db falló: %s", e)
         raise

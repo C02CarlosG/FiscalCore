@@ -34,7 +34,11 @@ export default function LoginPage({ onLogin, onGoRegister }) {
       });
       const data = await res.json();
       if (!res.ok) { setError(data.detail ?? "Error al iniciar sesión"); return; }
-      onLogin(data.access_token, { empresa_id: data.empresa_id, rfc: data.rfc, razon_social: data.razon_social });
+      onLogin(data.access_token, {
+        user_id: data.user_id,
+        nombre:  data.nombre,
+        empresas: data.empresas ?? [],
+      });
     } catch {
       setError("No se pudo conectar con el servidor");
     } finally {

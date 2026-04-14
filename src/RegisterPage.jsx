@@ -10,7 +10,7 @@ import { cn }     from "./lib/utils";
 const API = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
 function StepIndicator({ current }) {
-  const steps = ["Credenciales", "Constancia", "Confirmar"];
+  const steps = ["Credenciales", "Primera empresa"];
   return (
     <div className="flex items-center gap-0 mb-8">
       {steps.map((s, i) => (
@@ -41,22 +41,23 @@ function StepIndicator({ current }) {
   );
 }
 
-function StepCredenciales({ data, onChange, onNext }) {
+function StepCredenciales({ data, onChange, onNext, loading }) {
   const [error,   setError]   = useState("");
   const [showPwd, setShowPwd] = useState(false);
 
   function validate() {
-    if (!data.nombre.trim())                          return "El nombre es requerido";
+    if (!data.nombre.trim())                              return "El nombre es requerido";
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.email)) return "Correo inválido";
-    if (data.password.length < 8)                    return "Contraseña mínimo 8 caracteres";
-    if (data.password !== data.confirm)              return "Las contraseñas no coinciden";
+    if (data.password.length < 8)                         return "Contraseña mínimo 8 caracteres";
+    if (data.password !== data.confirm)                   return "Las contraseñas no coinciden";
     return "";
   }
 
-  function handleNext() {
+  async function handleNext() {
     const err = validate();
     if (err) { setError(err); return; }
-    setError(""); onNext();
+    setError("");
+    await onNext();
   }
 
   return (
@@ -64,10 +65,10 @@ function StepCredenciales({ data, onChange, onNext }) {
       {error && <Alert variant="destructive"><AlertDescription>{error}</AlertDescription></Alert>}
 
       <div><Label htmlFor="nombre">Nombre completo</Label>
-        <Input id="nombre" value={data.nombre} onChange={e => onChange("nombre", e.target.value)} placeholder="Tu nombre o razón social" />
+        <Input id="nombre" value={data.nombre} onChange={e => onChange("nombre", e.target.value)} placeholder="Tu nombre como contador" />
       </div>
       <div><Label htmlFor="reg-email">Correo electrónico</Label>
-        <Input id="reg-email" type="email" value={data.email} onChange={e => onChange("email", e.target.value)} placeholder="correo@empresa.com" />
+        <Input id="reg-email" type="email" value={data.email} onChange={e => onChange("email", e.target.value)} placeholder="correo@despacho.com" />
       </div>
       <div><Label htmlFor="reg-pwd">Contraseña</Label>
         <div className="relative">
@@ -83,45 +84,77 @@ function StepCredenciales({ data, onChange, onNext }) {
         <Input id="confirm-pwd" type="password" value={data.confirm} onChange={e => onChange("confirm", e.target.value)} placeholder="Repite la contraseña" />
       </div>
 
-      <Button onClick={handleNext} className="w-full mt-2" size="lg">
-        Continuar <ChevronRight className="w-4 h-4" />
+      <Button onClick={handleNext} disabled={loading} className="w-full mt-2" size="lg">
+        {loading ? "Creando cuenta..." : <>Continuar <ChevronRight className="w-4 h-4" /></>}
       </Button>
     </div>
   );
 }
 
-function StepConstancia({ onNext, onManual }) {
-  const [dragging, setDragging] = useState(false);
-  const [loading,  setLoading]  = useState(false);
-  const [error,    setError]    = useState("");
-  const [fileName, setFileName] = useState("");
+function StepEmpresa({ token, onDone }) {
+  const [mode,    setMode]    = useState("pdf"); // "pdf" | "manual"
+  const [loading, setLoading] = useState(false);
+  const [error,   setError]   = useState("");
+  const [fiscal,  setFiscal]  = useState({ rfc: "", razon_social: "", regimen_fiscal: "", cp_fiscal: "", curp: "", obligaciones: [] });
+  const [preview, setPreview] = useState(null); // datos extraídos del PDF
+  const [dragging,setDragging]= useState(false);
   const fileRef = useRef();
+  const RFC_RE = /^[A-ZÑ&]{3,4}\d{6}[A-Z0-9]{3}$/i;
 
   async function procesarPDF(file) {
-    if (!file) return;
-    if (!file.name.toLowerCase().endsWith(".pdf")) { setError("El archivo debe ser PDF"); return; }
-    setFileName(file.name); setLoading(true); setError("");
+    if (!file || !file.name.toLowerCase().endsWith(".pdf")) { setError("El archivo debe ser PDF"); return; }
+    setLoading(true); setError("");
     try {
       const form = new FormData();
       form.append("archivo", file);
       const res  = await fetch(`${API}/api/v1/constancia/parsear`, { method: "POST", body: form });
       const data = await res.json();
-      if (!res.ok) { setError(data.detail ?? "Error al procesar el PDF"); setLoading(false); return; }
-      onNext(data);
+      if (!res.ok) { setError(data.detail ?? "Error al procesar el PDF"); return; }
+      setPreview(data);
+      setFiscal({
+        rfc:           data.rfc ?? "",
+        razon_social:  data.razon_social ?? "",
+        regimen_fiscal:(data.regimenes?.[0] ?? data.regimen_fiscal) ?? "",
+        cp_fiscal:     data.cp_fiscal ?? "",
+        curp:          data.curp ?? null,
+        obligaciones:  data.obligaciones ?? [],
+      });
+      setMode("confirm");
     } catch { setError("No se pudo conectar con el servidor"); }
     finally  { setLoading(false); }
   }
 
-  return (
+  async function vincularEmpresa() {
+    if (!RFC_RE.test(fiscal.rfc.trim())) { setError("RFC inválido — formato SAT"); return; }
+    if (!fiscal.razon_social.trim())     { setError("La razón social es requerida"); return; }
+    setLoading(true); setError("");
+    try {
+      const res  = await fetch(`${API}/api/v1/mis-empresas`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+        body: JSON.stringify({
+          rfc:           fiscal.rfc.trim().toUpperCase(),
+          razon_social:  fiscal.razon_social.trim(),
+          regimen_fiscal:fiscal.regimen_fiscal?.trim() || null,
+          cp_fiscal:     fiscal.cp_fiscal?.trim() || null,
+          curp:          fiscal.curp || null,
+          obligaciones:  fiscal.obligaciones,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setError(data.detail ?? "Error al registrar la empresa"); return; }
+      onDone({ empresa_id: data.empresa_id, rfc: data.rfc, razon_social: data.razon_social });
+    } catch { setError("No se pudo conectar con el servidor"); }
+    finally  { setLoading(false); }
+  }
+
+  // Vista: subir PDF
+  if (mode === "pdf") return (
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground leading-relaxed">
-        Sube tu <span className="text-foreground font-semibold">Constancia de Situación Fiscal</span> para
-        completar automáticamente los datos de tu empresa.
+        Sube la <span className="text-foreground font-semibold">Constancia de Situación Fiscal</span> de tu primer cliente para completar los datos automáticamente.
       </p>
-
       {error && <Alert variant="destructive"><AlertDescription>{error}</AlertDescription></Alert>}
-
-      {/* Zona drag & drop */}
       <div
         onDragOver={e => { e.preventDefault(); setDragging(true); }}
         onDragLeave={() => setDragging(false)}
@@ -132,17 +165,11 @@ function StepConstancia({ onNext, onManual }) {
           dragging ? "border-primary bg-primary/10" : "border-border hover:border-primary/40 hover:bg-secondary/50"
         )}
       >
-        <input ref={fileRef} type="file" accept=".pdf" className="hidden"
-          onChange={e => procesarPDF(e.target.files[0])} />
+        <input ref={fileRef} type="file" accept=".pdf" className="hidden" onChange={e => procesarPDF(e.target.files[0])} />
         {loading ? (
           <div className="space-y-2">
             <div className="w-10 h-10 rounded-full border-2 border-primary border-t-transparent animate-spin mx-auto" />
             <p className="text-sm font-mono text-muted-foreground">Extrayendo datos fiscales...</p>
-          </div>
-        ) : fileName ? (
-          <div className="space-y-2">
-            <CheckCircle2 className="w-10 h-10 text-primary mx-auto" />
-            <p className="text-sm font-mono text-primary font-semibold">{fileName}</p>
           </div>
         ) : (
           <div className="space-y-3">
@@ -154,89 +181,59 @@ function StepConstancia({ onNext, onManual }) {
           </div>
         )}
       </div>
-
       <div className="text-center">
-        <button onClick={onManual}
+        <button onClick={() => setMode("manual")}
           className="text-xs font-mono text-muted-foreground hover:text-primary underline underline-offset-4 transition-colors">
           Capturar datos manualmente →
         </button>
       </div>
     </div>
   );
-}
 
-function StepManual({ data, onChange, onNext, onBack }) {
-  const [error, setError] = useState("");
-  const RFC_RE = /^[A-ZÑ&]{3,4}\d{6}[A-Z0-9]{3}$/i;
-
-  function handleNext() {
-    if (!RFC_RE.test(data.rfc.trim())) { setError("RFC inválido — formato SAT"); return; }
-    if (!data.razon_social.trim())     { setError("La razón social es requerida"); return; }
-    setError(""); onNext();
-  }
-
-  return (
+  // Vista: captura manual
+  if (mode === "manual") return (
     <div className="space-y-4">
-      <p className="text-sm text-muted-foreground">Ingresa los datos fiscales manualmente.</p>
+      <p className="text-sm text-muted-foreground">Ingresa los datos fiscales del cliente.</p>
       {error && <Alert variant="destructive"><AlertDescription>{error}</AlertDescription></Alert>}
       <div><Label>RFC</Label>
-        <Input value={data.rfc} onChange={e => onChange("rfc", e.target.value.toUpperCase())} placeholder="XAXX010101000" maxLength={13} />
+        <Input value={fiscal.rfc} onChange={e => setFiscal(p => ({ ...p, rfc: e.target.value.toUpperCase() }))} placeholder="XAXX010101000" maxLength={13} />
       </div>
       <div><Label>Razón Social / Nombre</Label>
-        <Input value={data.razon_social} onChange={e => onChange("razon_social", e.target.value)} placeholder="EMPRESA SA DE CV" />
+        <Input value={fiscal.razon_social} onChange={e => setFiscal(p => ({ ...p, razon_social: e.target.value }))} placeholder="EMPRESA SA DE CV" />
       </div>
       <div><Label>Régimen Fiscal</Label>
-        <Input value={data.regimen_fiscal} onChange={e => onChange("regimen_fiscal", e.target.value)} placeholder="Ej. Régimen Simplificado de Confianza" />
+        <Input value={fiscal.regimen_fiscal} onChange={e => setFiscal(p => ({ ...p, regimen_fiscal: e.target.value }))} placeholder="Régimen Simplificado de Confianza" />
       </div>
       <div><Label>C.P. Fiscal</Label>
-        <Input value={data.cp_fiscal} onChange={e => onChange("cp_fiscal", e.target.value)} placeholder="00000" maxLength={5} />
+        <Input value={fiscal.cp_fiscal} onChange={e => setFiscal(p => ({ ...p, cp_fiscal: e.target.value }))} placeholder="00000" maxLength={5} />
       </div>
       <div className="flex gap-3 pt-2">
-        <Button variant="outline" onClick={onBack} className="flex-none">← Volver</Button>
-        <Button onClick={handleNext} className="flex-1">Continuar <ChevronRight className="w-4 h-4" /></Button>
+        <Button variant="outline" onClick={() => setMode("pdf")} className="flex-none">← Volver</Button>
+        <Button onClick={() => { setMode("confirm"); }} className="flex-1">
+          Continuar <ChevronRight className="w-4 h-4" />
+        </Button>
       </div>
     </div>
   );
-}
 
-function StepConfirmar({ creds, fiscal, onSubmit, onBack, loading }) {
-  const [rfc,         setRfc]         = useState(fiscal.rfc           ?? "");
-  const [razonSocial, setRazonSocial] = useState(fiscal.razon_social  ?? "");
-  const [regimen,     setRegimen]     = useState((fiscal.regimenes?.[0] ?? fiscal.regimen_fiscal) ?? "");
-  const [cp,          setCp]          = useState(fiscal.cp_fiscal     ?? "");
-  const [error,       setError]       = useState("");
-  const RFC_RE = /^[A-ZÑ&]{3,4}\d{6}[A-Z0-9]{3}$/i;
-
-  function handleSubmit() {
-    if (!RFC_RE.test(rfc.trim())) { setError("RFC inválido"); return; }
-    if (!razonSocial.trim())      { setError("Razón social requerida"); return; }
-    setError("");
-    onSubmit({ rfc: rfc.trim().toUpperCase(), razon_social: razonSocial.trim(), regimen_fiscal: regimen.trim(), cp_fiscal: cp.trim(), obligaciones: fiscal.obligaciones ?? [], curp: fiscal.curp ?? null });
-  }
-
+  // Vista: confirmar y registrar empresa
   return (
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground leading-relaxed">
-        Revisa y confirma los datos fiscales. Puedes editarlos antes de crear la cuenta.
+        Revisa y confirma los datos del cliente antes de registrarlo.
       </p>
-
-      {fiscal.regimenes?.length > 0 && (
-        <Alert variant="success">
-          <AlertDescription className="flex items-center gap-2">
-            <CheckCircle2 className="w-3.5 h-3.5" />
-            Datos extraídos del PDF · {fiscal.regimenes.length} régimen(es) detectado(s)
-          </AlertDescription>
-        </Alert>
+      {preview?.regimenes?.length > 0 && (
+        <Alert><AlertDescription className="flex items-center gap-2">
+          <CheckCircle2 className="w-3.5 h-3.5 text-primary" />
+          Datos extraídos del PDF · {preview.regimenes.length} régimen(es) detectado(s)
+        </AlertDescription></Alert>
       )}
-
       {error && <Alert variant="destructive"><AlertDescription>{error}</AlertDescription></Alert>}
-
       <div className="space-y-3">
-        <div><Label>RFC</Label><Input value={rfc} onChange={e => setRfc(e.target.value.toUpperCase())} maxLength={13} /></div>
-        <div><Label>Razón Social / Nombre</Label><Input value={razonSocial} onChange={e => setRazonSocial(e.target.value)} /></div>
-        <div><Label>Régimen Fiscal Principal</Label><Input value={regimen} onChange={e => setRegimen(e.target.value)} /></div>
-        <div><Label>C.P. Fiscal</Label><Input value={cp} onChange={e => setCp(e.target.value)} maxLength={5} /></div>
-
+        <div><Label>RFC</Label><Input value={fiscal.rfc} onChange={e => setFiscal(p => ({ ...p, rfc: e.target.value.toUpperCase() }))} maxLength={13} /></div>
+        <div><Label>Razón Social / Nombre</Label><Input value={fiscal.razon_social} onChange={e => setFiscal(p => ({ ...p, razon_social: e.target.value }))} /></div>
+        <div><Label>Régimen Fiscal</Label><Input value={fiscal.regimen_fiscal} onChange={e => setFiscal(p => ({ ...p, regimen_fiscal: e.target.value }))} /></div>
+        <div><Label>C.P. Fiscal</Label><Input value={fiscal.cp_fiscal} onChange={e => setFiscal(p => ({ ...p, cp_fiscal: e.target.value }))} maxLength={5} /></div>
         {fiscal.obligaciones?.length > 0 && (
           <div>
             <Label>Obligaciones detectadas</Label>
@@ -251,11 +248,10 @@ function StepConfirmar({ creds, fiscal, onSubmit, onBack, loading }) {
           </div>
         )}
       </div>
-
       <div className="flex gap-3 pt-2">
-        <Button variant="outline" onClick={onBack} disabled={loading} className="flex-none">← Volver</Button>
-        <Button onClick={handleSubmit} disabled={loading} className="flex-1" size="lg">
-          {loading ? "Creando cuenta..." : "Crear cuenta y empresa ✓"}
+        <Button variant="outline" onClick={() => setMode(preview ? "pdf" : "manual")} disabled={loading} className="flex-none">← Volver</Button>
+        <Button onClick={vincularEmpresa} disabled={loading} className="flex-1" size="lg">
+          {loading ? "Registrando..." : "Registrar empresa ✓"}
         </Button>
       </div>
     </div>
@@ -263,31 +259,36 @@ function StepConfirmar({ creds, fiscal, onSubmit, onBack, loading }) {
 }
 
 export default function RegisterPage({ onRegistered, onGoLogin }) {
-  const [step,          setStep]          = useState(0);
-  const [manual,        setManual]        = useState(false);
-  const [submitLoading, setSubmitLoading] = useState(false);
-  const [globalError,   setGlobalError]   = useState("");
-  const [creds,  setCreds]  = useState({ nombre: "", email: "", password: "", confirm: "" });
-  const [fiscal, setFiscal] = useState({ rfc: "", razon_social: "", regimen_fiscal: "", regimenes: [], obligaciones: [], cp_fiscal: "", curp: "" });
+  const [step,        setStep]        = useState(0);
+  const [submitLoading,setSubmitLoading]=useState(false);
+  const [globalError, setGlobalError] = useState("");
+  const [token,       setToken]       = useState(null);
+  const [userData,    setUserData]    = useState(null);
+  const [creds, setCreds] = useState({ nombre: "", email: "", password: "", confirm: "" });
 
-  function updateCreds(k, v)  { setCreds(p => ({ ...p, [k]: v })); }
-  function updateFiscal(k, v) { setFiscal(p => ({ ...p, [k]: v })); }
+  function updateCreds(k, v) { setCreds(p => ({ ...p, [k]: v })); }
 
-  async function handleRegister(fiscalData) {
+  async function handleRegisterUser() {
     setSubmitLoading(true); setGlobalError("");
     try {
       const res  = await fetch(`${API}/api/v1/auth/register`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: creds.email, password: creds.password, nombre: creds.nombre, ...fiscalData }),
+        body: JSON.stringify({ email: creds.email, password: creds.password, nombre: creds.nombre }),
       });
       const data = await res.json();
       if (!res.ok) { setGlobalError(data.detail ?? "Error al crear la cuenta"); return; }
-      onRegistered(data.access_token, { empresa_id: data.empresa_id, rfc: data.rfc, razon_social: data.razon_social });
+      setToken(data.access_token);
+      setUserData({ user_id: data.user_id, nombre: data.nombre, empresas: [] });
+      setStep(1);
     } catch { setGlobalError("No se pudo conectar con el servidor"); }
     finally  { setSubmitLoading(false); }
   }
 
-  const titles = ["Crea tu cuenta", "Constancia Fiscal", "Confirmar datos"];
+  function handleEmpresaVinculada(empresa) {
+    onRegistered(token, { ...userData, empresas: [empresa] });
+  }
+
+  const titles = ["Crea tu cuenta de contador", "Agrega tu primer cliente"];
 
   return (
     <div className="flex h-screen w-full overflow-hidden bg-background">
@@ -311,18 +312,17 @@ export default function RegisterPage({ onRegistered, onGoLogin }) {
           </div>
 
           <h2 className="font-display font-bold text-3xl text-foreground leading-tight mb-4">
-            Registro de<br /><span className="text-primary">empresa</span>
+            Registro de<br /><span className="text-primary">contador</span>
           </h2>
           <p className="text-sm text-muted-foreground leading-relaxed max-w-xs">
-            Ten a la mano tu <span className="text-foreground font-semibold">Constancia de Situación Fiscal</span> en PDF del SAT.
+            Una cuenta de contador. Múltiples empresas y personas físicas que administras desde un solo lugar.
           </p>
         </div>
 
         <div className="relative z-10 space-y-5">
           {[
-            { n:"1", t:"Crea tus credenciales",  d:"Email y contraseña" },
-            { n:"2", t:"Sube la Constancia SAT",  d:"PDF · extracción automática" },
-            { n:"3", t:"Confirma y comienza",     d:"Revisa los datos fiscales" },
+            { n:"1", t:"Crea tu cuenta",        d:"Email y contraseña de acceso" },
+            { n:"2", t:"Agrega tu primer cliente", d:"Constancia PDF o datos manuales" },
           ].map((s, i) => (
             <div key={s.n} className={cn("flex gap-3 items-start transition-opacity", i === step ? "opacity-100" : "opacity-40")}>
               <div className="w-6 h-6 rounded-full bg-primary/20 border border-primary/30 flex items-center justify-center text-[10px] font-bold font-mono text-primary flex-shrink-0">
@@ -355,21 +355,17 @@ export default function RegisterPage({ onRegistered, onGoLogin }) {
 
           {globalError && <Alert variant="destructive" className="mb-4"><AlertDescription>{globalError}</AlertDescription></Alert>}
 
-          {step === 0 && <StepCredenciales data={creds} onChange={updateCreds} onNext={() => setStep(1)} />}
-
-          {step === 1 && !manual && (
-            <StepConstancia
-              onNext={data => { setFiscal(p => ({ ...p, ...data })); setStep(2); }}
-              onManual={() => setManual(true)}
+          {step === 0 && (
+            <StepCredenciales
+              data={creds}
+              onChange={updateCreds}
+              onNext={handleRegisterUser}
+              loading={submitLoading}
             />
           )}
 
-          {step === 1 && manual && (
-            <StepManual data={fiscal} onChange={updateFiscal} onNext={() => setStep(2)} onBack={() => setManual(false)} />
-          )}
-
-          {step === 2 && (
-            <StepConfirmar creds={creds} fiscal={fiscal} loading={submitLoading} onSubmit={handleRegister} onBack={() => setStep(1)} />
+          {step === 1 && (
+            <StepEmpresa token={token} onDone={handleEmpresaVinculada} />
           )}
 
           {step === 0 && (

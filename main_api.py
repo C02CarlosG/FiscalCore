@@ -113,6 +113,9 @@ class RegisterRequest(BaseModel):
     email: str
     password: str
     nombre: Optional[str] = None
+
+
+class AgregarEmpresaRequest(BaseModel):
     rfc: str
     razon_social: str
     regimen_fiscal: Optional[str] = None
@@ -177,6 +180,15 @@ def _empresa_or_404(empresa_id: str) -> dict:
     return row
 
 
+def _validar_acceso_empresa(empresa_id: str, current_user: dict) -> None:
+    row = db.query_one(
+        "SELECT 1 FROM usuario_empresas WHERE usuario_id = %s AND empresa_id = %s",
+        (current_user["user_id"], empresa_id),
+    )
+    if not row:
+        raise HTTPException(status_code=403, detail="Sin acceso a esta empresa")
+
+
 def _serializar(obj: dict) -> dict:
     """Convierte Decimal y datetime a tipos JSON-serializables."""
     result = {}
@@ -205,94 +217,84 @@ async def raiz():
 
 @app.post("/api/v1/auth/register", status_code=status.HTTP_201_CREATED, tags=["Auth"])
 async def registrar(data: RegisterRequest):
-    """Crea una empresa y su usuario asociado. Retorna JWT."""
-    # Validar que RFC no exista
-    existente = db.query_one("SELECT id FROM empresas WHERE rfc = %s", (data.rfc,))
-    if existente:
-        raise HTTPException(status_code=409, detail=f"El RFC {data.rfc} ya está registrado")
-
+    """Registra un contador (usuario). Retorna JWT. Las empresas se agregan después con POST /mis-empresas."""
     email_existente = db.query_one("SELECT id FROM usuarios WHERE email = %s", (data.email,))
     if email_existente:
         raise HTTPException(status_code=409, detail="El correo ya está registrado")
 
-    try:
-        empresa = db.execute(
-            """
-            INSERT INTO empresas (rfc, razon_social, regimen_fiscal, email, cp_fiscal, curp, obligaciones)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
-            RETURNING *
-            """,
-            (
-                data.rfc, data.razon_social, data.regimen_fiscal,
-                data.email, data.cp_fiscal, data.curp,
-                json.dumps(data.obligaciones) if data.obligaciones else None,
-            ),
-            returning=True,
-        )
-    except psycopg2.errors.UniqueViolation:
-        raise HTTPException(status_code=409, detail=f"RFC {data.rfc} ya existe")
-
     password_hash = _hash_password(data.password)
     usuario = db.execute(
-        """
-        INSERT INTO usuarios (empresa_id, email, password_hash, nombre)
-        VALUES (%s, %s, %s, %s)
-        RETURNING *
-        """,
-        (str(empresa["id"]), data.email, password_hash, data.nombre),
+        "INSERT INTO usuarios (email, password_hash, nombre) VALUES (%s, %s, %s) RETURNING *",
+        (data.email, password_hash, data.nombre),
         returning=True,
     )
 
-    token = _crear_token({
-        "user_id":    str(usuario["id"]),
-        "empresa_id": str(empresa["id"]),
-        "email":      data.email,
-    })
+    token = _crear_token({"user_id": str(usuario["id"]), "email": data.email})
 
     return {
         "access_token": token,
-        "token_type": "bearer",
-        "empresa_id": str(empresa["id"]),
-        "rfc": empresa["rfc"],
-        "razon_social": empresa["razon_social"],
+        "token_type":   "bearer",
+        "user_id":      str(usuario["id"]),
+        "email":        data.email,
+        "nombre":       data.nombre,
+        "empresas":     [],
     }
 
 
 @app.post("/api/v1/auth/login", tags=["Auth"])
 async def login(data: LoginRequest):
-    """Autentica un usuario y retorna JWT."""
+    """Autentica un contador y retorna JWT + lista de empresas que administra."""
     usuario = db.query_one(
-        "SELECT u.*, e.rfc, e.razon_social FROM usuarios u JOIN empresas e ON e.id = u.empresa_id WHERE u.email = %s AND u.activo = TRUE",
+        "SELECT * FROM usuarios WHERE email = %s AND activo = TRUE",
         (data.email,),
     )
     if not usuario or not _verify_password(data.password, usuario["password_hash"]):
         raise HTTPException(status_code=401, detail="Credenciales incorrectas")
 
-    token = _crear_token({
-        "user_id":    str(usuario["id"]),
-        "empresa_id": str(usuario["empresa_id"]),
-        "email":      data.email,
-    })
+    empresas = db.query_all(
+        """
+        SELECT e.id AS empresa_id, e.rfc, e.razon_social, e.regimen_fiscal
+        FROM empresas e
+        JOIN usuario_empresas ue ON ue.empresa_id = e.id
+        WHERE ue.usuario_id = %s AND e.activo = TRUE
+        ORDER BY ue.created_at ASC
+        """,
+        (str(usuario["id"]),),
+    )
+
+    token = _crear_token({"user_id": str(usuario["id"]), "email": data.email})
 
     return {
         "access_token": token,
-        "token_type": "bearer",
-        "empresa_id": str(usuario["empresa_id"]),
-        "rfc": usuario["rfc"],
-        "razon_social": usuario["razon_social"],
+        "token_type":   "bearer",
+        "user_id":      str(usuario["id"]),
+        "nombre":       usuario.get("nombre"),
+        "empresas":     [_serializar(e) for e in empresas],
     }
 
 
 @app.get("/api/v1/auth/me", tags=["Auth"])
 async def me(current_user: dict = Depends(_get_current_user)):
-    """Retorna info del usuario autenticado."""
+    """Retorna info del usuario autenticado y sus empresas."""
     usuario = db.query_one(
-        "SELECT u.id, u.email, u.nombre, u.empresa_id, e.rfc, e.razon_social, e.regimen_fiscal FROM usuarios u JOIN empresas e ON e.id = u.empresa_id WHERE u.id = %s",
+        "SELECT id, email, nombre FROM usuarios WHERE id = %s",
         (current_user["user_id"],),
     )
     if not usuario:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
-    return _serializar(usuario)
+
+    empresas = db.query_all(
+        """
+        SELECT e.id AS empresa_id, e.rfc, e.razon_social, e.regimen_fiscal
+        FROM empresas e
+        JOIN usuario_empresas ue ON ue.empresa_id = e.id
+        WHERE ue.usuario_id = %s AND e.activo = TRUE
+        ORDER BY ue.created_at ASC
+        """,
+        (current_user["user_id"],),
+    )
+
+    return {**_serializar(usuario), "empresas": [_serializar(e) for e in empresas]}
 
 
 # ── Constancia ────────────────────────────────────────────────
@@ -325,37 +327,77 @@ async def parsear_constancia_pdf(archivo: UploadFile = File(...)):
 # ── Empresas ─────────────────────────────────────────────────
 
 @app.get("/api/v1/empresas", tags=["Empresas"])
-async def listar_empresas():
-    rows = db.query_all("SELECT * FROM empresas WHERE activo = TRUE ORDER BY created_at DESC")
+async def listar_empresas(current_user: dict = Depends(_get_current_user)):
+    """Retorna las empresas que administra el contador autenticado."""
+    rows = db.query_all(
+        """
+        SELECT e.* FROM empresas e
+        JOIN usuario_empresas ue ON ue.empresa_id = e.id
+        WHERE ue.usuario_id = %s AND e.activo = TRUE
+        ORDER BY ue.created_at ASC
+        """,
+        (current_user["user_id"],),
+    )
     return [_serializar(r) for r in rows]
 
 
-@app.post("/api/v1/empresas", status_code=status.HTTP_201_CREATED, tags=["Empresas"])
-async def crear_empresa(data: EmpresaCreate):
-    try:
-        row = db.execute(
-            """
-            INSERT INTO empresas (rfc, razon_social, regimen_fiscal, email)
-            VALUES (%s, %s, %s, %s)
-            RETURNING *
-            """,
-            (data.rfc, data.razon_social, data.regimen_fiscal, data.email),
-            returning=True,
+@app.post("/api/v1/mis-empresas", status_code=status.HTTP_201_CREATED, tags=["Empresas"])
+async def agregar_empresa(
+    data: AgregarEmpresaRequest,
+    current_user: dict = Depends(_get_current_user),
+):
+    """Crea (o encuentra por RFC) una empresa y la vincula al contador autenticado."""
+    # Si ya existe empresa con ese RFC, reutilizarla
+    empresa = db.query_one("SELECT * FROM empresas WHERE rfc = %s", (data.rfc,))
+
+    if not empresa:
+        try:
+            empresa = db.execute(
+                """
+                INSERT INTO empresas (rfc, razon_social, regimen_fiscal, cp_fiscal, curp, obligaciones)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                RETURNING *
+                """,
+                (
+                    data.rfc, data.razon_social, data.regimen_fiscal,
+                    data.cp_fiscal, data.curp,
+                    json.dumps(data.obligaciones) if data.obligaciones else None,
+                ),
+                returning=True,
+            )
+        except psycopg2.errors.UniqueViolation:
+            empresa = db.query_one("SELECT * FROM empresas WHERE rfc = %s", (data.rfc,))
+
+    # Vincular al usuario (idempotente)
+    ya_vinculada = db.query_one(
+        "SELECT 1 FROM usuario_empresas WHERE usuario_id = %s AND empresa_id = %s",
+        (current_user["user_id"], str(empresa["id"])),
+    )
+    if not ya_vinculada:
+        db.execute(
+            "INSERT INTO usuario_empresas (usuario_id, empresa_id) VALUES (%s, %s)",
+            (current_user["user_id"], str(empresa["id"])),
         )
-    except psycopg2.errors.UniqueViolation:
-        raise HTTPException(status_code=409, detail=f"RFC {data.rfc} ya existe")
-    return {"mensaje": "Empresa creada", "empresa": _serializar(row)}
+
+    return {
+        "mensaje":    "Empresa vinculada correctamente",
+        "empresa_id": str(empresa["id"]),
+        "rfc":        empresa["rfc"],
+        "razon_social": empresa["razon_social"],
+    }
 
 
 @app.get("/api/v1/empresas/{empresa_id}", tags=["Empresas"])
-async def obtener_empresa(empresa_id: str):
+async def obtener_empresa(empresa_id: str, current_user: dict = Depends(_get_current_user)):
+    _validar_acceso_empresa(empresa_id, current_user)
     return _serializar(_empresa_or_404(empresa_id))
 
 
 # ── Dashboard ─────────────────────────────────────────────────
 
 @app.get("/api/v1/dashboard/{empresa_id}", tags=["Dashboard"])
-async def dashboard(empresa_id: str, periodo: Optional[str] = None):
+async def dashboard(empresa_id: str, periodo: Optional[str] = None, current_user: dict = Depends(_get_current_user)):
+    _validar_acceso_empresa(empresa_id, current_user)
     empresa = _empresa_or_404(empresa_id)
 
     # Scoring más reciente (o del período solicitado)
@@ -457,7 +499,9 @@ async def subir_cfdi(
     empresa_id: str,
     archivos: list[UploadFile] = File(...),
     periodo: str = Form(...),
+    current_user: dict = Depends(_get_current_user),
 ):
+    _validar_acceso_empresa(empresa_id, current_user)
     empresa = _empresa_or_404(empresa_id)
     from cfdi_parser import CFDIParser
     parser = CFDIParser()
@@ -623,7 +667,9 @@ async def subir_estado_cuenta(
     archivo: UploadFile = File(...),
     banco: str = Form(...),
     periodo: str = Form(...),
+    current_user: dict = Depends(_get_current_user),
 ):
+    _validar_acceso_empresa(empresa_id, current_user)
     empresa = _empresa_or_404(empresa_id)
     from banco_parser import BancoParser
     parser = BancoParser()
@@ -890,7 +936,9 @@ async def listar_riesgos(
     periodo: Optional[str] = None,
     severidad: Optional[str] = None,
     estado: str = "abierto",
+    current_user: dict = Depends(_get_current_user),
 ):
+    _validar_acceso_empresa(empresa_id, current_user)
     _empresa_or_404(empresa_id)
 
     sql = """
@@ -943,7 +991,8 @@ async def resolver_riesgo(riesgo_id: str, notas: str = ""):
 # ── Scoring ───────────────────────────────────────────────────
 
 @app.get("/api/v1/empresas/{empresa_id}/scoring", tags=["Scoring"])
-async def obtener_scoring(empresa_id: str, periodo: Optional[str] = None):
+async def obtener_scoring(empresa_id: str, periodo: Optional[str] = None, current_user: dict = Depends(_get_current_user)):
+    _validar_acceso_empresa(empresa_id, current_user)
     _empresa_or_404(empresa_id)
     if periodo:
         row = db.query_one(
@@ -961,7 +1010,8 @@ async def obtener_scoring(empresa_id: str, periodo: Optional[str] = None):
 
 
 @app.get("/api/v1/empresas/{empresa_id}/scoring/historial", tags=["Scoring"])
-async def historial_scoring(empresa_id: str):
+async def historial_scoring(empresa_id: str, current_user: dict = Depends(_get_current_user)):
+    _validar_acceso_empresa(empresa_id, current_user)
     _empresa_or_404(empresa_id)
     rows = db.query_all(
         "SELECT periodo, score_total AS score, clasificacion FROM scoring_fiscal WHERE empresa_id = %s ORDER BY periodo",
@@ -973,7 +1023,8 @@ async def historial_scoring(empresa_id: str):
 # ── Conciliación ──────────────────────────────────────────────
 
 @app.get("/api/v1/empresas/{empresa_id}/conciliaciones", tags=["Conciliación"])
-async def listar_conciliaciones(empresa_id: str, periodo: Optional[str] = None):
+async def listar_conciliaciones(empresa_id: str, periodo: Optional[str] = None, current_user: dict = Depends(_get_current_user)):
+    _validar_acceso_empresa(empresa_id, current_user)
     _empresa_or_404(empresa_id)
 
     sql = "SELECT tipo_match, COUNT(*) AS total FROM conciliaciones WHERE empresa_id = %s"
@@ -1048,11 +1099,12 @@ async def ejecutar_accion(deteccion_id: str, body: AccionRequest):
 # ── Vista de cierre mensual ───────────────────────────────────
 
 @app.get("/api/v1/empresas/{empresa_id}/cierre/{periodo}", tags=["Cierre"])
-async def vista_cierre(empresa_id: str, periodo: str):
+async def vista_cierre(empresa_id: str, periodo: str, current_user: dict = Depends(_get_current_user)):
     """
     Vista consolidada para el cierre mensual.
     Responde: ¿Puedo cerrar? / ¿Qué me falta? / ¿Qué hago hoy?
     """
+    _validar_acceso_empresa(empresa_id, current_user)
     _empresa_or_404(empresa_id)
 
     # Detecciones accionables (abierto, pendiente, en_revision, en_espera_cfdi)
@@ -1182,8 +1234,9 @@ async def vista_cierre(empresa_id: str, periodo: str):
 # ── Conciliaciones accionables ────────────────────────────────
 
 @app.get("/api/v1/empresas/{empresa_id}/conciliaciones/accionables", tags=["Conciliación"])
-async def conciliaciones_accionables(empresa_id: str, periodo: Optional[str] = None):
+async def conciliaciones_accionables(empresa_id: str, periodo: Optional[str] = None, current_user: dict = Depends(_get_current_user)):
     """Pares sin_cfdi y parciales con contexto del movimiento bancario."""
+    _validar_acceso_empresa(empresa_id, current_user)
     _empresa_or_404(empresa_id)
 
     sql = """

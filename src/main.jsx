@@ -1,7 +1,7 @@
 import "./index.css";
 import { StrictMode, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { isLoggedIn, saveAuth, clearAuth, getEmpresaId, getEmpresaData } from "./auth.js";
+import { isLoggedIn, saveAuth, clearAuth, getEmpresaId, getEmpresaData, getEmpresas } from "./auth.js";
 import LoginPage    from "./LoginPage.jsx";
 import RegisterPage from "./RegisterPage.jsx";
 import AuditoriaFiscal from "../AuditoriaFiscalDashboard.jsx";
@@ -31,6 +31,7 @@ function App() {
     <AuditoriaFiscal
       empresaId={getEmpresaId()}
       empresaData={getEmpresaData()}
+      empresas={getEmpresas()}
       onLogout={handleLogout}
     />
   );

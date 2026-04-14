@@ -1,23 +1,39 @@
-const KEY_TOKEN   = "fc_token";
-const KEY_EMPRESA = "fc_empresa";
+const KEY_TOKEN = "fc_token";
+const KEY_USER  = "fc_user";   // { user_id, nombre, empresas: [] }
 
-export function saveAuth(token, empresaData) {
+export function saveAuth(token, userData) {
   localStorage.setItem(KEY_TOKEN, token);
-  localStorage.setItem(KEY_EMPRESA, JSON.stringify(empresaData));
+  localStorage.setItem(KEY_USER,  JSON.stringify(userData));
 }
 
 export function getToken() {
   return localStorage.getItem(KEY_TOKEN);
 }
 
-export function getEmpresaData() {
-  const raw = localStorage.getItem(KEY_EMPRESA);
+export function getUser() {
+  const raw = localStorage.getItem(KEY_USER);
   if (!raw) return null;
   try { return JSON.parse(raw); } catch { return null; }
 }
 
+export function getEmpresas() {
+  return getUser()?.empresas ?? [];
+}
+
+// Retorna la empresa activa (primera por defecto, o la que el usuario seleccionó)
 export function getEmpresaId() {
-  return getEmpresaData()?.empresa_id ?? null;
+  const activa = localStorage.getItem("fc_empresa_activa");
+  if (activa) return activa;
+  return getEmpresas()[0]?.empresa_id ?? null;
+}
+
+export function setEmpresaActiva(empresaId) {
+  localStorage.setItem("fc_empresa_activa", empresaId);
+}
+
+export function getEmpresaData() {
+  const id = getEmpresaId();
+  return getEmpresas().find(e => e.empresa_id === id) ?? getEmpresas()[0] ?? null;
 }
 
 export function isLoggedIn() {
@@ -33,5 +49,6 @@ export function isLoggedIn() {
 
 export function clearAuth() {
   localStorage.removeItem(KEY_TOKEN);
-  localStorage.removeItem(KEY_EMPRESA);
+  localStorage.removeItem(KEY_USER);
+  localStorage.removeItem("fc_empresa_activa");
 }
