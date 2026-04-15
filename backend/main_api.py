@@ -15,7 +15,7 @@ from typing import Optional
 
 import psycopg2
 import psycopg2.extras
-from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile, status
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, field_validator
@@ -581,14 +581,16 @@ async def subir_cfdi(
                     subtotal, descuento, iva_trasladado, iva_retenido, isr_retenido, total,
                     metodo_pago, forma_pago, uso_cfdi, moneda, tipo_cambio, xml_raw,
                     exportacion, lugar_expedicion,
-                    domicilio_fiscal_receptor, regimen_fiscal_receptor
+                    domicilio_fiscal_receptor, regimen_fiscal_receptor,
+                    cfdi_relacionados
                 ) VALUES (
                     %s,%s,%s,%s,%s,%s,
                     %s,%s,%s,%s,
                     %s,%s,
                     %s,%s,%s,%s,%s,%s,
                     %s,%s,%s,%s,%s,%s,
-                    %s,%s,%s,%s
+                    %s,%s,%s,%s,
+                    %s
                 )
                 ON CONFLICT (uuid) DO NOTHING
                 """,
@@ -609,6 +611,7 @@ async def subir_cfdi(
                     resultado.lugar_expedicion,
                     resultado.domicilio_fiscal_receptor,
                     resultado.regimen_fiscal_receptor,
+                    json.dumps(resultado.cfdi_relacionados),
                 ),
             )
 
@@ -1312,6 +1315,177 @@ async def conciliaciones_accionables(empresa_id: str, periodo: Optional[str] = N
 
     rows = db.query_all(sql, tuple(params))
     return {"total": len(rows), "pares": [_serializar(r) for r in rows]}
+
+
+# ── Módulo Emitidos ──────────────────────────────────────────
+
+@app.get("/api/v1/empresas/{empresa_id}/emitidos", tags=["Emitidos"])
+async def get_emitidos(
+    empresa_id: str,
+    periodo: str = Query(..., description="Período en formato YYYY-MM"),
+    current_user: dict = Depends(_get_current_user),
+):
+    """
+    Retorna los CFDIs emitidos por la empresa en el período, organizados en secciones
+    con lógica de anticipos (TipoRelacion=07).
+    """
+    _validar_acceso_empresa(empresa_id, current_user)
+    empresa = _empresa_or_404(empresa_id)
+
+    año, mes = periodo.split("-")
+    inicio = f"{año}-{mes}-01"
+    import calendar
+    ultimo = calendar.monthrange(int(año), int(mes))[1]
+    fin = f"{año}-{mes}-{ultimo:02d}"
+
+    # CFDIs emitidos (rfc_emisor = RFC de la empresa) del período
+    rows = db.query_all(
+        """
+        SELECT uuid, tipo_comprobante, serie, folio, fecha_emision::date AS fecha,
+               rfc_receptor, nombre_receptor, subtotal, descuento, total,
+               iva_trasladado, metodo_pago, forma_pago, uso_cfdi, moneda,
+               estado, estado_pago, cfdi_relacionados
+        FROM cfdi
+        WHERE empresa_id = %s
+          AND rfc_emisor = %s
+          AND fecha_emision::date BETWEEN %s AND %s
+          AND tipo_comprobante IN ('I', 'E')
+        ORDER BY fecha_emision ASC
+        """,
+        (empresa_id, empresa["rfc"], inicio, fin),
+    )
+
+    ingresos_raw = [r for r in rows if r["tipo_comprobante"] == "I"]
+    egresos_raw  = [r for r in rows if r["tipo_comprobante"] == "E"]
+
+    # ── Calcular flags de anticipos ──────────────────────────
+    # Los UUIDs de ingresos que son anticipos = UUIDs referenciados por
+    # algún egreso con tipo_relacion="07"
+    uuids_anticipos: set[str] = set()
+    for egr in egresos_raw:
+        for rel in (egr["cfdi_relacionados"] or []):
+            if rel.get("tipo_relacion") == "07":
+                uuids_anticipos.update(u.upper() for u in rel.get("uuids", []))
+
+    # UUIDs de ingresos finales (facturas que aplican anticipo)
+    # = ingresos que en su propio cfdi_relacionados tienen tipo_relacion="07"
+    uuids_facturas_con_anticipo: set[str] = set()
+    for ing in ingresos_raw:
+        for rel in (ing["cfdi_relacionados"] or []):
+            if rel.get("tipo_relacion") == "07":
+                uuids_facturas_con_anticipo.add(ing["uuid"].upper())
+
+    # ── Serializar ingresos ──────────────────────────────────
+    def _cfdi_row(r: dict, es_anticipo=False, es_factura_con_anticipo=False) -> dict:
+        return {
+            "uuid":                    r["uuid"],
+            "serie_folio":             f"{r['serie'] or ''}{r['folio'] or ''}".strip() or None,
+            "fecha":                   str(r["fecha"]),
+            "rfc_receptor":            r["rfc_receptor"],
+            "nombre_receptor":         r["nombre_receptor"],
+            "subtotal":                float(r["subtotal"] or 0),
+            "descuento":               float(r["descuento"] or 0),
+            "total":                   float(r["total"] or 0),
+            "iva":                     float(r["iva_trasladado"] or 0),
+            "metodo_pago":             r["metodo_pago"],
+            "forma_pago":              r["forma_pago"],
+            "uso_cfdi":                r["uso_cfdi"],
+            "moneda":                  r["moneda"],
+            "estado":                  r["estado"],
+            "estado_pago":             r["estado_pago"],
+            "cfdi_relacionados":       r["cfdi_relacionados"] or [],
+            "es_anticipo":             es_anticipo,
+            "es_factura_con_anticipo": es_factura_con_anticipo,
+        }
+
+    ventas_servicios     = []
+    anticipos            = []
+    facturas_con_anticipo = []
+
+    for ing in ingresos_raw:
+        uuid_upper = ing["uuid"].upper()
+        if uuid_upper in uuids_anticipos:
+            anticipos.append(_cfdi_row(ing, es_anticipo=True))
+        elif uuid_upper in uuids_facturas_con_anticipo:
+            facturas_con_anticipo.append(_cfdi_row(ing, es_factura_con_anticipo=True))
+        else:
+            ventas_servicios.append(_cfdi_row(ing))
+
+    notas_credito         = []
+    aplicaciones_anticipo = []
+
+    for egr in egresos_raw:
+        tiene_rel07 = any(
+            rel.get("tipo_relacion") == "07"
+            for rel in (egr["cfdi_relacionados"] or [])
+        )
+        if tiene_rel07:
+            aplicaciones_anticipo.append(_cfdi_row(egr))
+        else:
+            notas_credito.append(_cfdi_row(egr))
+
+    # ── Advertencias ─────────────────────────────────────────
+    # Facturas con anticipo (tipo_relacion=07 en ingreso) que NO tienen
+    # su CFDI Egreso de aplicación en el mismo período
+    uuids_anticipos_aplicados_por_egreso: set[str] = set()
+    for egr in egresos_raw:
+        for rel in (egr["cfdi_relacionados"] or []):
+            if rel.get("tipo_relacion") == "07":
+                uuids_anticipos_aplicados_por_egreso.update(
+                    u.upper() for u in rel.get("uuids", [])
+                )
+
+    advertencias = []
+    for ing in facturas_con_anticipo:
+        # Obtener los UUIDs de anticipos que referencia esta factura
+        uuids_ref = [
+            u.upper()
+            for rel in ing["cfdi_relacionados"]
+            if rel.get("tipo_relacion") == "07"
+            for u in rel.get("uuids", [])
+        ]
+        uuids_sin_egreso = [u for u in uuids_ref if u not in uuids_anticipos_aplicados_por_egreso]
+        if uuids_sin_egreso:
+            advertencias.append({
+                "tipo":    "sin_egreso_anticipo",
+                "uuid_factura": ing["uuid"],
+                "uuids_anticipos_sin_egreso": uuids_sin_egreso,
+                "mensaje": f"La factura {ing['uuid'][:8]}… aplica anticipo(s) pero no se encontró el CFDI Egreso correspondiente en el período",
+            })
+
+    # ── Resumen ──────────────────────────────────────────────
+    from decimal import Decimal as D
+    total_ventas         = sum(D(str(i["total"])) for i in ventas_servicios)
+    total_fact_anticipo  = sum(D(str(i["total"])) for i in facturas_con_anticipo)
+    total_anticipos_acum = sum(D(str(i["total"])) for i in anticipos)
+    total_aplicaciones   = sum(D(str(e["total"])) for e in aplicaciones_anticipo)
+    ingreso_neto         = total_ventas + total_fact_anticipo - total_aplicaciones
+
+    return {
+        "periodo": periodo,
+        "empresa_rfc": empresa["rfc"],
+        "resumen": {
+            "total_ingresos":             float(total_ventas),
+            "total_facturas_con_anticipo": float(total_fact_anticipo),
+            "total_anticipos_acumulados": float(total_anticipos_acum),
+            "total_aplicaciones_anticipo": float(total_aplicaciones),
+            "ingreso_neto_periodo":        float(ingreso_neto),
+            "num_ingresos":               len(ventas_servicios),
+            "num_anticipos":              len(anticipos),
+            "num_facturas_con_anticipo":  len(facturas_con_anticipo),
+            "num_egresos":                len(notas_credito) + len(aplicaciones_anticipo),
+            "advertencias":               advertencias,
+        },
+        "ingresos": {
+            "ventas_servicios":      ventas_servicios,
+            "anticipos":             anticipos,
+            "facturas_con_anticipo": facturas_con_anticipo,
+        },
+        "egresos": {
+            "notas_credito":         notas_credito,
+            "aplicaciones_anticipo": aplicaciones_anticipo,
+        },
+    }
 
 
 if __name__ == "__main__":

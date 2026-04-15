@@ -119,6 +119,11 @@ class CFDIParsed:
     # Complemento de Pago (solo si tipo_comprobante == "P")
     pagos: list[PagoCFDI] = field(default_factory=list)
 
+    # CFDIs relacionados (nodo CfdiRelacionados del XML)
+    # Formato: [{"tipo_relacion": "07", "uuids": ["uuid1", ...]}, ...]
+    # TipoRelacion relevantes: "01"=nota crédito, "07"=aplicación anticipo
+    cfdi_relacionados: list[dict] = field(default_factory=list)
+
     @property
     def es_ingreso(self) -> bool:
         return self.tipo_comprobante == "I"
@@ -221,6 +226,9 @@ class CFDIParser:
         # Extraer Complemento de Pago si es tipo P
         if parsed.tipo_comprobante == "P":
             parsed.pagos = self._extraer_pagos(root)
+
+        # Extraer CfdiRelacionados (siempre — anticipos, notas de crédito, etc.)
+        parsed.cfdi_relacionados = self._extraer_cfdi_relacionados(root, ns_cfdi)
 
         return parsed
 
@@ -332,6 +340,30 @@ class CFDIParser:
                     errores.append("AVISO: Falta RegimenFiscalReceptor (requerido en CFDI 4.0)")
 
         return errores
+
+    def _extraer_cfdi_relacionados(self, root, ns_cfdi: str) -> list[dict]:
+        """
+        Extrae nodos CfdiRelacionados del XML.
+        Retorna lista de dicts: [{"tipo_relacion": "07", "uuids": ["uuid1", ...]}, ...]
+
+        TipoRelacion relevantes:
+          "01" = Nota de crédito
+          "02" = Nota de débito
+          "03" = Devolución de mercancía
+          "04" = Sustitución de CFDI
+          "07" = CFDI por aplicación de anticipos  ← el más importante para nosotros
+        """
+        resultado = []
+        for nodo in root.findall(f"{ns_cfdi}CfdiRelacionados"):
+            tipo_relacion = nodo.get("TipoRelacion", "")
+            uuids = [
+                rel.get("UUID", "").upper()
+                for rel in nodo.findall(f"{ns_cfdi}CfdiRelacionado")
+                if rel.get("UUID")
+            ]
+            if uuids:
+                resultado.append({"tipo_relacion": tipo_relacion, "uuids": uuids})
+        return resultado
 
     def _extraer_pagos(self, root) -> list[PagoCFDI]:
         """Extrae nodos pago20:Pago del Complemento de Pago 2.0 (fallback a 1.0)."""

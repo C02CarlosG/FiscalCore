@@ -150,6 +150,9 @@ def init_db() -> None:
         # 013 es idempotente — perfil extendido del contador: telefono, rfc, nombre_despacho, cedula
         _run_sql_file("013_perfil_contador.sql")
 
+        # 014 es idempotente — cfdi_relacionados JSONB en cfdi (TipoRelacion + UUIDs para anticipos)
+        _run_sql_file("014_cfdi_relacionados.sql")
+
     except Exception as e:
         log.error("DB: init_db falló: %s", e)
         raise

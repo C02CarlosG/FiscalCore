@@ -169,6 +169,14 @@ function parseCFDI(xmlText, filename) {
     const rets=rootImp?[...rootImp.getElementsByTagNameNS(NS4,"Retencion")]:[];
     const isrRet=rets.filter(r=>a(r,"Impuesto")==="001").reduce((s,r)=>s+nf(r,"Importe"),0);
     const ivaRet=rets.filter(r=>a(r,"Impuesto")==="002").reduce((s,r)=>s+nf(r,"Importe"),0);
+    // CfdiRelacionados (anticipos, notas de crédito, etc.)
+    const cfdiRelacionados = [];
+    doc.querySelectorAll("CfdiRelacionados").forEach(nodo => {
+      const tipo = nodo.getAttribute("TipoRelacion") ?? "";
+      const uuids = [...nodo.querySelectorAll("CfdiRelacionado")]
+        .map(r => r.getAttribute("UUID")).filter(Boolean);
+      if (uuids.length) cfdiRelacionados.push({ tipo_relacion: tipo, uuids });
+    });
     return {
       filename, tipo:a(comp,"TipoDeComprobante"), fecha:a(comp,"Fecha"),
       uuid:a(tfd,"UUID"), rfcEmisor:a(emisor,"Rfc"), nombreEmisor:a(emisor,"Nombre"),
@@ -179,6 +187,7 @@ function parseCFDI(xmlText, filename) {
       esGlobal:!!infGlobal,
       globalPeriodicidad:a(infGlobal,"Periodicidad"),globalMeses:a(infGlobal,"Meses"),globalAno:a(infGlobal,"Año"),
       esPublicoGeneral:a(receptor,"Rfc")==="XAXX010101000",
+      cfdiRelacionados,
     };
   } catch(_){ return null; }
 }
@@ -262,13 +271,16 @@ export default function AuditoriaFiscal({ empresaId: empresaIdProp = null, empre
   const [uploadState, setUploadState] = useState({ cfdi:false, banco:false });
   const [uploadMsg, setUploadMsg]   = useState("");
   const [diagnostico, setDiagnostico] = useState([]);
+  const [emitidosData, setEmitidosData] = useState(null);   // respuesta de /emitidos
+  const [loadingEmitidos, setLoadingEmitidos] = useState(false);
   const [periodoUpload, setPeriodoUpload] = useState(() => {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
   });
 
-  const cfdiRef  = useRef(null);
-  const bancoRef = useRef(null);
+  const cfdiRef     = useRef(null);
+  const bancoRef    = useRef(null);
+  const emitidosRef = useRef(null);
 
   const periodoActual = periodoUpload;
 
@@ -303,6 +315,17 @@ export default function AuditoriaFiscal({ empresaId: empresaIdProp = null, empre
     } catch(_) {}
   }, []);
 
+  const fetchEmitidos = useCallback(async (eid, periodo) => {
+    if (!eid) return;
+    setLoadingEmitidos(true);
+    try {
+      const res = await fetch(`${API_URL}/api/v1/empresas/${eid}/emitidos?periodo=${periodo}`, { headers: authHeaders() });
+      if (res.ok) setEmitidosData(await res.json());
+      else setEmitidosData(null);
+    } catch(_) { setEmitidosData(null); }
+    finally { setLoadingEmitidos(false); }
+  }, []);
+
   useEffect(() => {
     const init = async () => {
       setLoading(true);
@@ -316,6 +339,7 @@ export default function AuditoriaFiscal({ empresaId: empresaIdProp = null, empre
           fetchCierre(eid, periodoActual),
           fetchLegacy(eid),
           fetchAcisionables(eid, periodoActual),
+          fetchEmitidos(eid, periodoActual),
         ]);
       } catch(_) {} finally { setLoading(false); }
     };
@@ -356,13 +380,12 @@ export default function AuditoriaFiscal({ empresaId: empresaIdProp = null, empre
 
   const resolver = async (id) => ejecutarAccion(id, "resolver");
 
-  const uploadCfdi = async (e) => {
-    const files = e.target.files;
-    if (!files.length) return;
+  const procesarCfdi = async (files) => {
+    if (!files || !files.length) return;
     const parsed = await Promise.all([...files].map(async f => parseCFDI(await f.text(), f.name)));
     const valid = parsed.filter(Boolean);
     if (valid.length > 0) { setDiagnostico(prev=>[...prev,...valid]); setTab("diagnostico"); }
-    if (!empresaId) { setUploadMsg("Sin empresa activa — diagnóstico en pestaña «Diagnóstico»"); e.target.value=""; return; }
+    if (!empresaId) { setUploadMsg("Sin empresa activa — diagnóstico en pestaña «Diagnóstico»"); return; }
     setUploadState(p=>({...p,cfdi:true})); setUploadMsg("");
     const fd = new FormData();
     for(const f of files) fd.append("archivos",f);
@@ -370,13 +393,22 @@ export default function AuditoriaFiscal({ empresaId: empresaIdProp = null, empre
     try {
       const res = await fetch(`${API_URL}/api/v1/empresas/${empresaId}/cfdi/upload`,{method:"POST",body:fd,headers:authHeaders()}).then(r=>r.json());
       setUploadMsg(`✓ ${res.mensaje}`);
-      await Promise.all([fetchCierre(empresaId, periodoActual), fetchAcisionables(empresaId, periodoActual)]);
+      await Promise.all([
+        fetchCierre(empresaId, periodoActual),
+        fetchAcisionables(empresaId, periodoActual),
+        fetchEmitidos(empresaId, periodoActual),
+      ]);
     } catch(_) { setUploadMsg("✗ Error al subir CFDI."); }
-    finally { setUploadState(p=>({...p,cfdi:false})); e.target.value=""; }
+    finally { setUploadState(p=>({...p,cfdi:false})); }
   };
 
-  const uploadBanco = async (e) => {
-    const file = e.target.files[0];
+  const uploadCfdi = async (e) => {
+    const files = e.target.files;
+    await procesarCfdi(files);
+    e.target.value = "";
+  };
+
+  const procesarBanco = async (file) => {
     if (!file || !empresaId) return;
     setUploadState(p=>({...p,banco:true})); setUploadMsg("");
     const fd = new FormData();
@@ -386,13 +418,24 @@ export default function AuditoriaFiscal({ empresaId: empresaIdProp = null, empre
       setUploadMsg(`✓ ${res.mensaje}`);
       await Promise.all([fetchCierre(empresaId, periodoActual), fetchAcisionables(empresaId, periodoActual)]);
     } catch(_) { setUploadMsg("✗ Error al subir estado de cuenta."); }
-    finally { setUploadState(p=>({...p,banco:false})); e.target.value=""; }
+    finally { setUploadState(p=>({...p,banco:false})); }
+  };
+
+  const uploadBanco = async (e) => {
+    await procesarBanco(e.target.files[0]);
+    e.target.value = "";
   };
 
   const empresaActiva = empresas.find(e => e.empresa_id === empresaId) ?? empresaData ?? null;
   const rfc = empresaActiva?.rfc ?? cierreData?.empresa?.rfc ?? "FC";
 
+  const totalEmitidos = emitidosData
+    ? (emitidosData.resumen?.num_ingresos ?? 0) + (emitidosData.resumen?.num_anticipos ?? 0)
+      + (emitidosData.resumen?.num_facturas_con_anticipo ?? 0) + (emitidosData.resumen?.num_egresos ?? 0)
+    : 0;
+
   const DRILL_TABS = [
+    ["emitidos",      totalEmitidos > 0 ? `Emitidos (${totalEmitidos})` : "Emitidos"],
     ["riesgos",       "Todos los riesgos"],
     ["conciliacion",  "Conciliación"],
     ["ingesta",       "Cargar archivos"],
@@ -401,41 +444,35 @@ export default function AuditoriaFiscal({ empresaId: empresaIdProp = null, empre
 
   /* ── Onboarding: sin datos en el período ────────────────────── */
   const SinDatos = () => {
-    const [arrastrandoCfdi,  setArrastrandoCfdi]  = useState(false);
+    const [arrastrandoEmit,  setArrastrandoEmit]  = useState(false);
     const [arrastrandoBanco, setArrastrandoBanco] = useState(false);
-    const [cfdiOk,  setCfdiOk]  = useState(false);
+    const [emitOk,  setEmitOk]  = useState(false);
     const [bancoOk, setBancoOk] = useState(false);
 
-    const handleDropCfdi = e => {
-      e.preventDefault(); setArrastrandoCfdi(false);
-      const dt = new DataTransfer();
-      [...e.dataTransfer.files].filter(f => f.name.endsWith(".xml")).forEach(f => dt.items.add(f));
-      if (!dt.files.length) return;
-      cfdiRef.current.files = dt.files;
-      cfdiRef.current.dispatchEvent(new Event("change", { bubbles: true }));
-      setCfdiOk(true);
+    const handleDropEmitidos = e => {
+      e.preventDefault(); setArrastrandoEmit(false);
+      const files = [...e.dataTransfer.files].filter(f => f.name.endsWith(".xml"));
+      if (!files.length) return;
+      setEmitOk(true);
+      procesarCfdi(files);
     };
 
     const handleDropBanco = e => {
       e.preventDefault(); setArrastrandoBanco(false);
-      const dt = new DataTransfer();
-      [...e.dataTransfer.files].filter(f => /\.(csv|xlsx)$/i.test(f.name)).forEach(f => dt.items.add(f));
-      if (!dt.files.length) return;
-      bancoRef.current.files = dt.files;
-      bancoRef.current.dispatchEvent(new Event("change", { bubbles: true }));
+      const files = [...e.dataTransfer.files].filter(f => /\.(csv|xlsx)$/i.test(f.name));
+      if (!files.length) return;
       setBancoOk(true);
+      procesarBanco(files[0]);
     };
 
     return (
       <div className="space-y-6">
-        {/* Encabezado del período */}
+        {/* Período */}
         <div className="flex items-center gap-4 flex-wrap">
           <div>
-            <h2 className="font-display font-bold text-xl text-foreground">
-              Carga los archivos del período
-            </h2>
+            <h2 className="font-display font-bold text-xl text-foreground">Bienvenido al período</h2>
             <p className="text-sm text-muted-foreground mt-0.5">
-              Sube tus CFDIs y el estado de cuenta para generar el análisis de cierre
+              Carga los CFDIs emitidos para comenzar el análisis de cierre
             </p>
           </div>
           <div className="flex items-center gap-2 ml-auto">
@@ -448,7 +485,6 @@ export default function AuditoriaFiscal({ empresaId: empresaIdProp = null, empre
           </div>
         </div>
 
-        {/* Mensaje de éxito de upload si aplica */}
         {uploadMsg && (
           <div className={cn(
             "flex items-center gap-2 px-4 py-2.5 rounded-lg border font-mono text-sm",
@@ -460,127 +496,134 @@ export default function AuditoriaFiscal({ empresaId: empresaIdProp = null, empre
           </div>
         )}
 
-        {/* Dos zonas de carga */}
+        {/* ── Tarjetas principales: Emitidos / Recibidos ── */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
 
-          {/* CFDI XML */}
+          {/* EMITIDOS */}
           <div
-            onDragOver={e => { e.preventDefault(); setArrastrandoCfdi(true); }}
-            onDragLeave={() => setArrastrandoCfdi(false)}
-            onDrop={handleDropCfdi}
-            onClick={() => cfdiRef.current?.click()}
+            onDragOver={e => { e.preventDefault(); setArrastrandoEmit(true); }}
+            onDragLeave={() => setArrastrandoEmit(false)}
+            onDrop={handleDropEmitidos}
             className={cn(
-              "relative rounded-xl border-2 border-dashed p-8 cursor-pointer transition-all duration-200 text-center group",
-              arrastrandoCfdi
+              "relative rounded-xl border-2 p-6 transition-all duration-200",
+              arrastrandoEmit
                 ? "border-primary bg-primary/10 scale-[1.01]"
                 : uploadState.cfdi
                 ? "border-primary/50 bg-primary/5"
-                : cfdiOk
+                : emitOk
                 ? "border-emerald-500/60 bg-emerald-500/5"
-                : "border-border hover:border-primary/50 hover:bg-primary/5"
+                : "border-primary/30 bg-primary/5"
             )}
           >
-            <div className={cn(
-              "w-14 h-14 rounded-xl flex items-center justify-center mx-auto mb-4 transition-colors",
-              cfdiOk ? "bg-emerald-500/15" : "bg-primary/10 group-hover:bg-primary/20"
-            )}>
-              {uploadState.cfdi ? (
-                <span className="w-6 h-6 border-2 border-primary/40 border-t-primary rounded-full animate-spin block"/>
-              ) : cfdiOk ? (
-                <svg className="w-7 h-7 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M20 6L9 17l-5-5"/>
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-lg bg-primary/15 border border-primary/30 flex items-center justify-center flex-shrink-0">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#06B6D4" strokeWidth="1.5" strokeLinecap="round">
+                  <path d="M12 19V5M12 5l-4 4M12 5l4 4"/>
+                  <path d="M3 19h18"/>
                 </svg>
-              ) : (
-                <svg className="w-7 h-7 text-primary" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                  <polyline points="14,2 14,8 20,8"/>
-                  <line x1="12" y1="18" x2="12" y2="12"/>
-                  <polyline points="9,15 12,18 15,15"/>
-                </svg>
-              )}
+              </div>
+              <div>
+                <div className="font-display font-bold text-base text-foreground">Facturas Emitidas</div>
+                <div className="font-mono text-[10px] text-muted-foreground tracking-widest">EMITIDOS · XML</div>
+              </div>
+              {emitOk && <span className="ml-auto font-mono text-[10px] bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 rounded-full px-2 py-0.5">Cargado</span>}
             </div>
 
-            <p className={cn(
-              "font-display font-bold text-base mb-1",
-              cfdiOk ? "text-emerald-400" : "text-foreground"
-            )}>
-              {uploadState.cfdi ? "Procesando CFDIs…" : cfdiOk ? "CFDIs cargados" : "CFDIs XML"}
-            </p>
-            <p className="text-sm text-muted-foreground mb-3">
-              {cfdiOk
-                ? "Puedes cargar más archivos"
-                : "Arrastra archivos .xml o haz clic para seleccionar"}
+            <p className="text-sm text-muted-foreground mb-5">
+              Carga los XMLs de las facturas que emitiste en el período: ingresos, notas de crédito y anticipos.
             </p>
 
-            <div className="flex flex-wrap justify-center gap-2">
-              {["Versión 3.3 y 4.0", "Ingresos y Egresos", "Complementos de Pago"].map(t => (
-                <span key={t} className="font-mono text-[10px] bg-primary/10 text-primary/80 border border-primary/20 rounded-full px-2.5 py-0.5">
-                  {t}
-                </span>
+            <div className="flex flex-wrap gap-2 mb-5">
+              {["Ingresos (Ventas)", "Egresos (Notas crédito)", "Anticipos (Rel. 07)"].map(t => (
+                <span key={t} className="font-mono text-[10px] bg-primary/10 text-primary/70 border border-primary/20 rounded-full px-2.5 py-0.5">{t}</span>
               ))}
             </div>
 
-            {arrastrandoCfdi && (
+            <Button
+              onClick={() => emitidosRef.current?.click()}
+              disabled={uploadState.cfdi}
+              className="w-full"
+            >
+              {uploadState.cfdi
+                ? <><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin mr-2 inline-block"/>Procesando…</>
+                : emitOk ? "Cargar más XMLs Emitidos" : "Cargar XMLs Emitidos"
+              }
+            </Button>
+
+            {emitOk && (
+              <button
+                onClick={() => setTab("emitidos")}
+                className="w-full mt-2 text-center font-mono text-xs text-primary hover:underline"
+              >
+                Ver análisis de emitidos →
+              </button>
+            )}
+
+            {arrastrandoEmit && (
               <div className="absolute inset-0 rounded-xl bg-primary/5 border-2 border-primary flex items-center justify-center pointer-events-none">
-                <span className="font-mono text-sm text-primary font-bold">Soltar archivos XML aquí</span>
+                <span className="font-mono text-sm text-primary font-bold">Soltar XMLs aquí</span>
               </div>
             )}
           </div>
 
-          {/* Estado bancario */}
+          {/* RECIBIDOS (próximamente) */}
+          <div className="relative rounded-xl border-2 border-border/40 p-6 opacity-50">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-lg bg-muted/30 border border-border flex items-center justify-center flex-shrink-0">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#6B7280" strokeWidth="1.5" strokeLinecap="round">
+                  <path d="M12 5v14M12 19l-4-4M12 19l4-4"/>
+                  <path d="M3 5h18"/>
+                </svg>
+              </div>
+              <div>
+                <div className="font-display font-bold text-base text-muted-foreground">Facturas Recibidas</div>
+                <div className="font-mono text-[10px] text-muted-foreground tracking-widest">RECIBIDOS · GASTOS</div>
+              </div>
+              <span className="ml-auto font-mono text-[10px] bg-muted/20 text-muted-foreground border border-border rounded-full px-2 py-0.5">Próximamente</span>
+            </div>
+            <p className="text-sm text-muted-foreground mb-5">
+              Carga los XMLs de las facturas que recibiste de tus proveedores: gastos, compras y servicios.
+            </p>
+            <div className="flex flex-wrap gap-2 mb-5">
+              {["Gastos deducibles", "Compras", "Servicios recibidos"].map(t => (
+                <span key={t} className="font-mono text-[10px] bg-muted/10 text-muted-foreground border border-border/50 rounded-full px-2.5 py-0.5">{t}</span>
+              ))}
+            </div>
+            <div className="w-full h-9 rounded-md bg-muted/20 border border-border flex items-center justify-center">
+              <span className="font-mono text-xs text-muted-foreground">Disponible próximamente</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Estado de cuenta (secundario) */}
+        <div>
+          <p className="font-mono text-[10px] text-muted-foreground tracking-widest uppercase mb-3">Estado de cuenta bancario</p>
           <div
             onDragOver={e => { e.preventDefault(); setArrastrandoBanco(true); }}
             onDragLeave={() => setArrastrandoBanco(false)}
             onDrop={handleDropBanco}
             onClick={() => bancoRef.current?.click()}
             className={cn(
-              "relative rounded-xl border-2 border-dashed p-8 cursor-pointer transition-all duration-200 text-center group",
-              arrastrandoBanco
-                ? "border-primary bg-primary/10 scale-[1.01]"
-                : uploadState.banco
-                ? "border-primary/50 bg-primary/5"
-                : bancoOk
-                ? "border-emerald-500/60 bg-emerald-500/5"
-                : "border-border hover:border-primary/50 hover:bg-primary/5"
+              "relative rounded-xl border-2 border-dashed p-5 cursor-pointer transition-all duration-200 flex items-center gap-4 group",
+              arrastrandoBanco ? "border-primary bg-primary/10" : bancoOk ? "border-emerald-500/60 bg-emerald-500/5" : "border-border hover:border-primary/40 hover:bg-primary/5"
             )}
           >
-            <div className={cn(
-              "w-14 h-14 rounded-xl flex items-center justify-center mx-auto mb-4 transition-colors",
-              bancoOk ? "bg-emerald-500/15" : "bg-primary/10 group-hover:bg-primary/20"
-            )}>
-              {uploadState.banco ? (
-                <span className="w-6 h-6 border-2 border-primary/40 border-t-primary rounded-full animate-spin block"/>
-              ) : bancoOk ? (
-                <svg className="w-7 h-7 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M20 6L9 17l-5-5"/>
-                </svg>
-              ) : (
-                <svg className="w-7 h-7 text-primary" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                  <path d="M3 3h18v18H3zM3 9h18M9 21V9"/>
-                </svg>
-              )}
+            <div className={cn("w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0", bancoOk ? "bg-emerald-500/15" : "bg-muted/20")}>
+              {uploadState.banco
+                ? <span className="w-5 h-5 border-2 border-primary/40 border-t-primary rounded-full animate-spin block"/>
+                : bancoOk
+                ? <svg className="w-5 h-5 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 6L9 17l-5-5"/></svg>
+                : <svg className="w-5 h-5 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M3 3h18v18H3zM3 9h18M9 21V9"/></svg>
+              }
             </div>
-
-            <p className={cn(
-              "font-display font-bold text-base mb-1",
-              bancoOk ? "text-emerald-400" : "text-foreground"
-            )}>
-              {uploadState.banco ? "Procesando movimientos…" : bancoOk ? "Estado de cuenta cargado" : "Estado de Cuenta"}
-            </p>
-            <p className="text-sm text-muted-foreground mb-3">
-              {bancoOk
-                ? "Archivo procesado correctamente"
-                : "Arrastra tu archivo .csv o .xlsx o haz clic para seleccionar"}
-            </p>
-
-            <div className="flex flex-wrap justify-center gap-2">
-              {["BBVA · Santander", "Banamex · Banorte", "HSBC · Scotiabank"].map(t => (
-                <span key={t} className="font-mono text-[10px] bg-primary/10 text-primary/80 border border-primary/20 rounded-full px-2.5 py-0.5">
-                  {t}
-                </span>
-              ))}
+            <div className="flex-1 min-w-0">
+              <div className="font-display font-semibold text-sm text-foreground">
+                {uploadState.banco ? "Procesando movimientos…" : bancoOk ? "Estado de cuenta cargado" : "Estado de Cuenta"}
+              </div>
+              <div className="text-xs text-muted-foreground mt-0.5">
+                {bancoOk ? "Archivo procesado correctamente" : "CSV o XLSX · BBVA, Santander, Banamex, Banorte y más · Arrastra o haz clic"}
+              </div>
             </div>
-
             {arrastrandoBanco && (
               <div className="absolute inset-0 rounded-xl bg-primary/5 border-2 border-primary flex items-center justify-center pointer-events-none">
                 <span className="font-mono text-sm text-primary font-bold">Soltar archivo aquí</span>
@@ -644,6 +687,61 @@ export default function AuditoriaFiscal({ empresaId: empresaIdProp = null, empre
 
     return (
       <div className="space-y-5">
+
+        {/* ── Tarjetas de módulos: Emitidos / Recibidos ── */}
+        <div className="grid grid-cols-2 gap-3">
+          {/* EMITIDOS */}
+          <button
+            onClick={() => emitidosData ? setTab("emitidos") : emitidosRef.current?.click()}
+            className="rounded-xl border border-primary/30 bg-primary/5 p-4 text-left hover:bg-primary/10 transition-colors group"
+          >
+            <div className="flex items-center gap-3 mb-2">
+              <div className="w-8 h-8 rounded-lg bg-primary/15 border border-primary/30 flex items-center justify-center flex-shrink-0">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#06B6D4" strokeWidth="2" strokeLinecap="round">
+                  <path d="M12 19V5M12 5l-4 4M12 5l4 4"/><path d="M3 19h18"/>
+                </svg>
+              </div>
+              <span className="font-display font-bold text-sm text-foreground">Emitidos</span>
+              {loadingEmitidos && <span className="ml-auto w-3 h-3 border border-primary/40 border-t-primary rounded-full animate-spin block"/>}
+              {!loadingEmitidos && emitidosData && (
+                <span className="ml-auto font-mono text-[10px] bg-primary/10 text-primary border border-primary/20 rounded-full px-1.5 py-0.5">
+                  {totalEmitidos} CFDIs
+                </span>
+              )}
+            </div>
+            {emitidosData ? (
+              <div className="space-y-0.5">
+                <div className="font-mono text-xs text-foreground">
+                  Ingresos: <span className="text-emerald-400">${(emitidosData.resumen?.total_ingresos ?? 0).toLocaleString("es-MX",{minimumFractionDigits:2})}</span>
+                </div>
+                <div className="font-mono text-xs text-muted-foreground">
+                  Egresos: {emitidosData.resumen?.num_egresos ?? 0} notas · Ver detalle →
+                </div>
+                {(emitidosData.resumen?.advertencias?.length ?? 0) > 0 && (
+                  <div className="font-mono text-[10px] text-amber-400">
+                    ⚠ {emitidosData.resumen.advertencias.length} advertencia(s)
+                  </div>
+                )}
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground">Sin CFDIs emitidos en el período · Haz clic para cargar</p>
+            )}
+          </button>
+
+          {/* RECIBIDOS (próximamente) */}
+          <div className="rounded-xl border border-border/40 bg-muted/10 p-4 opacity-50">
+            <div className="flex items-center gap-3 mb-2">
+              <div className="w-8 h-8 rounded-lg bg-muted/20 border border-border flex items-center justify-center flex-shrink-0">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6B7280" strokeWidth="2" strokeLinecap="round">
+                  <path d="M12 5v14M12 19l-4-4M12 19l4-4"/><path d="M3 5h18"/>
+                </svg>
+              </div>
+              <span className="font-display font-bold text-sm text-muted-foreground">Recibidos</span>
+              <span className="ml-auto font-mono text-[9px] bg-muted/20 text-muted-foreground border border-border rounded-full px-1.5 py-0.5">Próx.</span>
+            </div>
+            <p className="text-xs text-muted-foreground">Gastos y compras · Disponible próximamente</p>
+          </div>
+        </div>
 
         {/* ── Bloque 1: ¿Puedo cerrar el mes? ── */}
         <div className={cn(
@@ -878,6 +976,207 @@ export default function AuditoriaFiscal({ empresaId: empresaIdProp = null, empre
   };
 
   /* ── Tab: Todos los riesgos ──────────────────────────────────── */
+  /* ── Tab: Emitidos ──────────────────────────────────────────── */
+  const TabEmitidos = () => {
+    const data = emitidosData;
+    const res  = data?.resumen ?? {};
+
+    const fmtMXN = v => Number(v || 0).toLocaleString("es-MX", { style:"currency", currency:"MXN", minimumFractionDigits:2 });
+    const fmtUUID = u => u ? u.substring(0,8)+"…" : "—";
+
+    const FilaCFDI = ({ c, badge }) => (
+      <tr className="border-b border-border/40 hover:bg-muted/10 transition-colors">
+        <td className="py-2 px-3 font-mono text-[11px] text-muted-foreground">{c.fecha}</td>
+        <td className="py-2 px-3">
+          <div className="font-mono text-[11px] text-foreground" title={c.uuid}>{fmtUUID(c.uuid)}</div>
+          {c.serie_folio && <div className="font-mono text-[9px] text-muted-foreground">{c.serie_folio}</div>}
+        </td>
+        <td className="py-2 px-3">
+          <div className="text-xs text-foreground truncate max-w-[180px]" title={c.nombre_receptor}>{c.nombre_receptor || "—"}</div>
+          <div className="font-mono text-[9px] text-muted-foreground">{c.rfc_receptor}</div>
+        </td>
+        <td className="py-2 px-3 text-right font-mono text-xs text-foreground">{fmtMXN(c.total)}</td>
+        <td className="py-2 px-3 text-center">
+          <span className={cn("font-mono text-[9px] rounded-full px-2 py-0.5 border",
+            c.metodo_pago==="PUE" ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" : "bg-amber-500/10 text-amber-400 border-amber-500/20"
+          )}>{c.metodo_pago ?? "—"}</span>
+        </td>
+        <td className="py-2 px-3">
+          {badge && <span className="font-mono text-[9px] rounded-full px-2 py-0.5 border bg-primary/10 text-primary border-primary/20">{badge}</span>}
+          {c.estado === "cancelado" && <span className="font-mono text-[9px] rounded-full px-2 py-0.5 border bg-red-500/10 text-red-400 border-red-500/20">Cancelado</span>}
+        </td>
+      </tr>
+    );
+
+    const Seccion = ({ titulo, subtitulo, items, badge, color = "#06B6D4", vacio }) => (
+      <div className="mb-6">
+        <div className="flex items-center gap-2 mb-3">
+          <div className="w-1 h-5 rounded-full" style={{ background: color }}/>
+          <span className="font-display font-bold text-sm text-foreground">{titulo}</span>
+          <span className="font-mono text-[10px] text-muted-foreground">({items.length})</span>
+          {subtitulo && <span className="font-mono text-[10px] text-muted-foreground ml-1">— {subtitulo}</span>}
+        </div>
+        {items.length === 0 ? (
+          <div className="rounded-lg border border-border/40 bg-muted/10 px-4 py-3 text-xs text-muted-foreground font-mono">{vacio ?? "Sin registros en el período"}</div>
+        ) : (
+          <div className="rounded-lg border border-border overflow-hidden">
+            <table className="w-full text-left">
+              <thead>
+                <tr className="bg-muted/20 border-b border-border">
+                  <th className="py-2 px-3 font-mono text-[9px] text-muted-foreground tracking-widest uppercase">Fecha</th>
+                  <th className="py-2 px-3 font-mono text-[9px] text-muted-foreground tracking-widest uppercase">UUID</th>
+                  <th className="py-2 px-3 font-mono text-[9px] text-muted-foreground tracking-widest uppercase">Receptor</th>
+                  <th className="py-2 px-3 font-mono text-[9px] text-muted-foreground tracking-widest uppercase text-right">Total</th>
+                  <th className="py-2 px-3 font-mono text-[9px] text-muted-foreground tracking-widest uppercase text-center">Método</th>
+                  <th className="py-2 px-3 font-mono text-[9px] text-muted-foreground tracking-widest uppercase">Nota</th>
+                </tr>
+              </thead>
+              <tbody>
+                {items.map(c => <FilaCFDI key={c.uuid} c={c} badge={badge}/>)}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    );
+
+    return (
+      <div className="space-y-6">
+
+        {/* Encabezado + botón recargar */}
+        <div className="flex items-center gap-4 flex-wrap">
+          <div>
+            <h2 className="font-display font-bold text-xl text-foreground">Facturas Emitidas</h2>
+            <p className="text-sm text-muted-foreground mt-0.5">
+              Período <span className="text-primary font-mono">{periodoActual}</span>
+              {data && <> · {totalEmitidos} CFDIs cargados</>}
+            </p>
+          </div>
+          <div className="flex items-center gap-2 ml-auto">
+            <Button variant="outline" size="sm" onClick={() => emitidosRef.current?.click()} disabled={uploadState.cfdi}>
+              {uploadState.cfdi ? "Procesando…" : "+ Cargar XMLs"}
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => fetchEmitidos(empresaId, periodoActual)} disabled={loadingEmitidos}>
+              {loadingEmitidos ? "…" : "↺"}
+            </Button>
+          </div>
+        </div>
+
+        {uploadMsg && (
+          <div className={cn("flex items-center gap-2 px-4 py-2.5 rounded-lg border font-mono text-sm",
+            uploadMsg.startsWith("✓") ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400" : "bg-red-500/10 border-red-500/30 text-red-400"
+          )}>{uploadMsg}</div>
+        )}
+
+        {/* Sin datos */}
+        {!data && !loadingEmitidos && (
+          <div className="rounded-xl border-2 border-dashed border-border p-10 text-center">
+            <p className="text-muted-foreground text-sm mb-3">No hay CFDIs emitidos cargados para este período</p>
+            <Button onClick={() => emitidosRef.current?.click()}>Cargar XMLs Emitidos</Button>
+          </div>
+        )}
+
+        {loadingEmitidos && (
+          <div className="flex items-center justify-center py-10">
+            <span className="w-6 h-6 border-2 border-primary/40 border-t-primary rounded-full animate-spin"/>
+          </div>
+        )}
+
+        {data && (
+          <>
+            {/* Resumen numérico */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              {[
+                { label:"Ingreso del período", value: fmtMXN(res.total_ingresos), color:"#10B981" },
+                { label:"Anticipos acumulados", value: fmtMXN(res.total_anticipos_acumulados), color:"#06B6D4" },
+                { label:"Aplicaciones anticipo", value: fmtMXN(res.total_aplicaciones_anticipo), color:"#F59E0B" },
+                { label:"Ingreso neto", value: fmtMXN(res.ingreso_neto_periodo), color:"#A78BFA" },
+              ].map(({ label, value, color }) => (
+                <div key={label} className="rounded-lg border border-border bg-card p-4">
+                  <div className="font-mono text-[9px] text-muted-foreground tracking-widest uppercase mb-2">{label}</div>
+                  <div className="font-display font-bold text-lg" style={{ color }}>{value}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* Advertencias */}
+            {(res.advertencias?.length ?? 0) > 0 && (
+              <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-4">
+                <div className="font-mono text-[10px] text-amber-400 tracking-widest uppercase mb-2">
+                  ⚠ {res.advertencias.length} advertencia(s) de anticipos
+                </div>
+                {res.advertencias.map((adv, i) => (
+                  <div key={i} className="text-xs text-amber-300/80 mt-1">{adv.mensaje}</div>
+                ))}
+              </div>
+            )}
+
+            {/* ── SECCIÓN INGRESOS ── */}
+            <div className="rounded-xl border border-border p-5">
+              <div className="flex items-center gap-2 mb-5">
+                <div className="w-2 h-6 rounded-full bg-emerald-500"/>
+                <h3 className="font-display font-bold text-base text-foreground">Ingresos</h3>
+                <span className="font-mono text-[10px] text-muted-foreground">Tipo I — Facturas emitidas por la empresa</span>
+              </div>
+
+              <Seccion
+                titulo="Ventas y Servicios"
+                subtitulo="Facturas de ingreso ordinarias"
+                items={data.ingresos.ventas_servicios}
+                color="#10B981"
+                vacio="No se emitieron facturas de venta/servicio en el período"
+              />
+
+              <Seccion
+                titulo="Anticipos Acumulados"
+                subtitulo="Ingresos aplicados como anticipo por notas de crédito (Rel.07)"
+                items={data.ingresos.anticipos}
+                badge="ANTICIPO"
+                color="#06B6D4"
+                vacio="Sin anticipos en el período"
+              />
+
+              <Seccion
+                titulo="Facturas con Anticipo Aplicado"
+                subtitulo="Ingresos que incluyen CfdiRelacionados TipoRelacion=07"
+                items={data.ingresos.facturas_con_anticipo}
+                badge="APLICA ANTICIPO"
+                color="#A78BFA"
+                vacio="Sin facturas con anticipo aplicado"
+              />
+            </div>
+
+            {/* ── SECCIÓN EGRESOS ── */}
+            <div className="rounded-xl border border-border p-5">
+              <div className="flex items-center gap-2 mb-5">
+                <div className="w-2 h-6 rounded-full bg-red-400"/>
+                <h3 className="font-display font-bold text-base text-foreground">Egresos</h3>
+                <span className="font-mono text-[10px] text-muted-foreground">Tipo E — Notas de crédito y aplicaciones de anticipo</span>
+              </div>
+
+              <Seccion
+                titulo="Notas de Crédito"
+                subtitulo="Devoluciones y descuentos"
+                items={data.egresos.notas_credito}
+                color="#F87171"
+                vacio="Sin notas de crédito en el período"
+              />
+
+              <Seccion
+                titulo="Aplicaciones de Anticipo"
+                subtitulo="Egresos con TipoRelacion=07 — reducen el ingreso del anticipo original"
+                items={data.egresos.aplicaciones_anticipo}
+                badge="APLICA ANTICIPO"
+                color="#F59E0B"
+                vacio="Sin aplicaciones de anticipo en el período"
+              />
+            </div>
+          </>
+        )}
+      </div>
+    );
+  };
+
   const TabRiesgos = () => {
     const riesgos = cierreData?.acciones ?? [];
     return (
@@ -1032,15 +1331,18 @@ export default function AuditoriaFiscal({ empresaId: empresaIdProp = null, empre
         </CardContent>
       </Card>
 
-      <input ref={cfdiRef}  type="file" multiple accept=".xml"       className="hidden" onChange={uploadCfdi}/>
-      <input ref={bancoRef} type="file"          accept=".csv,.xlsx" className="hidden" onChange={uploadBanco}/>
+      <input ref={cfdiRef}     type="file" multiple accept=".xml"       className="hidden" onChange={uploadCfdi}/>
+      <input ref={bancoRef}    type="file"          accept=".csv,.xlsx" className="hidden" onChange={uploadBanco}/>
+      <input ref={emitidosRef} type="file" multiple accept=".xml"       className="hidden" onChange={uploadCfdi}/>
 
       <div className="grid grid-cols-2 gap-4">
         {[
           { ref:cfdiRef,  state:uploadState.cfdi,  icon:"sky",     title:"CFDI XML",        sub:"Versión 3.3 y 4.0",     processing:"Procesando CFDI…",        drag:"Arrastra archivos XML",    color:"#38BDF8",
-            features:["UUID · Timbre fiscal","RFC emisor y receptor","Subtotal / IVA / Total","Método de pago PUE/PPD"], featLabel:"Campos extraídos" },
+            features:["UUID · Timbre fiscal","RFC emisor y receptor","Subtotal / IVA / Total","Método de pago PUE/PPD"], featLabel:"Campos extraídos",
+            onDrop: e => { e.preventDefault(); const files=[...e.dataTransfer.files].filter(f=>f.name.endsWith(".xml")); if(files.length) procesarCfdi(files); } },
           { ref:bancoRef, state:uploadState.banco, icon:"primary",  title:"Estado de Cuenta",sub:"CSV o XLSX · Todos los bancos", processing:"Procesando movimientos…", drag:"Arrastra CSV o XLSX", color:"#06B6D4",
-            features:["BBVA · Santander · Banamex","HSBC · Banorte · Scotiabank","BanBajío · Inbursa · Afirme","Formato personalizado"], featLabel:"Bancos soportados" },
+            features:["BBVA · Santander · Banamex","HSBC · Banorte · Scotiabank","BanBajío · Inbursa · Afirme","Formato personalizado"], featLabel:"Bancos soportados",
+            onDrop: e => { e.preventDefault(); const files=[...e.dataTransfer.files].filter(f=>/\.(csv|xlsx)$/i.test(f.name)); if(files.length) procesarBanco(files[0]); } },
         ].map((z,i)=>(
           <Card key={i}>
             <CardHeader>
@@ -1060,6 +1362,8 @@ export default function AuditoriaFiscal({ empresaId: empresaIdProp = null, empre
             </CardHeader>
             <CardContent>
               <div onClick={()=>z.ref.current?.click()}
+                onDrop={z.onDrop}
+                onDragOver={e=>e.preventDefault()}
                 className={cn("border-2 border-dashed rounded-md p-8 text-center cursor-pointer transition-all",
                   z.state?"border-emerald-400 bg-emerald-400/5":"border-border hover:border-primary/40 hover:bg-primary/5"
                 )}>
@@ -1293,10 +1597,11 @@ export default function AuditoriaFiscal({ empresaId: empresaIdProp = null, empre
       </header>
 
       <main className="max-w-screen-xl mx-auto px-7 py-7">
-        {tab === null       && <VistaPrincipal/>}
-        {tab === "riesgos"  && <TabRiesgos/>}
+        {tab === null          && <VistaPrincipal/>}
+        {tab === "emitidos"    && <TabEmitidos/>}
+        {tab === "riesgos"     && <TabRiesgos/>}
         {tab === "conciliacion" && <TabConciliacion/>}
-        {tab === "ingesta"  && <TabIngesta/>}
+        {tab === "ingesta"     && <TabIngesta/>}
         {tab === "diagnostico" && <TabDiagnostico/>}
       </main>
 
