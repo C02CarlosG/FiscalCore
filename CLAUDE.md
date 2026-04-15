@@ -152,26 +152,26 @@ Toda propuesta funcional debe incluir:
 
 ### Levantar con Docker (recomendado)
 ```bash
-docker-compose up -d        # levanta PostgreSQL 16 + inicializa schema automáticamente (001 → 002 → 003)
-python -m uvicorn main_api:app --reload --port 8000
+docker-compose up -d        # levanta PostgreSQL 16 + inicializa schema automáticamente (001 → 010)
+python -m uvicorn backend.main_api:app --reload --port 8000
 ```
 
 ### Backend manual (Python/FastAPI)
 ```bash
 pip install fastapi uvicorn python-multipart psycopg2-binary openpyxl pydantic python-jose bcrypt pdfplumber
 
-# La DB se inicializa sola con docker-compose (scripts SQL 001 → 002 → 003).
-# init_db() en db.py también aplica migraciones al startup en Railway.
-python -m uvicorn main_api:app --reload --port 8000
+# La DB se inicializa sola con docker-compose (scripts SQL 001 → 010).
+# init_db() en backend/db.py también aplica migraciones al startup en Railway (incluyendo 011).
+python -m uvicorn backend.main_api:app --reload --port 8000
 # Docs interactivos: http://localhost:8000/docs
 ```
 
 ### Deploy en Railway
 ```bash
 # Railway detecta Procfile automáticamente:
-# web: uvicorn main_api:app --host 0.0.0.0 --port $PORT
+# web: uvicorn backend.main_api:app --host 0.0.0.0 --port $PORT
 # Variable de entorno requerida: DATABASE_URL (Railway la inyecta al vincular PostgreSQL)
-# init_db() aplica las 3 migraciones SQL al startup si el schema no existe
+# init_db() aplica todas las migraciones SQL al startup
 ```
 
 ### Frontend (React + Vite)
@@ -184,15 +184,38 @@ npm run dev   # → http://localhost:5173
 
 ```
 Archivos usuario (XML/CSV/XLSX / Constancia PDF)
-    → Parser Layer        cfdi_parser.py / banco_parser.py / constancia_parser.py
-    → Motor Fiscal        motor_fiscal.py
-    → API REST            main_api.py  (FastAPI, puerto 8000)
-    → DB Layer            db.py  (connection pool + init_db con auto-migración)
-    → Base de datos       PostgreSQL 16 (Docker / Railway) — 001 + 002 + 003 SQL
+    → Parser Layer        backend/cfdi_parser.py / banco_parser.py / constancia_parser.py
+    → Motor Fiscal        backend/motor_fiscal.py
+    → API REST            backend/main_api.py  (FastAPI, puerto 8000)
+    → DB Layer            backend/db.py  (connection pool + init_db con auto-migración)
+    → Base de datos       PostgreSQL 16 (Docker / Railway) — database/migrations/ 001→011
     → Frontend            React 18 + Vite 5 (src/)
 ```
 
-### Módulos backend
+### Estructura de directorios
+
+```
+backend/                  # Paquete Python (tiene __init__.py)
+  main_api.py             # FastAPI app
+  db.py                   # Connection pool + init_db
+  motor_fiscal.py         # Motores: conciliación, riesgos, scoring
+  cfdi_parser.py          # Parser CFDI XML 3.3 / 4.0
+  banco_parser.py         # Parser CSV/XLSX bancario
+  constancia_parser.py    # Parser Constancia PDF
+database/
+  migrations/             # Scripts SQL idempotentes (001 → 011)
+src/                      # Frontend React + Vite
+  AuditoriaFiscalDashboard.jsx
+  LoginPage.jsx
+  RegisterPage.jsx
+  main.jsx
+  auth.js
+  components/ui/          # shadcn/ui
+  lib/utils.js
+  index.css
+```
+
+### Módulos backend (`backend/`)
 
 | Módulo | Responsabilidad |
 |--------|-----------------|
@@ -200,14 +223,24 @@ Archivos usuario (XML/CSV/XLSX / Constancia PDF)
 | `banco_parser.py` | Parsea CSV/XLSX bancarios. Auto-detecta encoding y columnas (6+ alias) |
 | `motor_fiscal.py` | Tres motores: Conciliación (banco↔CFDI), Riesgos (8 tipos), Scoring (0–100) |
 | `constancia_parser.py` | Extrae RFC, razón social, régimen, obligaciones, CP, CURP de la Constancia de Situación Fiscal PDF (pdfplumber) |
-| `main_api.py` | FastAPI: auth JWT, empresas, ingesta CFDI/banco, dashboard, riesgos, scoring, parseo constancia, acciones inline, cierre mensual |
+| `main_api.py` | FastAPI: auth JWT, contador→N empresas, ingesta CFDI/banco, dashboard, riesgos, scoring, parseo constancia, acciones inline, cierre mensual |
 | `db.py` | Connection pool psycopg2 + helpers (`query_all`, `query_one`, `execute`) + `init_db()` con auto-migración al startup |
+
+### Migraciones (`database/migrations/`)
+
+| Migración | Contenido |
+|-----------|-----------|
 | `001_schema_inicial.sql` | DDL PostgreSQL: 8 tablas + extensiones `uuid-ossp`, `pg_trgm` |
 | `002_usuarios.sql` | Tabla `usuarios` + columnas extra en `empresas` (constancia_path, obligaciones JSONB, cp_fiscal, curp) |
 | `003_acciones.sql` | `accion_sugerida` JSONB en catálogo `riesgos` + estados intermedios en `detecciones` (idempotente) |
 | `004_pagos_cfdi.sql` | Tablas `pagos_cfdi` y `pagos_relaciones`; agrega `complemento_pago` a `conciliaciones.tipo_match`; agrega `estado_pago` en `cfdi` (idempotente) |
+| `005_cfdi40_campos.sql` | Campos CFDI 4.0: `exportacion`, `lugar_expedicion`, `domicilio_fiscal_receptor`, `regimen_fiscal_receptor` en tabla `cfdi` |
+| `006_match_multiple.sql` | Extiende `tipo_match` con `agrupado` y `parcial_multiple` para matching 1:N y N:1 |
+| `007_match_heuristico.sql` | Agrega `heuristico` a `tipo_match` (matches por similitud/heurística) |
+| `008_confianza_conciliacion.sql` | Columna `confianza` (`alta`/`media`/`baja`) en `conciliaciones` |
 | `009_ppd_estados.sql` | Extiende `tipo_match` con `pendiente_rep`/`pagado_parcial`; extiende `cfdi.estado_pago` con `pendiente_rep` (idempotente) |
 | `010_complemento_tipos.sql` | Agrega `complemento_pago_total`/`complemento_pago_parcial` a `tipo_match`; columnas `pago_id` y `saldo_insoluto` en `conciliaciones` (idempotente) |
+| `011_usuario_empresas.sql` | Tabla `usuario_empresas` (M:N): 1 contador → N empresas; migra relaciones existentes |
 
 ### Módulos frontend (`src/`)
 
@@ -217,7 +250,7 @@ Archivos usuario (XML/CSV/XLSX / Constancia PDF)
 | `auth.js` | JWT en localStorage: `saveAuth`, `getToken`, `getEmpresaData`, `isLoggedIn` (verifica exp), `clearAuth` |
 | `LoginPage.jsx` | Split-screen: branding izquierdo + formulario shadcn derecho. Llama `POST /api/v1/auth/login` |
 | `RegisterPage.jsx` | Wizard 3 pasos: credenciales → constancia PDF → confirmación. Llama `POST /api/v1/auth/register` + `POST /api/v1/constancia/parsear` |
-| `../AuditoriaFiscalDashboard.jsx` | Dashboard principal: 5 tabs (Resumen, Riesgos, Conciliación, Cargar, Diagnóstico CFDI). Parseo CFDI client-side con DOMParser |
+| `AuditoriaFiscalDashboard.jsx` | Dashboard principal: 5 tabs (Resumen, Riesgos, Conciliación, Cargar, Diagnóstico CFDI). Parseo CFDI client-side con DOMParser |
 | `components/ui/` | Componentes shadcn/ui: button, input, card, badge, label, alert, avatar, dialog, tabs, separator |
 | `lib/utils.js` | Helper `cn()` (clsx + tailwind-merge) |
 | `index.css` | Variables CSS dark theme (navy + cyan) + directivas Tailwind |
@@ -225,10 +258,11 @@ Archivos usuario (XML/CSV/XLSX / Constancia PDF)
 ### Autenticación
 - **JWT** con `python-jose`. Tokens con 8h de expiración.
 - **Bcrypt** directo (`import bcrypt as _bcrypt`) — **NO usar passlib** (incompatibilidad con bcrypt moderno).
-- Un usuario por empresa. El token contiene `empresa_id`, `rfc`, `razon_social`.
+- **Modelo usuario-céntrico**: 1 contador puede gestionar N empresas. El token contiene `user_id`, `email`. La empresa activa se selecciona en el frontend.
+- La tabla `usuario_empresas` (M:N) vincula usuarios a empresas con un rol (`contador` por defecto).
 - Endpoints: `POST /api/v1/auth/register`, `POST /api/v1/auth/login`, `GET /api/v1/auth/me`.
 
-### Endpoints principales (`main_api.py`)
+### Endpoints principales (`backend/main_api.py`)
 
 | Método | Ruta | Tag |
 |--------|------|-----|
@@ -236,7 +270,8 @@ Archivos usuario (XML/CSV/XLSX / Constancia PDF)
 | POST | `/api/v1/auth/login` | Auth |
 | GET | `/api/v1/auth/me` | Auth |
 | POST | `/api/v1/constancia/parsear` | Constancia |
-| GET/POST | `/api/v1/empresas` | Empresas |
+| GET | `/api/v1/empresas` | Empresas |
+| POST | `/api/v1/mis-empresas` | Empresas |
 | GET | `/api/v1/empresas/{id}` | Empresas |
 | GET | `/api/v1/dashboard/{empresa_id}` | Dashboard |
 | POST | `/api/v1/empresas/{id}/cfdi/upload` | Ingesta |
@@ -259,7 +294,8 @@ Archivos usuario (XML/CSV/XLSX / Constancia PDF)
 ### Lógica de conciliación (`MotorConciliacion`)
 - Prioridad: RFC + monto exacto → monto exacto → tolerancia ±2%
 - Tolerancia exacta: ±$0.05 MXN
-- Resultados: `exacto`, `parcial`, `sin_cfdi`, `sin_movimiento`
+- Resultados completos: `exacto`, `parcial`, `sin_cfdi`, `sin_movimiento`, `complemento_pago`, `complemento_pago_total`, `complemento_pago_parcial`, `agrupado`, `parcial_multiple`, `heuristico`, `pendiente_rep`, `pagado_parcial`
+- Columna `confianza` en cada resultado: `alta` / `media` / `baja`
 
 ### Riesgos detectados (`MotorRiesgos`) — 8 tipos
 | Clave | Severidad |
@@ -284,8 +320,9 @@ score ∈ [0, 100]
 ## Estado actual del proyecto
 
 - ✅ Schema DB, parsers, motor fiscal y API — diseñados y funcionales
-- ✅ Auth JWT multiempresa — registro con Constancia PDF, login, token
-- ✅ Docker Compose — PostgreSQL 16 con auto-init de scripts SQL (001 → 002 → 003)
+- ✅ Auth JWT — registro con Constancia PDF, login, token
+- ✅ **Modelo usuario-céntrico** — 1 contador → N empresas via `usuario_empresas` (M:N); `POST /api/v1/mis-empresas` crea/reutiliza empresa por RFC y la vincula al contador
+- ✅ Docker Compose — PostgreSQL 16 con auto-init de scripts SQL (001 → 010)
 - ✅ Frontend migrado a Tailwind CSS v3 + shadcn/ui (tema dark navy + cyan)
 - ✅ **API conectada a PostgreSQL real** — pipeline ingesta → conciliación → riesgos → scoring persiste
 - ✅ **Dashboard conectado a la API** — llama a endpoints reales, sin datos hardcoded
@@ -294,15 +331,18 @@ score ∈ [0, 100]
   - `POST /api/v1/acciones/{id}/ejecutar` — actualiza estado con update optimista en frontend
   - `GET /api/v1/empresas/{id}/cierre/{periodo}` — vista consolidada: bloqueadores + acciones + conciliación
   - `GET /api/v1/empresas/{id}/conciliaciones/accionables` — pares sin_cfdi y parciales con contexto
-- ✅ **`db.py` modularizado** — connection pool psycopg2 + `init_db()` con auto-migración al startup (Railway-ready)
-- ✅ **`Procfile` añadido** — listo para deploy en Railway (`uvicorn main_api:app --host 0.0.0.0 --port $PORT`)
+- ✅ **`backend/db.py` modularizado** — connection pool psycopg2 + `init_db()` con auto-migración al startup (Railway-ready)
+- ✅ **`Procfile` actualizado** — `uvicorn backend.main_api:app` (módulo con prefijo de paquete)
+- ✅ **Reestructuración de directorios** — código Python en `backend/` (paquete Python), migraciones en `database/migrations/`
+- ✅ **Campos CFDI 4.0** — `exportacion`, `lugar_expedicion`, `domicilio_fiscal_receptor`, `regimen_fiscal_receptor` (`005`)
+- ✅ **Matching avanzado** — tipos `agrupado`, `parcial_multiple` (006), `heuristico` (007), columna `confianza` (008)
 - ✅ **Complemento de Pago 2.0 (CFDI tipo P)** — parser, persistencia y conciliación con prioridad sobre heurística
 - ✅ **Conciliación PPD completa con REP** — `enriquecer_estados_ppd()` clasifica cada CFDI PPD antes de conciliar; elimina falsos positivos en `CFDI_NO_COBRADO`/`CFDI_NO_PAGADO`; nuevos `tipo_match`: `pendiente_rep`, `pagado_parcial`; umbral PPD sin REP elevado a 60 días
 - ✅ **Paso 1 score-based banco→REP** — `_conciliar_con_rep()` reemplaza el loop con `break`; scoring monto (exacto=10, ±2%=5) + fecha (exacta=+4, ≤2d=+2, ≤5d=+1); dedup de REPs por `pago.id`; emite `complemento_pago_total`/`complemento_pago_parcial` según `saldo_insoluto`; `TOLERANCIA_FECHA_REP=5d`; trazabilidad `pago_id` + `saldo_insoluto` en `ResultadoConciliacion`
-  - `cfdi_parser.py` — `PagoCFDI`, `DoctoRelacionado`, `_extraer_pagos()`, `es_pago` property; validación de cuadre omitida para tipo P
-  - `004_pagos_cfdi.sql` — tablas `pagos_cfdi` + `pagos_relaciones`; `estado_pago` en `cfdi`; `complemento_pago` en tipo_match
-  - `motor_fiscal.py` — `PagoResumen`; `MotorConciliacion.conciliar()` acepta `pagos=`; regla: si existe complemento → NO usar heurística; output `{tipo_match:"complemento_pago", cfdis_relacionados:[], confianza:"alta"}`
-  - `main_api.py` — `_persistir_complemento_pago()` actualiza `monto_cobrado` y `estado_pago` en CFDIs relacionados; pipeline carga `pagos_cfdi` y pasa a motor
+  - `backend/cfdi_parser.py` — `PagoCFDI`, `DoctoRelacionado`, `_extraer_pagos()`, `es_pago` property; validación de cuadre omitida para tipo P
+  - `database/migrations/004_pagos_cfdi.sql` — tablas `pagos_cfdi` + `pagos_relaciones`; `estado_pago` en `cfdi`; `complemento_pago` en tipo_match
+  - `backend/motor_fiscal.py` — `PagoResumen`; `MotorConciliacion.conciliar()` acepta `pagos=`; regla: si existe complemento → NO usar heurística; output `{tipo_match:"complemento_pago", cfdis_relacionados:[], confianza:"alta"}`
+  - `backend/main_api.py` — `_persistir_complemento_pago()` actualiza `monto_cobrado` y `estado_pago` en CFDIs relacionados; pipeline carga `pagos_cfdi` y pasa a motor
 
 ## Convenciones importantes
 

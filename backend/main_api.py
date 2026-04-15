@@ -38,7 +38,7 @@ try:
 except ImportError:
     BCRYPT_OK = False
 
-import db
+from . import db
 
 # ─── JWT config ──────────────────────────────────────────────
 _JWT_INSECURE_DEFAULT = "fiscalcore-dev-secret-change-in-prod"
@@ -122,11 +122,18 @@ class AgregarEmpresaRequest(BaseModel):
     cp_fiscal: Optional[str] = None
     curp: Optional[str] = None
     obligaciones: Optional[list] = None
+    representante_legal: Optional[str] = None
+    rfc_representante: Optional[str] = None
 
     @field_validator("rfc")
     @classmethod
     def rfc_upper(cls, v: str) -> str:
         return v.strip().upper()
+
+    @field_validator("rfc_representante", mode="before")
+    @classmethod
+    def rfc_rep_upper(cls, v):
+        return v.strip().upper() if v else v
 
 
 class LoginRequest(BaseModel):
@@ -277,7 +284,10 @@ async def login(data: LoginRequest):
 async def me(current_user: dict = Depends(_get_current_user)):
     """Retorna info del usuario autenticado y sus empresas."""
     usuario = db.query_one(
-        "SELECT id, email, nombre FROM usuarios WHERE id = %s",
+        """
+        SELECT id, email, nombre, telefono, rfc, nombre_despacho, cedula_profesional
+        FROM usuarios WHERE id = %s
+        """,
         (current_user["user_id"],),
     )
     if not usuario:
@@ -297,6 +307,41 @@ async def me(current_user: dict = Depends(_get_current_user)):
     return {**_serializar(usuario), "empresas": [_serializar(e) for e in empresas]}
 
 
+class ActualizarPerfilRequest(BaseModel):
+    nombre:             Optional[str] = None
+    telefono:           Optional[str] = None
+    rfc:                Optional[str] = None
+    nombre_despacho:    Optional[str] = None
+    cedula_profesional: Optional[str] = None
+
+    @field_validator("rfc", mode="before")
+    @classmethod
+    def rfc_upper(cls, v):
+        return v.strip().upper() if v else v
+
+
+@app.patch("/api/v1/usuarios/perfil", tags=["Auth"])
+async def actualizar_perfil(
+    data: ActualizarPerfilRequest,
+    current_user: dict = Depends(_get_current_user),
+):
+    """Actualiza los datos de perfil del contador autenticado."""
+    campos = {k: v for k, v in data.model_dump().items() if v is not None}
+    if not campos:
+        raise HTTPException(status_code=400, detail="Sin campos para actualizar")
+
+    sets   = ", ".join(f"{k} = %s" for k in campos)
+    valores = list(campos.values()) + [current_user["user_id"]]
+    usuario = db.execute(
+        f"UPDATE usuarios SET {sets}, updated_at = NOW() WHERE id = %s RETURNING id, email, nombre, telefono, rfc, nombre_despacho, cedula_profesional",
+        tuple(valores),
+        returning=True,
+    )
+    if not usuario:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    return _serializar(usuario)
+
+
 # ── Constancia ────────────────────────────────────────────────
 
 @app.post("/api/v1/constancia/parsear", tags=["Constancia"])
@@ -308,7 +353,7 @@ async def parsear_constancia_pdf(archivo: UploadFile = File(...)):
     contenido = await archivo.read()
 
     try:
-        from constancia_parser import parsear_constancia
+        from .constancia_parser import parsear_constancia
         datos = parsear_constancia(contenido)
     except RuntimeError as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -354,14 +399,19 @@ async def agregar_empresa(
         try:
             empresa = db.execute(
                 """
-                INSERT INTO empresas (rfc, razon_social, regimen_fiscal, cp_fiscal, curp, obligaciones)
-                VALUES (%s, %s, %s, %s, %s, %s)
+                INSERT INTO empresas (
+                    rfc, razon_social, regimen_fiscal, cp_fiscal, curp, obligaciones,
+                    representante_legal, rfc_representante
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING *
                 """,
                 (
                     data.rfc, data.razon_social, data.regimen_fiscal,
                     data.cp_fiscal, data.curp,
                     json.dumps(data.obligaciones) if data.obligaciones else None,
+                    data.representante_legal,
+                    data.rfc_representante,
                 ),
                 returning=True,
             )
@@ -503,7 +553,7 @@ async def subir_cfdi(
 ):
     _validar_acceso_empresa(empresa_id, current_user)
     empresa = _empresa_or_404(empresa_id)
-    from cfdi_parser import CFDIParser
+    from .cfdi_parser import CFDIParser
     parser = CFDIParser()
     procesados = 0
     errores: list[str] = []
@@ -671,7 +721,7 @@ async def subir_estado_cuenta(
 ):
     _validar_acceso_empresa(empresa_id, current_user)
     empresa = _empresa_or_404(empresa_id)
-    from banco_parser import BancoParser
+    from .banco_parser import BancoParser
     parser = BancoParser()
     contenido = await archivo.read()
 
@@ -715,7 +765,7 @@ async def subir_estado_cuenta(
 
 def _correr_pipeline(empresa_id: str, periodo: str, rfc_empresa: str) -> None:
     """Ejecuta el motor fiscal completo para un período y persiste los resultados."""
-    from motor_fiscal import (
+    from .motor_fiscal import (
         CFDIResumen, MovResumen, PagoResumen,
         MotorConciliacion, MotorRiesgos, MotorScoring,
     )

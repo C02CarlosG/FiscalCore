@@ -1,12 +1,12 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Button }   from "./src/components/ui/button";
-import { Badge }    from "./src/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "./src/components/ui/card";
-import { Alert, AlertDescription } from "./src/components/ui/alert";
-import { Avatar, AvatarFallback } from "./src/components/ui/avatar";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./src/components/ui/dialog";
-import { cn } from "./src/lib/utils";
-import { getToken } from "./src/auth.js";
+import { Button }   from "./components/ui/button";
+import { Badge }    from "./components/ui/badge";
+import { Card, CardContent, CardHeader, CardTitle } from "./components/ui/card";
+import { Alert, AlertDescription } from "./components/ui/alert";
+import { Avatar, AvatarFallback } from "./components/ui/avatar";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./components/ui/dialog";
+import { cn } from "./lib/utils";
+import { getToken } from "./auth.js";
 
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
@@ -249,7 +249,7 @@ function AccionItem({ item, onEjecutar, onDetalle, ejecutando }) {
 }
 
 /* ── Main Component ──────────────────────────────────────────── */
-export default function AuditoriaFiscal({ empresaId: empresaIdProp = null, empresaData = null, empresas: empresasProp = [], onLogout = null }) {
+export default function AuditoriaFiscal({ empresaId: empresaIdProp = null, empresaData = null, empresas: empresasProp = [], onLogout = null, onVolverInicio = null }) {
   const [tab, setTab]               = useState(null);      // null = vista principal
   const [detalle, setDetalle]       = useState(null);
   const [cierreData, setCierreData] = useState(null);
@@ -399,6 +399,220 @@ export default function AuditoriaFiscal({ empresaId: empresaIdProp = null, empre
     ["diagnostico",   diagnostico.length > 0 ? `Diagnóstico (${diagnostico.length})` : "Diagnóstico CFDI"],
   ];
 
+  /* ── Onboarding: sin datos en el período ────────────────────── */
+  const SinDatos = () => {
+    const [arrastrandoCfdi,  setArrastrandoCfdi]  = useState(false);
+    const [arrastrandoBanco, setArrastrandoBanco] = useState(false);
+    const [cfdiOk,  setCfdiOk]  = useState(false);
+    const [bancoOk, setBancoOk] = useState(false);
+
+    const handleDropCfdi = e => {
+      e.preventDefault(); setArrastrandoCfdi(false);
+      const dt = new DataTransfer();
+      [...e.dataTransfer.files].filter(f => f.name.endsWith(".xml")).forEach(f => dt.items.add(f));
+      if (!dt.files.length) return;
+      cfdiRef.current.files = dt.files;
+      cfdiRef.current.dispatchEvent(new Event("change", { bubbles: true }));
+      setCfdiOk(true);
+    };
+
+    const handleDropBanco = e => {
+      e.preventDefault(); setArrastrandoBanco(false);
+      const dt = new DataTransfer();
+      [...e.dataTransfer.files].filter(f => /\.(csv|xlsx)$/i.test(f.name)).forEach(f => dt.items.add(f));
+      if (!dt.files.length) return;
+      bancoRef.current.files = dt.files;
+      bancoRef.current.dispatchEvent(new Event("change", { bubbles: true }));
+      setBancoOk(true);
+    };
+
+    return (
+      <div className="space-y-6">
+        {/* Encabezado del período */}
+        <div className="flex items-center gap-4 flex-wrap">
+          <div>
+            <h2 className="font-display font-bold text-xl text-foreground">
+              Carga los archivos del período
+            </h2>
+            <p className="text-sm text-muted-foreground mt-0.5">
+              Sube tus CFDIs y el estado de cuenta para generar el análisis de cierre
+            </p>
+          </div>
+          <div className="flex items-center gap-2 ml-auto">
+            <span className="font-mono text-[10px] text-muted-foreground tracking-wider">PERÍODO</span>
+            <input
+              type="month" value={periodoUpload}
+              onChange={e => setPeriodoUpload(e.target.value)}
+              className="bg-background border border-border rounded px-3 py-1.5 text-foreground font-mono text-sm focus:outline-none focus:border-primary transition-colors"
+            />
+          </div>
+        </div>
+
+        {/* Mensaje de éxito de upload si aplica */}
+        {uploadMsg && (
+          <div className={cn(
+            "flex items-center gap-2 px-4 py-2.5 rounded-lg border font-mono text-sm",
+            uploadMsg.startsWith("✓")
+              ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400"
+              : "bg-red-500/10 border-red-500/30 text-red-400"
+          )}>
+            {uploadMsg}
+          </div>
+        )}
+
+        {/* Dos zonas de carga */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+          {/* CFDI XML */}
+          <div
+            onDragOver={e => { e.preventDefault(); setArrastrandoCfdi(true); }}
+            onDragLeave={() => setArrastrandoCfdi(false)}
+            onDrop={handleDropCfdi}
+            onClick={() => cfdiRef.current?.click()}
+            className={cn(
+              "relative rounded-xl border-2 border-dashed p-8 cursor-pointer transition-all duration-200 text-center group",
+              arrastrandoCfdi
+                ? "border-primary bg-primary/10 scale-[1.01]"
+                : uploadState.cfdi
+                ? "border-primary/50 bg-primary/5"
+                : cfdiOk
+                ? "border-emerald-500/60 bg-emerald-500/5"
+                : "border-border hover:border-primary/50 hover:bg-primary/5"
+            )}
+          >
+            <div className={cn(
+              "w-14 h-14 rounded-xl flex items-center justify-center mx-auto mb-4 transition-colors",
+              cfdiOk ? "bg-emerald-500/15" : "bg-primary/10 group-hover:bg-primary/20"
+            )}>
+              {uploadState.cfdi ? (
+                <span className="w-6 h-6 border-2 border-primary/40 border-t-primary rounded-full animate-spin block"/>
+              ) : cfdiOk ? (
+                <svg className="w-7 h-7 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M20 6L9 17l-5-5"/>
+                </svg>
+              ) : (
+                <svg className="w-7 h-7 text-primary" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                  <polyline points="14,2 14,8 20,8"/>
+                  <line x1="12" y1="18" x2="12" y2="12"/>
+                  <polyline points="9,15 12,18 15,15"/>
+                </svg>
+              )}
+            </div>
+
+            <p className={cn(
+              "font-display font-bold text-base mb-1",
+              cfdiOk ? "text-emerald-400" : "text-foreground"
+            )}>
+              {uploadState.cfdi ? "Procesando CFDIs…" : cfdiOk ? "CFDIs cargados" : "CFDIs XML"}
+            </p>
+            <p className="text-sm text-muted-foreground mb-3">
+              {cfdiOk
+                ? "Puedes cargar más archivos"
+                : "Arrastra archivos .xml o haz clic para seleccionar"}
+            </p>
+
+            <div className="flex flex-wrap justify-center gap-2">
+              {["Versión 3.3 y 4.0", "Ingresos y Egresos", "Complementos de Pago"].map(t => (
+                <span key={t} className="font-mono text-[10px] bg-primary/10 text-primary/80 border border-primary/20 rounded-full px-2.5 py-0.5">
+                  {t}
+                </span>
+              ))}
+            </div>
+
+            {arrastrandoCfdi && (
+              <div className="absolute inset-0 rounded-xl bg-primary/5 border-2 border-primary flex items-center justify-center pointer-events-none">
+                <span className="font-mono text-sm text-primary font-bold">Soltar archivos XML aquí</span>
+              </div>
+            )}
+          </div>
+
+          {/* Estado bancario */}
+          <div
+            onDragOver={e => { e.preventDefault(); setArrastrandoBanco(true); }}
+            onDragLeave={() => setArrastrandoBanco(false)}
+            onDrop={handleDropBanco}
+            onClick={() => bancoRef.current?.click()}
+            className={cn(
+              "relative rounded-xl border-2 border-dashed p-8 cursor-pointer transition-all duration-200 text-center group",
+              arrastrandoBanco
+                ? "border-primary bg-primary/10 scale-[1.01]"
+                : uploadState.banco
+                ? "border-primary/50 bg-primary/5"
+                : bancoOk
+                ? "border-emerald-500/60 bg-emerald-500/5"
+                : "border-border hover:border-primary/50 hover:bg-primary/5"
+            )}
+          >
+            <div className={cn(
+              "w-14 h-14 rounded-xl flex items-center justify-center mx-auto mb-4 transition-colors",
+              bancoOk ? "bg-emerald-500/15" : "bg-primary/10 group-hover:bg-primary/20"
+            )}>
+              {uploadState.banco ? (
+                <span className="w-6 h-6 border-2 border-primary/40 border-t-primary rounded-full animate-spin block"/>
+              ) : bancoOk ? (
+                <svg className="w-7 h-7 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M20 6L9 17l-5-5"/>
+                </svg>
+              ) : (
+                <svg className="w-7 h-7 text-primary" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                  <path d="M3 3h18v18H3zM3 9h18M9 21V9"/>
+                </svg>
+              )}
+            </div>
+
+            <p className={cn(
+              "font-display font-bold text-base mb-1",
+              bancoOk ? "text-emerald-400" : "text-foreground"
+            )}>
+              {uploadState.banco ? "Procesando movimientos…" : bancoOk ? "Estado de cuenta cargado" : "Estado de Cuenta"}
+            </p>
+            <p className="text-sm text-muted-foreground mb-3">
+              {bancoOk
+                ? "Archivo procesado correctamente"
+                : "Arrastra tu archivo .csv o .xlsx o haz clic para seleccionar"}
+            </p>
+
+            <div className="flex flex-wrap justify-center gap-2">
+              {["BBVA · Santander", "Banamex · Banorte", "HSBC · Scotiabank"].map(t => (
+                <span key={t} className="font-mono text-[10px] bg-primary/10 text-primary/80 border border-primary/20 rounded-full px-2.5 py-0.5">
+                  {t}
+                </span>
+              ))}
+            </div>
+
+            {arrastrandoBanco && (
+              <div className="absolute inset-0 rounded-xl bg-primary/5 border-2 border-primary flex items-center justify-center pointer-events-none">
+                <span className="font-mono text-sm text-primary font-bold">Soltar archivo aquí</span>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Qué pasa después */}
+        <div className="rounded-lg border border-border bg-card/50 p-5">
+          <p className="font-mono text-[10px] text-muted-foreground tracking-widest uppercase mb-4">
+            Qué genera FiscalCore al procesar
+          </p>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            {[
+              { icon: "⚡", title: "Estado de cierre", desc: "¿Puedes cerrar el mes sin riesgo?" },
+              { icon: "🛡", title: "Riesgos detectados", desc: "Ingresos no facturados, IVA, RFC inválidos…" },
+              { icon: "🔗", title: "Conciliación banco↔CFDI", desc: "Matching automático con score de confianza" },
+              { icon: "📊", title: "Score fiscal 0–100", desc: "Salud fiscal del cliente en un número" },
+            ].map(({ icon, title, desc }) => (
+              <div key={title} className="flex flex-col gap-1.5">
+                <span className="text-xl">{icon}</span>
+                <p className="font-display font-semibold text-sm text-foreground">{title}</p>
+                <p className="text-[11px] text-muted-foreground leading-relaxed">{desc}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   /* ── Vista principal ─────────────────────────────────────────── */
   const VistaPrincipal = () => {
     const cierre = cierreData;
@@ -420,6 +634,13 @@ export default function AuditoriaFiscal({ empresaId: empresaIdProp = null, empre
 
     // Pares accionables del período actual (sin_cfdi y parciales), máximo 6 en vista principal
     const paresActivos = accionables.slice(0, 6);
+
+    // Sin datos: no hay CFDIs ni movimientos bancarios en el período
+    const sinDatos = !loading && (
+      !cierre ||
+      ((cierre.conciliacion?.total ?? 0) === 0 && (cierre.acciones?.length ?? 0) === 0)
+    );
+    if (sinDatos) return <SinDatos />;
 
     return (
       <div className="space-y-5">
@@ -987,6 +1208,19 @@ export default function AuditoriaFiscal({ empresaId: empresaIdProp = null, empre
               <div className="font-mono text-[8px] text-muted-foreground tracking-widest uppercase">AUDITORÍA · SAT MX</div>
             </div>
           </button>
+
+          {/* Volver a inicio */}
+          {onVolverInicio && (
+            <button
+              onClick={onVolverInicio}
+              className="hidden sm:flex items-center gap-1 font-mono text-[10px] text-muted-foreground hover:text-primary transition-colors border-l border-border pl-4 ml-1 h-6"
+            >
+              <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <path d="M19 12H5M12 5l-7 7 7 7"/>
+              </svg>
+              Mis empresas
+            </button>
+          )}
 
           {/* Período actual */}
           <div className="flex items-center gap-2 px-3 py-1 rounded-md bg-primary/10 border border-primary/20">

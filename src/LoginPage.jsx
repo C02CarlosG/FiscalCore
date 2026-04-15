@@ -37,6 +37,7 @@ export default function LoginPage({ onLogin, onGoRegister }) {
       onLogin(data.access_token, {
         user_id: data.user_id,
         nombre:  data.nombre,
+        email:   data.email ?? email,
         empresas: data.empresas ?? [],
       });
     } catch {

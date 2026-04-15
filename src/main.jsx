@@ -1,22 +1,50 @@
 import "./index.css";
 import { StrictMode, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { isLoggedIn, saveAuth, clearAuth, getEmpresaId, getEmpresaData, getEmpresas } from "./auth.js";
-import LoginPage    from "./LoginPage.jsx";
-import RegisterPage from "./RegisterPage.jsx";
-import AuditoriaFiscal from "../AuditoriaFiscalDashboard.jsx";
+import {
+  isLoggedIn, saveAuth, clearAuth,
+  getEmpresaId, getEmpresaData, getEmpresas, getUser,
+  setEmpresaActiva, addEmpresa, updateProfile,
+} from "./auth.js";
+import LoginPage       from "./LoginPage.jsx";
+import RegisterPage    from "./RegisterPage.jsx";
+import InicioPage      from "./InicioPage.jsx";
+import PerfilPage      from "./PerfilPage.jsx";
+import AuditoriaFiscal from "./AuditoriaFiscalDashboard.jsx";
 
 function App() {
-  const [view, setView] = useState(isLoggedIn() ? "dashboard" : "login");
+  const [view, setView] = useState(isLoggedIn() ? "inicio" : "login");
+  const [empresasVersion, setEmpresasVersion] = useState(0);
+  // userData en estado para que PerfilPage y el avatar reflejen cambios de inmediato
+  const [userData, setUserData] = useState(getUser);
 
-  function handleLogin(token, empresaData) {
-    saveAuth(token, empresaData);
-    setView("dashboard");
+  function handleLogin(token, data) {
+    saveAuth(token, data);
+    setUserData(data);
+    setView("inicio");
   }
 
   function handleLogout() {
     clearAuth();
+    setUserData(null);
     setView("login");
+  }
+
+  function handleSelectEmpresa(empresaId) {
+    setEmpresaActiva(empresaId);
+    setView("dashboard");
+  }
+
+  function handleEmpresaAgregada(empresa) {
+    addEmpresa(empresa);
+    setEmpresasVersion(v => v + 1);
+    // Actualizar empresas en userData local
+    setUserData(u => u ? { ...u, empresas: [...(u.empresas ?? []), empresa] } : u);
+  }
+
+  function handlePerfilActualizado(campos) {
+    updateProfile(campos);
+    setUserData(u => u ? { ...u, ...campos } : u);
   }
 
   if (view === "login") {
@@ -27,12 +55,37 @@ function App() {
     return <RegisterPage onRegistered={handleLogin} onGoLogin={() => setView("login")} />;
   }
 
+  if (view === "perfil") {
+    return (
+      <PerfilPage
+        userData={userData}
+        onVolver={() => setView("inicio")}
+        onPerfilActualizado={handlePerfilActualizado}
+      />
+    );
+  }
+
+  if (view === "inicio") {
+    return (
+      <InicioPage
+        key={empresasVersion}
+        empresas={userData?.empresas ?? getEmpresas()}
+        userData={userData}
+        onSelectEmpresa={handleSelectEmpresa}
+        onLogout={handleLogout}
+        onEmpresaAgregada={handleEmpresaAgregada}
+        onPerfil={() => setView("perfil")}
+      />
+    );
+  }
+
   return (
     <AuditoriaFiscal
       empresaId={getEmpresaId()}
       empresaData={getEmpresaData()}
       empresas={getEmpresas()}
       onLogout={handleLogout}
+      onVolverInicio={() => setView("inicio")}
     />
   );
 }

@@ -88,7 +88,7 @@ def execute(sql: str, params: tuple = (), returning: bool = False) -> Optional[d
 
 def _run_sql_file(filename: str) -> None:
     """Ejecuta un archivo SQL completo en una sola transacción."""
-    path = Path(__file__).parent / filename
+    path = Path(__file__).parent.parent / "database" / "migrations" / filename
     if not path.exists():
         log.warning("DB: archivo SQL no encontrado: %s", path)
         return
@@ -143,6 +143,12 @@ def init_db() -> None:
 
         # 011 es idempotente — tabla usuario_empresas (M:N), migra relaciones existentes
         _run_sql_file("011_usuario_empresas.sql")
+
+        # 012 es idempotente — columnas representante_legal + rfc_representante en empresas
+        _run_sql_file("012_empresa_representante.sql")
+
+        # 013 es idempotente — perfil extendido del contador: telefono, rfc, nombre_despacho, cedula
+        _run_sql_file("013_perfil_contador.sql")
 
     except Exception as e:
         log.error("DB: init_db falló: %s", e)

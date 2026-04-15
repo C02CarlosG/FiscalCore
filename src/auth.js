@@ -47,6 +47,25 @@ export function isLoggedIn() {
   }
 }
 
+export function getEmail() {
+  return getUser()?.email ?? null;
+}
+
+export function addEmpresa(empresa) {
+  const user = getUser();
+  if (!user) return;
+  localStorage.setItem(KEY_USER, JSON.stringify({
+    ...user,
+    empresas: [...(user.empresas ?? []), empresa],
+  }));
+}
+
+export function updateProfile(campos) {
+  const user = getUser();
+  if (!user) return;
+  localStorage.setItem(KEY_USER, JSON.stringify({ ...user, ...campos }));
+}
+
 export function clearAuth() {
   localStorage.removeItem(KEY_TOKEN);
   localStorage.removeItem(KEY_USER);

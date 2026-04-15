@@ -278,7 +278,7 @@ export default function RegisterPage({ onRegistered, onGoLogin }) {
       const data = await res.json();
       if (!res.ok) { setGlobalError(data.detail ?? "Error al crear la cuenta"); return; }
       setToken(data.access_token);
-      setUserData({ user_id: data.user_id, nombre: data.nombre, empresas: [] });
+      setUserData({ user_id: data.user_id, nombre: data.nombre, email: creds.email, empresas: [] });
       setStep(1);
     } catch { setGlobalError("No se pudo conectar con el servidor"); }
     finally  { setSubmitLoading(false); }
