@@ -1129,7 +1129,7 @@ export default function AuditoriaFiscal({ empresaId: empresaIdProp = null, empre
 
               <Seccion
                 titulo="Anticipos Acumulados"
-                subtitulo="Ingresos aplicados como anticipo por notas de crédito (Rel.07)"
+                subtitulo="ClaveProdServ 84111506 · MetodoPago PUE · sin CFDI relacionado (Paso 1 SAT)"
                 items={data.ingresos.anticipos}
                 badge="ANTICIPO"
                 color="#06B6D4"
@@ -1138,9 +1138,9 @@ export default function AuditoriaFiscal({ empresaId: empresaIdProp = null, empre
 
               <Seccion
                 titulo="Facturas con Anticipo Aplicado"
-                subtitulo="Ingresos que incluyen CfdiRelacionados TipoRelacion=07"
+                subtitulo="Ingreso total que referencia el anticipo con TipoRelacion=07 (Paso 2 SAT)"
                 items={data.ingresos.facturas_con_anticipo}
-                badge="APLICA ANTICIPO"
+                badge="FACTURA TOTAL"
                 color="#A78BFA"
                 vacio="Sin facturas con anticipo aplicado"
               />
@@ -1164,7 +1164,7 @@ export default function AuditoriaFiscal({ empresaId: empresaIdProp = null, empre
 
               <Seccion
                 titulo="Aplicaciones de Anticipo"
-                subtitulo="Egresos con TipoRelacion=07 — reducen el ingreso del anticipo original"
+                subtitulo="FormaPago 30 · CFDI Egreso que disminuye el ingreso de la factura total (Paso 3 SAT)"
                 items={data.egresos.aplicaciones_anticipo}
                 badge="APLICA ANTICIPO"
                 color="#F59E0B"

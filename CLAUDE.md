@@ -152,7 +152,7 @@ Toda propuesta funcional debe incluir:
 
 ### Levantar con Docker (recomendado)
 ```bash
-docker-compose up -d        # levanta PostgreSQL 16 + inicializa schema automáticamente (001 → 010)
+docker-compose up -d        # levanta PostgreSQL 16 + inicializa schema automáticamente (001 → 015)
 python -m uvicorn backend.main_api:app --reload --port 8000
 ```
 
@@ -160,8 +160,8 @@ python -m uvicorn backend.main_api:app --reload --port 8000
 ```bash
 pip install fastapi uvicorn python-multipart psycopg2-binary openpyxl pydantic python-jose bcrypt pdfplumber
 
-# La DB se inicializa sola con docker-compose (scripts SQL 001 → 010).
-# init_db() en backend/db.py también aplica migraciones al startup en Railway (incluyendo 011).
+# La DB se inicializa sola con docker-compose (scripts SQL 001 → 015).
+# init_db() en backend/db.py aplica todas las migraciones al startup (Railway-ready).
 python -m uvicorn backend.main_api:app --reload --port 8000
 # Docs interactivos: http://localhost:8000/docs
 ```
@@ -188,7 +188,7 @@ Archivos usuario (XML/CSV/XLSX / Constancia PDF)
     → Motor Fiscal        backend/motor_fiscal.py
     → API REST            backend/main_api.py  (FastAPI, puerto 8000)
     → DB Layer            backend/db.py  (connection pool + init_db con auto-migración)
-    → Base de datos       PostgreSQL 16 (Docker / Railway) — database/migrations/ 001→011
+    → Base de datos       PostgreSQL 16 (Docker / Railway) — database/migrations/ 001→015
     → Frontend            React 18 + Vite 5 (src/)
 ```
 
@@ -203,9 +203,12 @@ backend/                  # Paquete Python (tiene __init__.py)
   banco_parser.py         # Parser CSV/XLSX bancario
   constancia_parser.py    # Parser Constancia PDF
 database/
-  migrations/             # Scripts SQL idempotentes (001 → 011)
+  migrations/             # Scripts SQL idempotentes (001 → 015)
 src/                      # Frontend React + Vite
   AuditoriaFiscalDashboard.jsx
+  InicioPage.jsx          # Selector de empresa / onboarding post-login
+  PerfilPage.jsx          # Perfil del contador (teléfono, RFC, despacho, cédula)
+  AgregarEmpresaModal.jsx # Modal para agregar empresa por Constancia PDF
   LoginPage.jsx
   RegisterPage.jsx
   main.jsx
@@ -219,11 +222,11 @@ src/                      # Frontend React + Vite
 
 | Módulo | Responsabilidad |
 |--------|-----------------|
-| `cfdi_parser.py` | Parsea CFDI XML 3.3 y 4.0. Valida RFC, cuadre matemático, detecta namespace |
+| `cfdi_parser.py` | Parsea CFDI XML 3.3 y 4.0. Valida RFC, cuadre matemático, detecta namespace. Extrae `cfdi_relacionados` (TipoRelacion + UUIDs) y calcula `es_anticipo_sat` (ClaveProdServ 84111506 + PUE + sin CfdiRel) |
 | `banco_parser.py` | Parsea CSV/XLSX bancarios. Auto-detecta encoding y columnas (6+ alias) |
 | `motor_fiscal.py` | Tres motores: Conciliación (banco↔CFDI), Riesgos (8 tipos), Scoring (0–100) |
 | `constancia_parser.py` | Extrae RFC, razón social, régimen, obligaciones, CP, CURP de la Constancia de Situación Fiscal PDF (pdfplumber) |
-| `main_api.py` | FastAPI: auth JWT, contador→N empresas, ingesta CFDI/banco, dashboard, riesgos, scoring, parseo constancia, acciones inline, cierre mensual |
+| `main_api.py` | FastAPI: auth JWT, contador→N empresas, ingesta CFDI/banco, dashboard, riesgos, scoring, parseo constancia, acciones inline, cierre mensual, módulo Emitidos |
 | `db.py` | Connection pool psycopg2 + helpers (`query_all`, `query_one`, `execute`) + `init_db()` con auto-migración al startup |
 
 ### Migraciones (`database/migrations/`)
@@ -241,16 +244,23 @@ src/                      # Frontend React + Vite
 | `009_ppd_estados.sql` | Extiende `tipo_match` con `pendiente_rep`/`pagado_parcial`; extiende `cfdi.estado_pago` con `pendiente_rep` (idempotente) |
 | `010_complemento_tipos.sql` | Agrega `complemento_pago_total`/`complemento_pago_parcial` a `tipo_match`; columnas `pago_id` y `saldo_insoluto` en `conciliaciones` (idempotente) |
 | `011_usuario_empresas.sql` | Tabla `usuario_empresas` (M:N): 1 contador → N empresas; migra relaciones existentes |
+| `012_empresa_representante.sql` | Columnas `representante_legal` y `rfc_representante` en `empresas` (idempotente) |
+| `013_perfil_contador.sql` | Perfil extendido del contador: `telefono`, `rfc`, `nombre_despacho`, `cedula` en `usuarios` (idempotente) |
+| `014_cfdi_relacionados.sql` | Columna `cfdi_relacionados JSONB` + índice GIN en `cfdi` — almacena TipoRelacion + UUIDs del nodo CfdiRelacionados del XML (idempotente) |
+| `015_anticipo_sat.sql` | Columna `es_anticipo_sat BOOLEAN DEFAULT FALSE` en `cfdi` — calculada en el parser según reglas SAT (ClaveProdServ 84111506 + MetodoPago PUE + sin CfdiRelacionados) (idempotente) |
 
 ### Módulos frontend (`src/`)
 
 | Archivo | Responsabilidad |
 |---------|-----------------|
-| `main.jsx` | Raíz: enrutamiento login / register / dashboard basado en estado |
+| `main.jsx` | Raíz: enrutamiento login / register / inicio / dashboard basado en estado |
 | `auth.js` | JWT en localStorage: `saveAuth`, `getToken`, `getEmpresaData`, `isLoggedIn` (verifica exp), `clearAuth` |
 | `LoginPage.jsx` | Split-screen: branding izquierdo + formulario shadcn derecho. Llama `POST /api/v1/auth/login` |
 | `RegisterPage.jsx` | Wizard 3 pasos: credenciales → constancia PDF → confirmación. Llama `POST /api/v1/auth/register` + `POST /api/v1/constancia/parsear` |
-| `AuditoriaFiscalDashboard.jsx` | Dashboard principal: 5 tabs (Resumen, Riesgos, Conciliación, Cargar, Diagnóstico CFDI). Parseo CFDI client-side con DOMParser |
+| `InicioPage.jsx` | Selección de empresa post-login. Lista empresas del contador, permite agregar nueva |
+| `PerfilPage.jsx` | Perfil del contador: teléfono, RFC, despacho, cédula. Llama `PATCH /api/v1/perfil` |
+| `AgregarEmpresaModal.jsx` | Modal para agregar empresa cargando Constancia PDF. Llama `POST /api/v1/mis-empresas` |
+| `AuditoriaFiscalDashboard.jsx` | Dashboard principal con vista única accionable. Incluye tarjetas Emitidos/Recibidos, `TabEmitidos` (secciones por tipo SAT), parseo CFDI client-side con DOMParser |
 | `components/ui/` | Componentes shadcn/ui: button, input, card, badge, label, alert, avatar, dialog, tabs, separator |
 | `lib/utils.js` | Helper `cn()` (clsx + tailwind-merge) |
 | `index.css` | Variables CSS dark theme (navy + cyan) + directivas Tailwind |
@@ -284,6 +294,7 @@ src/                      # Frontend React + Vite
 | GET | `/api/v1/empresas/{id}/conciliaciones/accionables` | Conciliación |
 | POST | `/api/v1/acciones/{deteccion_id}/ejecutar` | Acciones |
 | GET | `/api/v1/empresas/{id}/cierre/{periodo}` | Cierre |
+| GET | `/api/v1/empresas/{id}/emitidos?periodo=YYYY-MM` | Emitidos |
 
 ### Frontend — stack y tema
 - **React 18 + Vite 5 + Tailwind CSS v3 + shadcn/ui** (componentes instalados manualmente en `src/components/ui/`).
@@ -322,7 +333,7 @@ score ∈ [0, 100]
 - ✅ Schema DB, parsers, motor fiscal y API — diseñados y funcionales
 - ✅ Auth JWT — registro con Constancia PDF, login, token
 - ✅ **Modelo usuario-céntrico** — 1 contador → N empresas via `usuario_empresas` (M:N); `POST /api/v1/mis-empresas` crea/reutiliza empresa por RFC y la vincula al contador
-- ✅ Docker Compose — PostgreSQL 16 con auto-init de scripts SQL (001 → 010)
+- ✅ Docker Compose — PostgreSQL 16 con auto-init de scripts SQL (001 → 015)
 - ✅ Frontend migrado a Tailwind CSS v3 + shadcn/ui (tema dark navy + cyan)
 - ✅ **API conectada a PostgreSQL real** — pipeline ingesta → conciliación → riesgos → scoring persiste
 - ✅ **Dashboard conectado a la API** — llama a endpoints reales, sin datos hardcoded
@@ -343,6 +354,48 @@ score ∈ [0, 100]
   - `database/migrations/004_pagos_cfdi.sql` — tablas `pagos_cfdi` + `pagos_relaciones`; `estado_pago` en `cfdi`; `complemento_pago` en tipo_match
   - `backend/motor_fiscal.py` — `PagoResumen`; `MotorConciliacion.conciliar()` acepta `pagos=`; regla: si existe complemento → NO usar heurística; output `{tipo_match:"complemento_pago", cfdis_relacionados:[], confianza:"alta"}`
   - `backend/main_api.py` — `_persistir_complemento_pago()` actualiza `monto_cobrado` y `estado_pago` en CFDIs relacionados; pipeline carga `pagos_cfdi` y pasa a motor
+- ✅ **Módulo Emitidos** — vista completa de CFDIs emitidos (tipo I y E) organizados por lógica fiscal SAT
+  - `database/migrations/014_cfdi_relacionados.sql` — columna `cfdi_relacionados JSONB` + índice GIN
+  - `database/migrations/015_anticipo_sat.sql` — columna `es_anticipo_sat BOOLEAN` calculada en el parser
+  - `backend/cfdi_parser.py` — `_extraer_cfdi_relacionados()`, `_tiene_clave_anticipo()`, campo `es_anticipo_sat`
+  - `GET /api/v1/empresas/{id}/emitidos?periodo=YYYY-MM` — retorna ingresos y egresos clasificados con lógica SAT de 3 pasos; resumen + advertencias
+  - `src/AuditoriaFiscalDashboard.jsx` — tarjetas Emitidos/Recibidos en vista principal, `TabEmitidos` con secciones por paso SAT, drag-and-drop funcional
+
+### Lógica fiscal de anticipos (SAT oficial) — 3 pasos
+
+El módulo Emitidos implementa la lógica SAT oficial. **No mezclar con TipoRelacion=07 en egresos** (era la implementación anterior incorrecta).
+
+```
+Paso 1 — ANTICIPO (Ingreso A):
+  tipo_comprobante = "I"
+  ClaveProdServ   = "84111506"   ← código SAT para anticipos
+  MetodoPago      = "PUE"        ← pago en una sola exhibición
+  Sin CfdiRelacionados
+  → es_anticipo_sat = TRUE (calculado en el parser, persistido en DB)
+  → acumula ingreso en el período de emisión
+
+Paso 2 — FACTURA TOTAL (Ingreso B):
+  tipo_comprobante = "I"
+  CfdiRelacionados TipoRelacion = "07" → UUID del Ingreso A
+  → es_factura_con_anticipo = TRUE (detectado en el endpoint)
+  → ingresa el monto total de la venta
+
+Paso 3 — EGRESO DE APLICACIÓN (Egreso C):
+  tipo_comprobante = "E"
+  FormaPago       = "30"         ← "Aplicación de anticipos"
+  CfdiRelacionados → UUID del Ingreso B
+  → aplicaciones_anticipo (detectado en el endpoint)
+  → REDUCE el ingreso del período de B
+
+Ingreso neto período = total(B) - total(C)
+
+Advertencia activa: existe B sin C correspondiente en el período
+→ tipo: "sin_egreso_anticipo" en la respuesta del endpoint
+```
+
+**Columnas clave en tabla `cfdi`:**
+- `cfdi_relacionados JSONB` — array de `{tipo_relacion, uuids[]}`, extraído del XML
+- `es_anticipo_sat BOOLEAN` — calculado en `cfdi_parser.py` al momento de la carga
 
 ## Convenciones importantes
 

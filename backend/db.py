@@ -153,6 +153,9 @@ def init_db() -> None:
         # 014 es idempotente — cfdi_relacionados JSONB en cfdi (TipoRelacion + UUIDs para anticipos)
         _run_sql_file("014_cfdi_relacionados.sql")
 
+        # 015 es idempotente — columna es_anticipo_sat (ClaveProdServ 84111506 + MetodoPago PUE)
+        _run_sql_file("015_anticipo_sat.sql")
+
     except Exception as e:
         log.error("DB: init_db falló: %s", e)
         raise

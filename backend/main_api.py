@@ -582,7 +582,7 @@ async def subir_cfdi(
                     metodo_pago, forma_pago, uso_cfdi, moneda, tipo_cambio, xml_raw,
                     exportacion, lugar_expedicion,
                     domicilio_fiscal_receptor, regimen_fiscal_receptor,
-                    cfdi_relacionados
+                    cfdi_relacionados, es_anticipo_sat
                 ) VALUES (
                     %s,%s,%s,%s,%s,%s,
                     %s,%s,%s,%s,
@@ -590,7 +590,7 @@ async def subir_cfdi(
                     %s,%s,%s,%s,%s,%s,
                     %s,%s,%s,%s,%s,%s,
                     %s,%s,%s,%s,
-                    %s
+                    %s,%s
                 )
                 ON CONFLICT (uuid) DO NOTHING
                 """,
@@ -612,6 +612,7 @@ async def subir_cfdi(
                     resultado.domicilio_fiscal_receptor,
                     resultado.regimen_fiscal_receptor,
                     json.dumps(resultado.cfdi_relacionados),
+                    resultado.es_anticipo_sat,
                 ),
             )
 
@@ -1344,7 +1345,7 @@ async def get_emitidos(
         SELECT uuid, tipo_comprobante, serie, folio, fecha_emision::date AS fecha,
                rfc_receptor, nombre_receptor, subtotal, descuento, total,
                iva_trasladado, metodo_pago, forma_pago, uso_cfdi, moneda,
-               estado, estado_pago, cfdi_relacionados
+               estado, estado_pago, cfdi_relacionados, es_anticipo_sat
         FROM cfdi
         WHERE empresa_id = %s
           AND rfc_emisor = %s
@@ -1358,24 +1359,18 @@ async def get_emitidos(
     ingresos_raw = [r for r in rows if r["tipo_comprobante"] == "I"]
     egresos_raw  = [r for r in rows if r["tipo_comprobante"] == "E"]
 
-    # ── Calcular flags de anticipos ──────────────────────────
-    # Los UUIDs de ingresos que son anticipos = UUIDs referenciados por
-    # algún egreso con tipo_relacion="07"
-    uuids_anticipos: set[str] = set()
-    for egr in egresos_raw:
-        for rel in (egr["cfdi_relacionados"] or []):
-            if rel.get("tipo_relacion") == "07":
-                uuids_anticipos.update(u.upper() for u in rel.get("uuids", []))
+    # ── Clasificación de ingresos (lógica SAT oficial) ───────
+    # Paso 1: Anticipo = es_anticipo_sat TRUE (ClaveProdServ 84111506 + MetodoPago PUE + sin CfdiRel)
+    anticipos_uuids: set[str] = {r["uuid"].upper() for r in ingresos_raw if r.get("es_anticipo_sat")}
 
-    # UUIDs de ingresos finales (facturas que aplican anticipo)
-    # = ingresos que en su propio cfdi_relacionados tienen tipo_relacion="07"
+    # Paso 2: Factura total = ingreso con CfdiRelacionados TipoRelacion="07"
     uuids_facturas_con_anticipo: set[str] = set()
     for ing in ingresos_raw:
         for rel in (ing["cfdi_relacionados"] or []):
             if rel.get("tipo_relacion") == "07":
                 uuids_facturas_con_anticipo.add(ing["uuid"].upper())
 
-    # ── Serializar ingresos ──────────────────────────────────
+    # ── Serializar filas ─────────────────────────────────────
     def _cfdi_row(r: dict, es_anticipo=False, es_factura_con_anticipo=False) -> dict:
         return {
             "uuid":                    r["uuid"],
@@ -1398,59 +1393,45 @@ async def get_emitidos(
             "es_factura_con_anticipo": es_factura_con_anticipo,
         }
 
-    ventas_servicios     = []
-    anticipos            = []
+    ventas_servicios      = []
+    anticipos             = []
     facturas_con_anticipo = []
 
     for ing in ingresos_raw:
-        uuid_upper = ing["uuid"].upper()
-        if uuid_upper in uuids_anticipos:
+        uid = ing["uuid"].upper()
+        if uid in anticipos_uuids:
             anticipos.append(_cfdi_row(ing, es_anticipo=True))
-        elif uuid_upper in uuids_facturas_con_anticipo:
+        elif uid in uuids_facturas_con_anticipo:
             facturas_con_anticipo.append(_cfdi_row(ing, es_factura_con_anticipo=True))
         else:
             ventas_servicios.append(_cfdi_row(ing))
 
+    # Paso 3: Egreso de aplicación = FormaPago="30"
     notas_credito         = []
     aplicaciones_anticipo = []
 
     for egr in egresos_raw:
-        tiene_rel07 = any(
-            rel.get("tipo_relacion") == "07"
-            for rel in (egr["cfdi_relacionados"] or [])
-        )
-        if tiene_rel07:
+        if egr.get("forma_pago") == "30":
             aplicaciones_anticipo.append(_cfdi_row(egr))
         else:
             notas_credito.append(_cfdi_row(egr))
 
     # ── Advertencias ─────────────────────────────────────────
-    # Facturas con anticipo (tipo_relacion=07 en ingreso) que NO tienen
-    # su CFDI Egreso de aplicación en el mismo período
-    uuids_anticipos_aplicados_por_egreso: set[str] = set()
+    # Factura total (Paso 2) sin su CFDI Egreso de aplicación (Paso 3)
+    # = no existe ningún egreso con forma_pago=30 que la referencie
+    uuids_con_egreso_aplicacion: set[str] = set()
     for egr in egresos_raw:
-        for rel in (egr["cfdi_relacionados"] or []):
-            if rel.get("tipo_relacion") == "07":
-                uuids_anticipos_aplicados_por_egreso.update(
-                    u.upper() for u in rel.get("uuids", [])
-                )
+        if egr.get("forma_pago") == "30":
+            for rel in (egr["cfdi_relacionados"] or []):
+                uuids_con_egreso_aplicacion.update(u.upper() for u in rel.get("uuids", []))
 
     advertencias = []
     for ing in facturas_con_anticipo:
-        # Obtener los UUIDs de anticipos que referencia esta factura
-        uuids_ref = [
-            u.upper()
-            for rel in ing["cfdi_relacionados"]
-            if rel.get("tipo_relacion") == "07"
-            for u in rel.get("uuids", [])
-        ]
-        uuids_sin_egreso = [u for u in uuids_ref if u not in uuids_anticipos_aplicados_por_egreso]
-        if uuids_sin_egreso:
+        if ing["uuid"].upper() not in uuids_con_egreso_aplicacion:
             advertencias.append({
-                "tipo":    "sin_egreso_anticipo",
+                "tipo":         "sin_egreso_anticipo",
                 "uuid_factura": ing["uuid"],
-                "uuids_anticipos_sin_egreso": uuids_sin_egreso,
-                "mensaje": f"La factura {ing['uuid'][:8]}… aplica anticipo(s) pero no se encontró el CFDI Egreso correspondiente en el período",
+                "mensaje":      f"La factura {ing['uuid'][:8]}... aplica anticipo (TipoRel=07) pero no se encontro CFDI Egreso con FormaPago=30 en el periodo",
             })
 
     # ── Resumen ──────────────────────────────────────────────

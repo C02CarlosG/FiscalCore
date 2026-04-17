@@ -124,6 +124,10 @@ class CFDIParsed:
     # TipoRelacion relevantes: "01"=nota crédito, "07"=aplicación anticipo
     cfdi_relacionados: list[dict] = field(default_factory=list)
 
+    # Anticipo SAT: True si el CFDI cumple la definición oficial:
+    #   tipo=I + MetodoPago=PUE + sin CfdiRelacionados + ClaveProdServ=84111506
+    es_anticipo_sat: bool = False
+
     @property
     def es_ingreso(self) -> bool:
         return self.tipo_comprobante == "I"
@@ -229,6 +233,11 @@ class CFDIParser:
 
         # Extraer CfdiRelacionados (siempre — anticipos, notas de crédito, etc.)
         parsed.cfdi_relacionados = self._extraer_cfdi_relacionados(root, ns_cfdi)
+
+        # Detectar anticipo SAT:
+        # tipo=I + MetodoPago=PUE + sin CfdiRelacionados + ClaveProdServ=84111506
+        if parsed.tipo_comprobante == "I" and parsed.metodo_pago == "PUE" and not parsed.cfdi_relacionados:
+            parsed.es_anticipo_sat = self._tiene_clave_anticipo(root, ns_cfdi)
 
         return parsed
 
@@ -340,6 +349,17 @@ class CFDIParser:
                     errores.append("AVISO: Falta RegimenFiscalReceptor (requerido en CFDI 4.0)")
 
         return errores
+
+    def _tiene_clave_anticipo(self, root, ns_cfdi: str) -> bool:
+        """
+        Retorna True si algún Concepto tiene ClaveProdServ = '84111506'
+        (Servicios de facturación / anticipo — clave SAT oficial para anticipos).
+        """
+        CLAVE_ANTICIPO = "84111506"
+        for concepto in root.findall(f".//{ns_cfdi}Concepto"):
+            if concepto.get("ClaveProdServ", "") == CLAVE_ANTICIPO:
+                return True
+        return False
 
     def _extraer_cfdi_relacionados(self, root, ns_cfdi: str) -> list[dict]:
         """
