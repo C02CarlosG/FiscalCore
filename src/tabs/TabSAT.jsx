@@ -29,8 +29,6 @@ export function TabSAT({ empresaId, periodoActual, onCfdiImportado }) {
   const cerRef = useRef(null);
   const keyRef = useRef(null);
 
-  useEffect(() => { if (empresaId) cargarSolicitudes(); }, [empresaId]);
-
   const cargarSolicitudes = async () => {
     if (!empresaId) return;
     setCargandoSol(true);
@@ -41,6 +39,8 @@ export function TabSAT({ empresaId, periodoActual, onCfdiImportado }) {
       if (res.ok) setSolicitudes(await res.json());
     } catch(_) {} finally { setCargandoSol(false); }
   };
+
+  useEffect(() => { if (empresaId) cargarSolicitudes(); }, [empresaId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const solicitar = async () => {
     if (!cerFile || !keyFile || !password || !fechaInicio || !fechaFin) {
@@ -68,6 +68,9 @@ export function TabSAT({ empresaId, periodoActual, onCfdiImportado }) {
         setPassword("");
         setCerFile(null);
         setKeyFile(null);
+        if (cerRef.current) cerRef.current.value = "";
+        if (keyRef.current) keyRef.current.value = "";
+        if (onCfdiImportado) onCfdiImportado();
       } else {
         setMsg({ tipo:"error", texto: data.detail ?? "Error al solicitar" });
       }
