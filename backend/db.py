@@ -156,6 +156,9 @@ def init_db() -> None:
         # 015 es idempotente — columna es_anticipo_sat (ClaveProdServ 84111506 + MetodoPago PUE)
         _run_sql_file("015_anticipo_sat.sql")
 
+        # 016 es idempotente — tabla sat_solicitudes para tracking de Descarga Masiva del SAT
+        _run_sql_file("016_sat_solicitudes.sql")
+
     except Exception as e:
         log.error("DB: init_db falló: %s", e)
         raise

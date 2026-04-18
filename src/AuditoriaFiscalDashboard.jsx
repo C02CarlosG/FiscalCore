@@ -18,6 +18,7 @@ import { TabRiesgos }      from "./tabs/TabRiesgos.jsx";
 import { TabConciliacion } from "./tabs/TabConciliacion.jsx";
 import { TabIngesta }      from "./tabs/TabIngesta.jsx";
 import { TabDiagnostico }  from "./tabs/TabDiagnostico.jsx";
+import { TabSAT }          from "./tabs/TabSAT.jsx";
 
 
 /* ── Main Component ──────────────────────────────────────────── */
@@ -215,6 +216,7 @@ export default function AuditoriaFiscal({ empresaId: empresaIdProp = null, empre
     ["conciliacion",  "Conciliación"],
     ["ingesta",       "Cargar archivos"],
     ["diagnostico",   diagnostico.length > 0 ? `Diagnóstico (${diagnostico.length})` : "Diagnóstico CFDI"],
+    ["sat",           "Descarga SAT"],
   ];
 
   /* ── Onboarding: sin datos en el período ────────────────────── */
@@ -938,6 +940,16 @@ export default function AuditoriaFiscal({ empresaId: empresaIdProp = null, empre
             diagnostico={diagnostico}
             setDiagnostico={setDiagnostico}
             onIrIngesta={() => setTab("ingesta")}
+          />
+        )}
+        {tab === "sat" && (
+          <TabSAT
+            empresaId={empresaId}
+            periodoActual={periodoActual}
+            onCfdiImportado={() => Promise.all([
+              fetchCierre(empresaId, periodoActual),
+              fetchEmitidos(empresaId, periodoActual),
+            ])}
           />
         )}
       </main>
