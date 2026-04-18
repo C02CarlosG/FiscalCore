@@ -177,7 +177,8 @@ python -m uvicorn backend.main_api:app --reload --port 8000
 ### Frontend (React + Vite)
 ```bash
 npm install
-npm run dev   # → http://localhost:5173
+npm run dev   # → http://localhost:3001 (proxy /api → http://localhost:8000)
+# Requiere .env.local con VITE_API_URL= (vacío) para usar URLs relativas vía proxy
 ```
 
 ## Arquitectura
@@ -248,19 +249,32 @@ src/                      # Frontend React + Vite
 | `013_perfil_contador.sql` | Perfil extendido del contador: `telefono`, `rfc`, `nombre_despacho`, `cedula` en `usuarios` (idempotente) |
 | `014_cfdi_relacionados.sql` | Columna `cfdi_relacionados JSONB` + índice GIN en `cfdi` — almacena TipoRelacion + UUIDs del nodo CfdiRelacionados del XML (idempotente) |
 | `015_anticipo_sat.sql` | Columna `es_anticipo_sat BOOLEAN DEFAULT FALSE` en `cfdi` — calculada en el parser según reglas SAT (ClaveProdServ 84111506 + MetodoPago PUE + sin CfdiRelacionados) (idempotente) |
+| `016_sat_solicitudes.sql` | Tabla `sat_solicitudes` para tracking de solicitudes de Descarga Masiva SAT: estados `pendiente→solicitado→en_proceso→terminado→fallo→descargado`; columnas `id_solicitud_sat`, `num_cfdi`, `num_paquetes`, `paquetes_descargados`, `cfdi_importados`, `error_msg` (idempotente) |
 
 ### Módulos frontend (`src/`)
 
 | Archivo | Responsabilidad |
 |---------|-----------------|
 | `main.jsx` | Raíz: enrutamiento login / register / inicio / dashboard basado en estado |
-| `auth.js` | JWT en localStorage: `saveAuth`, `getToken`, `getEmpresaData`, `isLoggedIn` (verifica exp), `clearAuth` |
+| `auth.js` | JWT + período fiscal en localStorage: `saveAuth`, `getToken`, `getEmpresaData`, `isLoggedIn` (verifica exp), `clearAuth`. Período: `getPeriodoSugerido()` (regla día 17 MX), `getPeriodoEmpresa(id)`, `setPeriodoEmpresa(id, periodo)` |
 | `LoginPage.jsx` | Split-screen: branding izquierdo + formulario shadcn derecho. Llama `POST /api/v1/auth/login` |
 | `RegisterPage.jsx` | Wizard 3 pasos: credenciales → constancia PDF → confirmación. Llama `POST /api/v1/auth/register` + `POST /api/v1/constancia/parsear` |
 | `InicioPage.jsx` | Selección de empresa post-login. Lista empresas del contador, permite agregar nueva |
 | `PerfilPage.jsx` | Perfil del contador: teléfono, RFC, despacho, cédula. Llama `PATCH /api/v1/perfil` |
 | `AgregarEmpresaModal.jsx` | Modal para agregar empresa cargando Constancia PDF. Llama `POST /api/v1/mis-empresas` |
-| `AuditoriaFiscalDashboard.jsx` | Dashboard principal con vista única accionable. Incluye tarjetas Emitidos/Recibidos, `TabEmitidos` (secciones por tipo SAT), parseo CFDI client-side con DOMParser |
+| `AuditoriaFiscalDashboard.jsx` | Dashboard principal (~500 líneas). Orquesta tabs y vista principal accionable. Importa de `src/lib/`, `src/components/`, `src/tabs/` |
+| `components/ScoreGauge.jsx` | Gauge SVG semicircular para score fiscal |
+| `components/TrendLine.jsx` | Gráfica SVG de tendencia para historial de scoring |
+| `components/ConciliacionBar.jsx` | Barra horizontal de progreso de conciliación con leyenda |
+| `components/AccionItem.jsx` | Tarjeta de acción inline con badge de severidad |
+| `tabs/TabEmitidos.jsx` | Tab de CFDIs emitidos/recibidos con lógica SAT de anticipos |
+| `tabs/TabRiesgos.jsx` | Tab de riesgos detectados con acciones inline |
+| `tabs/TabConciliacion.jsx` | Tab de conciliación banco↔CFDI |
+| `tabs/TabIngesta.jsx` | Tab de carga de archivos XML/CSV/XLSX |
+| `tabs/TabDiagnostico.jsx` | Tab de diagnóstico CFDI client-side con DOMParser |
+| `tabs/TabSAT.jsx` | Tab de descarga masiva SAT con FIEL: upload .cer/.key, rango fechas, historial de solicitudes |
+| `lib/constants.js` | Exports: `API_URL`, `authHeaders`, catálogos SAT (`FORMA_PAGO`, `TIPO_LABEL`), mapas de severidad/estado, helpers (`fmt`, `fmtK`, `periodoLabel`, `scoreColor`, `scoreClasif`) |
+| `lib/cfdiParser.js` | `parseCFDI(xmlText, filename)` — parseo client-side de XMLs CFDI |
 | `components/ui/` | Componentes shadcn/ui: button, input, card, badge, label, alert, avatar, dialog, tabs, separator |
 | `lib/utils.js` | Helper `cn()` (clsx + tailwind-merge) |
 | `index.css` | Variables CSS dark theme (navy + cyan) + directivas Tailwind |
@@ -295,6 +309,11 @@ src/                      # Frontend React + Vite
 | POST | `/api/v1/acciones/{deteccion_id}/ejecutar` | Acciones |
 | GET | `/api/v1/empresas/{id}/cierre/{periodo}` | Cierre |
 | GET | `/api/v1/empresas/{id}/emitidos?periodo=YYYY-MM` | Emitidos |
+| GET | `/api/v1/empresas/{id}/periodos` | Cierre |
+| POST | `/api/v1/sat/solicitar` | SAT FIEL |
+| GET | `/api/v1/sat/solicitudes` | SAT FIEL |
+| POST | `/api/v1/sat/solicitudes/{id}/verificar` | SAT FIEL |
+| POST | `/api/v1/sat/solicitudes/{id}/descargar` | SAT FIEL |
 
 ### Frontend — stack y tema
 - **React 18 + Vite 5 + Tailwind CSS v3 + shadcn/ui** (componentes instalados manualmente en `src/components/ui/`).
@@ -333,7 +352,7 @@ score ∈ [0, 100]
 - ✅ Schema DB, parsers, motor fiscal y API — diseñados y funcionales
 - ✅ Auth JWT — registro con Constancia PDF, login, token
 - ✅ **Modelo usuario-céntrico** — 1 contador → N empresas via `usuario_empresas` (M:N); `POST /api/v1/mis-empresas` crea/reutiliza empresa por RFC y la vincula al contador
-- ✅ Docker Compose — PostgreSQL 16 con auto-init de scripts SQL (001 → 015)
+- ✅ Docker Compose — PostgreSQL 16 con auto-init de scripts SQL (001 → 016)
 - ✅ Frontend migrado a Tailwind CSS v3 + shadcn/ui (tema dark navy + cyan)
 - ✅ **API conectada a PostgreSQL real** — pipeline ingesta → conciliación → riesgos → scoring persiste
 - ✅ **Dashboard conectado a la API** — llama a endpoints reales, sin datos hardcoded
@@ -353,13 +372,22 @@ score ∈ [0, 100]
   - `backend/cfdi_parser.py` — `PagoCFDI`, `DoctoRelacionado`, `_extraer_pagos()`, `es_pago` property; validación de cuadre omitida para tipo P
   - `database/migrations/004_pagos_cfdi.sql` — tablas `pagos_cfdi` + `pagos_relaciones`; `estado_pago` en `cfdi`; `complemento_pago` en tipo_match
   - `backend/motor_fiscal.py` — `PagoResumen`; `MotorConciliacion.conciliar()` acepta `pagos=`; regla: si existe complemento → NO usar heurística; output `{tipo_match:"complemento_pago", cfdis_relacionados:[], confianza:"alta"}`
-  - `backend/main_api.py` — `_persistir_complemento_pago()` actualiza `monto_cobrado` y `estado_pago` en CFDIs relacionados; pipeline carga `pagos_cfdi` y pasa a motor
+- ✅ **Selector de período fiscal** — badge "PERÍODO" en header con popover clickeable; default inteligente (regla día 17 MX: antes del 17 → mes anterior); persistencia por empresa (`fc_periodo_{empresaId}` en localStorage); recarga automática de datos al cambiar período
+  - `src/auth.js` — `getPeriodoSugerido()`, `getPeriodoEmpresa()`, `setPeriodoEmpresa()`
+  - `vite.config.js` — proxy `/api → http://localhost:8000` + puerto fijo 3001
+  - `GET /api/v1/empresas/{id}/periodos` — lista los 24 meses con datos (CFDI + banco + scoring)
 - ✅ **Módulo Emitidos** — vista completa de CFDIs emitidos (tipo I y E) organizados por lógica fiscal SAT
   - `database/migrations/014_cfdi_relacionados.sql` — columna `cfdi_relacionados JSONB` + índice GIN
   - `database/migrations/015_anticipo_sat.sql` — columna `es_anticipo_sat BOOLEAN` calculada en el parser
-  - `backend/cfdi_parser.py` — `_extraer_cfdi_relacionados()`, `_tiene_clave_anticipo()`, campo `es_anticipo_sat`
   - `GET /api/v1/empresas/{id}/emitidos?periodo=YYYY-MM` — retorna ingresos y egresos clasificados con lógica SAT de 3 pasos; resumen + advertencias
-  - `src/AuditoriaFiscalDashboard.jsx` — tarjetas Emitidos/Recibidos en vista principal, `TabEmitidos` con secciones por paso SAT, drag-and-drop funcional
+- ✅ **Refactor frontend** — `AuditoriaFiscalDashboard.jsx` descompuesto: lógica en `src/lib/constants.js` + `src/lib/cfdiParser.js`, componentes en `src/components/` (ScoreGauge, TrendLine, ConciliacionBar, AccionItem), tabs en `src/tabs/` (TabEmitidos, TabRiesgos, TabConciliacion, TabIngesta, TabDiagnostico, TabSAT). Dashboard ~500 líneas.
+- ✅ **Refactor backend** — `main_api.py` 1,494 → 69 líneas. Routers: `backend/routers/{auth,empresas,ingesta,riesgos,scoring,conciliacion,emitidos,dashboard,sat}.py`. Deps compartidas en `backend/deps.py`. Schemas en `backend/schemas.py`.
+- ✅ **Descarga masiva SAT con FIEL** — integración completa con portal SAT vía `satcfdi`
+  - `database/migrations/016_sat_solicitudes.sql` — tabla `sat_solicitudes` para tracking async
+  - `backend/sat_fiel.py` — `cargar_fiel()`, `solicitar_descarga()`, `verificar_solicitud()`, `descargar_paquete()` usando `satcfdi` (graceful degradation si no instalado)
+  - `backend/routers/sat.py` — 4 endpoints: `POST /sat/solicitar`, `GET /sat/solicitudes`, `POST /sat/solicitudes/{id}/verificar`, `POST /sat/solicitudes/{id}/descargar` (con BackgroundTasks)
+  - `src/tabs/TabSAT.jsx` — UI: toggle emitidos/recibidos, rango fechas, upload .cer/.key, contraseña, historial con 6 estados (pendiente→descargado)
+  - `requirements.txt` — `satcfdi` agregado para Railway
 
 ### Lógica fiscal de anticipos (SAT oficial) — 3 pasos
 
