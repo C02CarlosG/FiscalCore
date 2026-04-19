@@ -146,12 +146,25 @@ async def verificar_solicitud_endpoint(
     except FIELError as e:
         raise HTTPException(status_code=502, detail=str(e))
 
-    # Mapear código de estado SAT a estado interno.
-    # verificar_solicitud retorna "estado" como int del enum EstadoSolicitud:
-    #   1=Aceptada, 2=EnProceso, 3=Terminada, 4=Error, 5=Rechazada, 6=Vencida
-    codigo_int = resultado.get("estado", 0)
-    ESTADO_MAP = {1: "en_proceso", 2: "en_proceso", 3: "terminado", 4: "fallo", 5: "fallo", 6: "fallo"}
-    nuevo_estado = ESTADO_MAP.get(codigo_int, "en_proceso")
+    # satcfdi puede devolver EstadoSolicitud como enum Python o como string.
+    # Normalizamos a minúsculas para hacer el match robusto.
+    estado_raw = resultado.get("estado")
+    estado_str = (
+        str(estado_raw.value).lower().strip()
+        if hasattr(estado_raw, "value")
+        else str(estado_raw or "").lower().strip()
+    )
+    ESTADO_MAP = {
+        "aceptada":   "en_proceso",
+        "en proceso": "en_proceso",
+        "en_proceso": "en_proceso",
+        "terminada":  "terminado",
+        "error":      "fallo",
+        "rechazada":  "fallo",
+        "falla":      "fallo",
+        "vencida":    "fallo",
+    }
+    nuevo_estado = ESTADO_MAP.get(estado_str, "en_proceso")
 
     id_paquetes = resultado.get("id_paquetes", [])
     num_cfdi = resultado.get("num_cfdi", 0)
@@ -272,9 +285,11 @@ def _importar_paquetes_bg(
         except FIELError as e:
             _log.error("Error descargando paquete %s: %s", id_paq, e)
 
+    estado_final = "descargado" if total_importados > 0 else "fallo"
+    error_final = None if total_importados > 0 else "Ningún CFDI pudo importarse correctamente"
     db.execute(
-        "UPDATE sat_solicitudes SET cfdi_importados=%s, estado='descargado', updated_at=NOW() WHERE id=%s",
-        (total_importados, solicitud_id),
+        "UPDATE sat_solicitudes SET cfdi_importados=%s, estado=%s, error_msg=%s, updated_at=NOW() WHERE id=%s",
+        (total_importados, estado_final, error_final, solicitud_id),
     )
 
     # Correr pipeline conciliación/riesgos/scoring si se importaron CFDIs

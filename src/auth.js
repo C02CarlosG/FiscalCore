@@ -71,3 +71,22 @@ export function clearAuth() {
   localStorage.removeItem(KEY_USER);
   localStorage.removeItem("fc_empresa_activa");
 }
+
+// Regla fiscal MX: antes del día 17 → cierre del mes anterior
+export function getPeriodoSugerido() {
+  const now = new Date();
+  const target = now.getDate() < 17
+    ? new Date(now.getFullYear(), now.getMonth() - 1, 1)
+    : now;
+  return `${target.getFullYear()}-${String(target.getMonth() + 1).padStart(2, "0")}`;
+}
+
+export function getPeriodoEmpresa(empresaId) {
+  if (!empresaId) return getPeriodoSugerido();
+  return localStorage.getItem(`fc_periodo_${empresaId}`) ?? getPeriodoSugerido();
+}
+
+export function setPeriodoEmpresa(empresaId, periodo) {
+  if (!empresaId || !periodo) return;
+  localStorage.setItem(`fc_periodo_${empresaId}`, periodo);
+}

@@ -14,6 +14,52 @@ const ESTADO_SAT = {
   descargado:  { label:"Descargado",   cls:"text-emerald-400 bg-emerald-400/10 border-emerald-400/20" },
 };
 
+function FielForm({ label, onSubmit, cargando, submitLabel }) {
+  const [cerFile, setCerFile] = useState(null);
+  const [keyFile, setKeyFile] = useState(null);
+  const [password, setPassword] = useState("");
+  const cerRef = useRef(null);
+  const keyRef = useRef(null);
+
+  const handleSubmit = () => {
+    if (!cerFile || !keyFile || !password) return;
+    onSubmit({ cerFile, keyFile, password });
+  };
+
+  return (
+    <div className="mt-3 p-3 rounded-lg border border-primary/20 bg-primary/5 space-y-3">
+      <div className="font-mono text-[9px] text-primary tracking-widest uppercase">{label}</div>
+      <div className="grid grid-cols-2 gap-2">
+        {[
+          { ref: cerRef, label: ".cer", accept: ".cer", file: cerFile, setFile: setCerFile },
+          { ref: keyRef, label: ".key", accept: ".key", file: keyFile, setFile: setKeyFile },
+        ].map(f => (
+          <div key={f.label}>
+            <input ref={f.ref} type="file" accept={f.accept} className="hidden"
+              onChange={e => f.setFile(e.target.files[0])} />
+            <button onClick={() => f.ref.current?.click()}
+              className={cn("w-full py-1.5 rounded border font-mono text-[10px] transition-all text-left px-2",
+                f.file
+                  ? "border-emerald-500/40 bg-emerald-500/5 text-emerald-400"
+                  : "border-border hover:border-primary/40 text-muted-foreground"
+              )}>
+              {f.file ? `✓ ${f.file.name}` : `Seleccionar ${f.accept}`}
+            </button>
+          </div>
+        ))}
+      </div>
+      <input type="password" value={password} onChange={e => setPassword(e.target.value)}
+        placeholder="Contraseña del archivo .key"
+        className="w-full bg-background border border-border rounded px-3 py-1.5 text-foreground font-mono text-xs focus:outline-none focus:border-primary" />
+      <Button size="sm" onClick={handleSubmit}
+        disabled={cargando || !cerFile || !keyFile || !password}
+        className="w-full font-mono text-xs">
+        {cargando ? "Procesando…" : submitLabel}
+      </Button>
+    </div>
+  );
+}
+
 export function TabSAT({ empresaId, periodoActual, onCfdiImportado }) {
   const [cerFile, setCerFile] = useState(null);
   const [keyFile, setKeyFile] = useState(null);
@@ -25,6 +71,11 @@ export function TabSAT({ empresaId, periodoActual, onCfdiImportado }) {
   const [msg, setMsg] = useState(null);
   const [solicitudes, setSolicitudes] = useState([]);
   const [cargandoSol, setCargandoSol] = useState(false);
+
+  // Panel de acción expandido por solicitud: { id, accion: "verificar"|"descargar" }
+  const [accionActiva, setAccionActiva] = useState(null);
+  const [accionCargando, setAccionCargando] = useState(false);
+  const [accionMsg, setAccionMsg] = useState(null);
 
   const cerRef = useRef(null);
   const keyRef = useRef(null);
@@ -79,6 +130,85 @@ export function TabSAT({ empresaId, periodoActual, onCfdiImportado }) {
     } finally { setCargando(false); }
   };
 
+  const toggleAccion = (solicitudId, accion) => {
+    setAccionMsg(null);
+    setAccionActiva(prev =>
+      prev?.id === solicitudId && prev?.accion === accion ? null : { id: solicitudId, accion }
+    );
+  };
+
+  const ejecutarVerificar = async (solicitudId, { cerFile, keyFile, password }) => {
+    setAccionCargando(true);
+    setAccionMsg(null);
+    const fd = new FormData();
+    fd.append("cer_file", cerFile);
+    fd.append("key_file", keyFile);
+    fd.append("password", password);
+    try {
+      const res = await fetch(`${API_URL}/api/v1/sat/solicitudes/${solicitudId}/verificar`, {
+        method: "POST", body: fd, headers: authHeaders(),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setAccionMsg({ tipo:"ok", texto:`Estado: ${data.estado} · ${data.num_cfdi} CFDIs · ${data.num_paquetes} paquetes` });
+        setAccionActiva(null);
+        await cargarSolicitudes();
+      } else {
+        setAccionMsg({ tipo:"error", texto: data.detail ?? "Error al verificar" });
+      }
+    } catch(_) {
+      setAccionMsg({ tipo:"error", texto:"Error de conexión" });
+    } finally { setAccionCargando(false); }
+  };
+
+  // Descargar: primero verifica para obtener id_paquetes, luego descarga
+  const ejecutarDescargar = async (solicitudId, { cerFile, keyFile, password }) => {
+    setAccionCargando(true);
+    setAccionMsg(null);
+    try {
+      // Paso 1 — verificar para obtener id_paquetes
+      const fdV = new FormData();
+      fdV.append("cer_file", cerFile);
+      fdV.append("key_file", keyFile);
+      fdV.append("password", password);
+      const resV = await fetch(`${API_URL}/api/v1/sat/solicitudes/${solicitudId}/verificar`, {
+        method: "POST", body: fdV, headers: authHeaders(),
+      });
+      const dataV = await resV.json();
+      if (!resV.ok) {
+        setAccionMsg({ tipo:"error", texto: dataV.detail ?? "Error al verificar" });
+        return;
+      }
+      const idPaquetes = dataV.id_paquetes ?? [];
+      if (idPaquetes.length === 0) {
+        setAccionMsg({ tipo:"error", texto:"No hay paquetes disponibles para descargar" });
+        await cargarSolicitudes();
+        return;
+      }
+
+      // Paso 2 — descargar paquetes
+      const fdD = new FormData();
+      fdD.append("cer_file", cerFile);
+      fdD.append("key_file", keyFile);
+      fdD.append("password", password);
+      fdD.append("id_paquetes", JSON.stringify(idPaquetes));
+      const resD = await fetch(`${API_URL}/api/v1/sat/solicitudes/${solicitudId}/descargar`, {
+        method: "POST", body: fdD, headers: authHeaders(),
+      });
+      const dataD = await resD.json();
+      if (resD.ok) {
+        setAccionMsg({ tipo:"ok", texto:`Descarga iniciada — ${dataD.paquetes} paquete(s) en proceso` });
+        setAccionActiva(null);
+        await cargarSolicitudes();
+        if (onCfdiImportado) onCfdiImportado();
+      } else {
+        setAccionMsg({ tipo:"error", texto: dataD.detail ?? "Error al descargar" });
+      }
+    } catch(_) {
+      setAccionMsg({ tipo:"error", texto:"Error de conexión" });
+    } finally { setAccionCargando(false); }
+  };
+
   return (
     <div className="space-y-6">
       <div>
@@ -96,7 +226,7 @@ export function TabSAT({ empresaId, periodoActual, onCfdiImportado }) {
         </p>
       </div>
 
-      {/* Formulario */}
+      {/* Formulario nueva solicitud */}
       <Card>
         <CardHeader><CardTitle className="text-sm">Nueva solicitud de descarga</CardTitle></CardHeader>
         <CardContent className="space-y-4">
@@ -175,6 +305,14 @@ export function TabSAT({ empresaId, periodoActual, onCfdiImportado }) {
           <Button variant="ghost" size="sm" onClick={cargarSolicitudes} disabled={cargandoSol}
             className="font-mono text-[10px] h-6">{cargandoSol ? "…" : "↺ Actualizar"}</Button>
         </div>
+
+        {accionMsg && (
+          <div className={cn("mb-3 px-4 py-2.5 rounded-lg border font-mono text-sm",
+            accionMsg.tipo==="ok" ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400"
+                                  : "bg-red-500/10 border-red-500/30 text-red-400"
+          )}>{accionMsg.texto}</div>
+        )}
+
         {solicitudes.length === 0 ? (
           <div className="rounded-lg border border-dashed border-border p-6 text-center text-xs text-muted-foreground font-mono">
             Sin solicitudes previas
@@ -183,34 +321,86 @@ export function TabSAT({ empresaId, periodoActual, onCfdiImportado }) {
           <div className="space-y-2">
             {solicitudes.map(s => {
               const est = ESTADO_SAT[s.estado] ?? ESTADO_SAT.pendiente;
+              const puedeVerificar = ["solicitado", "en_proceso"].includes(s.estado);
+              const puedeDescargar = s.estado === "terminado";
+              const isAccionAbierta = accionActiva?.id === s.id;
+
               return (
-                <div key={s.id} className="flex items-center gap-3 p-3 rounded-lg border bg-card">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap mb-1">
-                      <span className={cn("font-mono text-[9px] font-bold px-1.5 py-0.5 rounded border", est.cls)}>
-                        {est.label}
-                      </span>
-                      <span className="font-mono text-[10px] text-foreground">
-                        {s.tipo === "emitidos" ? "Emitidos" : "Recibidos"}
-                      </span>
-                      <span className="font-mono text-[10px] text-muted-foreground">
-                        {periodoLabel(s.periodo_inicio)}
-                        {s.periodo_fin !== s.periodo_inicio && ` → ${periodoLabel(s.periodo_fin)}`}
-                      </span>
-                    </div>
-                    {s.num_cfdi != null && (
-                      <div className="font-mono text-[10px] text-muted-foreground">
-                        {s.num_cfdi} CFDIs · {s.num_paquetes ?? 0} paquetes
-                        {s.cfdi_importados > 0 && ` · ${s.cfdi_importados} importados`}
+                <div key={s.id} className="rounded-lg border bg-card overflow-hidden">
+                  {/* Fila principal */}
+                  <div className="flex items-center gap-3 p-3">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap mb-1">
+                        <span className={cn("font-mono text-[9px] font-bold px-1.5 py-0.5 rounded border", est.cls)}>
+                          {est.label}
+                        </span>
+                        <span className="font-mono text-[10px] text-foreground">
+                          {s.tipo === "emitidos" ? "Emitidos" : "Recibidos"}
+                        </span>
+                        <span className="font-mono text-[10px] text-muted-foreground">
+                          {periodoLabel(s.periodo_inicio)}
+                          {s.periodo_fin !== s.periodo_inicio && ` → ${periodoLabel(s.periodo_fin)}`}
+                        </span>
                       </div>
-                    )}
-                    {s.error_msg && (
-                      <div className="font-mono text-[10px] text-red-400 mt-0.5 truncate">{s.error_msg}</div>
-                    )}
+                      {s.num_cfdi != null && (
+                        <div className="font-mono text-[10px] text-muted-foreground">
+                          {s.num_cfdi} CFDIs · {s.num_paquetes ?? 0} paquetes
+                          {s.cfdi_importados > 0 && ` · ${s.cfdi_importados} importados`}
+                        </div>
+                      )}
+                      {s.error_msg && (
+                        <div className="font-mono text-[10px] text-red-400 mt-0.5 truncate">{s.error_msg}</div>
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      <div className="font-mono text-[10px] text-muted-foreground">
+                        {new Date(s.created_at).toLocaleDateString("es-MX",{day:"2-digit",month:"short"})}
+                      </div>
+                      {puedeVerificar && (
+                        <button onClick={() => toggleAccion(s.id, "verificar")}
+                          className={cn("font-mono text-[10px] px-2 py-1 rounded border transition-all",
+                            isAccionAbierta && accionActiva?.accion === "verificar"
+                              ? "border-primary text-primary bg-primary/10"
+                              : "border-sky-500/40 text-sky-400 hover:bg-sky-500/10"
+                          )}>
+                          Verificar
+                        </button>
+                      )}
+                      {puedeDescargar && (
+                        <button onClick={() => toggleAccion(s.id, "descargar")}
+                          className={cn("font-mono text-[10px] px-2 py-1 rounded border transition-all",
+                            isAccionAbierta && accionActiva?.accion === "descargar"
+                              ? "border-primary text-primary bg-primary/10"
+                              : "border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10"
+                          )}>
+                          Descargar
+                        </button>
+                      )}
+                    </div>
                   </div>
-                  <div className="font-mono text-[10px] text-muted-foreground flex-shrink-0">
-                    {new Date(s.created_at).toLocaleDateString("es-MX",{day:"2-digit",month:"short"})}
-                  </div>
+
+                  {/* Panel FIEL inline */}
+                  {isAccionAbierta && accionActiva?.accion === "verificar" && (
+                    <div className="border-t border-border px-3 pb-3">
+                      <FielForm
+                        label="Confirma tu FIEL para verificar"
+                        submitLabel="Verificar con SAT"
+                        cargando={accionCargando}
+                        onSubmit={creds => ejecutarVerificar(s.id, creds)}
+                      />
+                    </div>
+                  )}
+                  {isAccionAbierta && accionActiva?.accion === "descargar" && (
+                    <div className="border-t border-border px-3 pb-3">
+                      <FielForm
+                        label="Confirma tu FIEL para descargar"
+                        submitLabel="Verificar y descargar CFDIs"
+                        cargando={accionCargando}
+                        onSubmit={creds => ejecutarDescargar(s.id, creds)}
+                      />
+                    </div>
+                  )}
                 </div>
               );
             })}
