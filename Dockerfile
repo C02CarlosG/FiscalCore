@@ -28,6 +28,6 @@ COPY database/ ./database/
 COPY --from=frontend-build /app/dist ./dist
 
 ENV PORT=8080
-EXPOSE 8080
+EXPOSE $PORT
 
-CMD ["uvicorn", "backend.main_api:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["sh", "-c", "uvicorn backend.main_api:app --host 0.0.0.0 --port ${PORT:-8080}"]
