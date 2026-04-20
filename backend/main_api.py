@@ -7,8 +7,12 @@ from __future__ import annotations
 import logging
 import os
 
+from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 
 from . import db
 from .deps import JWT_SECRET, _JWT_INSECURE_DEFAULT
@@ -61,10 +65,16 @@ async def _startup() -> None:
     _log.info("FiscalCore API lista")
 
 
-@app.get("/", tags=["Sistema"])
-async def raiz():
-    return {
-        "sistema": "Plataforma de Auditoría Fiscal Preventiva",
-        "version": "1.0.0",
-        "estado": "operativo",
-    }
+@app.get("/api/health", tags=["Sistema"])
+async def health():
+    return {"estado": "operativo", "version": "1.0.0"}
+
+# Servir frontend React (dist/) en producción
+_DIST = Path(__file__).parent.parent / "dist"
+if _DIST.exists():
+    app.mount("/assets", StaticFiles(directory=_DIST / "assets"), name="assets")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def spa_fallback(full_path: str):
+        index = _DIST / "index.html"
+        return FileResponse(str(index))
