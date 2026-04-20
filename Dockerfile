@@ -5,7 +5,6 @@ COPY package.json package-lock.json* ./
 RUN npm install
 COPY index.html vite.config.js tailwind.config.js postcss.config.js ./
 COPY src/ ./src/
-COPY public/ ./public/ 2>/dev/null || true
 RUN npm run build
 
 # ── Etapa 2: Imagen de producción ────────────────────────────────
