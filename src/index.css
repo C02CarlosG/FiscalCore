@@ -4,38 +4,83 @@
 
 @layer base {
   :root {
-    /* Dark navy theme */
-    --background: 225 40% 8%;
-    --foreground: 210 40% 98%;
+    /* ── Terminal Bloomberg — dark ── */
+    --background: 30 15% 5%;        /* #0A0800 negro cálido */
+    --foreground: 40 45% 88%;       /* #E8D5A3 crema */
 
-    --card: 222 47% 11%;
-    --card-foreground: 210 40% 98%;
+    --card: 30 12% 8%;
+    --card-foreground: 40 45% 88%;
 
-    --primary: 189 94% 43%;
-    --primary-foreground: 222 47% 11%;
+    --primary: 38 95% 52%;          /* ámbar */
+    --primary-foreground: 30 15% 5%;
 
-    --secondary: 215 28% 17%;
-    --secondary-foreground: 210 40% 98%;
+    --secondary: 30 10% 13%;
+    --secondary-foreground: 40 45% 88%;
 
-    --muted: 215 28% 17%;
-    --muted-foreground: 218 11% 65%;
+    --muted: 30 10% 13%;
+    --muted-foreground: 40 18% 55%;
 
-    --accent: 215 28% 17%;
-    --accent-foreground: 210 40% 98%;
+    --accent: 30 10% 13%;
+    --accent-foreground: 40 45% 88%;
 
-    --destructive: 0 91% 71%;
-    --destructive-foreground: 210 40% 98%;
+    --destructive: 0 85% 62%;
+    --destructive-foreground: 40 45% 88%;
 
-    --border: 215 28% 17%;
-    --input:  215 28% 17%;
-    --ring:   189 94% 43%;
+    --border: 30 10% 14%;
+    --input:  30 10% 14%;
+    --ring:   38 95% 52%;
 
     --radius: 0.5rem;
+  }
+
+  /* ── Notaría Moderna — light ── */
+  .light {
+    --background: 40 25% 96%;       /* #F8F6F1 marfil */
+    --foreground: 150 28% 12%;      /* casi negro verdoso */
+
+    --card: 40 30% 99%;
+    --card-foreground: 150 28% 12%;
+
+    --primary: 150 47% 22%;         /* #1A4731 verde notarial */
+    --primary-foreground: 40 25% 96%;
+
+    --secondary: 40 18% 90%;
+    --secondary-foreground: 150 28% 12%;
+
+    --muted: 40 18% 90%;
+    --muted-foreground: 150 15% 38%;
+
+    --accent: 40 18% 90%;
+    --accent-foreground: 150 28% 12%;
+
+    --destructive: 0 68% 44%;
+    --destructive-foreground: 40 25% 96%;
+
+    --border: 40 16% 84%;
+    --input:  40 16% 84%;
+    --ring:   150 47% 22%;
+
+    /* Gold como variable extra */
+    --gold: 45 85% 38%;
+  }
+
+  /* Body font según tema */
+  body { font-family: 'Outfit', sans-serif; }
+  .light body, .light { font-family: 'DM Sans', sans-serif; }
+
+  /* Cards con sombra en tema claro */
+  .light .rounded-lg,
+  .light .rounded-xl {
+    box-shadow: 0 1px 4px rgba(26,71,49,0.07), 0 0 0 1px rgba(26,71,49,0.04);
   }
 
   * {
     @apply border-border;
     box-sizing: border-box;
+  }
+
+  html {
+    font-size: 14px;
   }
 
   body {
@@ -44,7 +89,12 @@
     -webkit-font-smoothing: antialiased;
   }
 
-  /* Scrollbar oscuro */
+  /* Escala mínima para texto mono pequeño */
+  .font-mono {
+    font-size: max(11px, 0.72rem);
+  }
+
+  /* Scrollbar */
   ::-webkit-scrollbar { width: 6px; height: 6px; }
   ::-webkit-scrollbar-track { background: hsl(var(--background)); }
   ::-webkit-scrollbar-thumb { background: hsl(var(--border)); border-radius: 3px; }

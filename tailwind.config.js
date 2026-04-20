@@ -48,6 +48,9 @@ module.exports = {
       fontFamily: {
         sans:    ["'Outfit'", "sans-serif"],
         display: ["'Bricolage Grotesque'", "sans-serif"],
+        brand:   ["'Exo 2'", "sans-serif"],
+        serif:   ["'Cormorant Garamond'", "Georgia", "serif"],
+        dmsans:  ["'DM Sans'", "sans-serif"],
         mono:    ["'JetBrains Mono'", "monospace"],
       },
       boxShadow: {

@@ -61,25 +61,21 @@ export default function LoginPage({ onLogin, onGoRegister }) {
 
         {/* Logo */}
         <div className="relative z-10">
-          <div className="flex items-center gap-3 mb-12">
-            <div className="w-9 h-9 rounded-lg bg-primary/20 border border-primary/30 flex items-center justify-center shadow-cyan-glow">
-              <div className="grid grid-cols-2 gap-0.5">
-                {[0.9,0.4,0.4,0.9].map((o,i) => (
-                  <div key={i} className="w-1.5 h-1.5 rounded-sm bg-primary" style={{ opacity: o }} />
-                ))}
-              </div>
+          <div className="flex items-center gap-2.5 mb-12">
+            <div className="w-9 h-9 rounded-lg bg-primary flex items-center justify-center flex-shrink-0">
+              <span className="font-brand font-black text-sm text-primary-foreground leading-none">FC</span>
             </div>
             <div>
-              <div className="font-display font-bold text-lg text-foreground tracking-tight">
+              <div className="font-brand font-black text-xl leading-none tracking-[-0.03em] text-foreground">
                 Fiscal<span className="text-primary">Core</span>
               </div>
-              <div className="font-mono text-[9px] text-muted-foreground tracking-widest uppercase">
+              <div className="font-mono text-[9px] text-muted-foreground tracking-widest uppercase mt-0.5">
                 Auditoría · SAT MX
               </div>
             </div>
           </div>
 
-          <h1 className="font-display font-bold text-4xl text-foreground leading-tight mb-4">
+          <h1 className="font-brand font-bold text-4xl text-foreground leading-tight mb-4">
             Auditoría fiscal<br />
             <span className="text-primary">preventiva</span>
           </h1>
@@ -125,7 +121,7 @@ export default function LoginPage({ onLogin, onGoRegister }) {
             <div className="font-mono text-[10px] text-primary tracking-widest uppercase mb-2">
               Bienvenido
             </div>
-            <h2 className="font-display font-bold text-3xl text-foreground">
+            <h2 className="font-brand font-bold text-3xl text-foreground">
               Iniciar sesión
             </h2>
           </div>

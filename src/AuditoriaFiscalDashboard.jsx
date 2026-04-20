@@ -23,6 +23,13 @@ import { TabSAT }          from "./tabs/TabSAT.jsx";
 
 /* ── Main Component ──────────────────────────────────────────── */
 export default function AuditoriaFiscal({ empresaId: empresaIdProp = null, empresaData = null, empresas: empresasProp = [], onLogout = null, onVolverInicio = null }) {
+  const [theme, setTheme] = useState(() => localStorage.getItem("fc_theme") ?? "dark");
+
+  useEffect(() => {
+    document.documentElement.classList.toggle("light", theme === "light");
+    localStorage.setItem("fc_theme", theme);
+  }, [theme]);
+
   const [tab, setTab]               = useState(null);      // null = vista principal
   const [detalle, setDetalle]       = useState(null);
   const [cierreData, setCierreData] = useState(null);
@@ -752,30 +759,25 @@ export default function AuditoriaFiscal({ empresaId: empresaIdProp = null, empre
 
       {/* Header */}
       <header className="sticky top-0 z-50 bg-card/95 backdrop-blur-sm border-b border-border">
-        <div className="h-px bg-gradient-to-r from-transparent via-primary/50 to-transparent"/>
-        <div className="max-w-screen-xl mx-auto px-7 flex items-center gap-5 h-14">
+        <div className="h-px bg-gradient-to-r from-transparent via-primary/60 to-transparent"/>
+
+        {/* Fila 1: Logo + controles */}
+        <div className="max-w-5xl mx-auto px-6 flex items-center gap-4 h-16">
 
           {/* Logo */}
           <button onClick={()=>setTab(null)} className="flex items-center gap-2.5 flex-shrink-0 bg-transparent border-none cursor-pointer">
-            <div className="w-7 h-7 rounded-md bg-primary/20 border border-primary/30 flex items-center justify-center">
-              <div className="grid grid-cols-2 gap-0.5">
-                {[0.9,0.4,0.4,0.9].map((o,i)=><div key={i} className="w-1.5 h-1.5 rounded-sm bg-primary" style={{opacity:o}}/>)}
-              </div>
+            <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center flex-shrink-0">
+              <span className="font-brand font-black text-[13px] text-primary-foreground leading-none tracking-tighter">FC</span>
             </div>
-            <div className="text-left">
-              <div className="font-display font-bold text-sm text-foreground tracking-tight">
-                Fiscal<span className="text-primary">Core</span>
-              </div>
-              <div className="font-mono text-[8px] text-muted-foreground tracking-widest uppercase">AUDITORÍA · SAT MX</div>
-            </div>
+            <span className="font-brand font-black text-xl leading-none tracking-[-0.03em] text-foreground">
+              Fiscal<span className="text-primary">Core</span>
+            </span>
           </button>
 
           {/* Volver a inicio */}
           {onVolverInicio && (
-            <button
-              onClick={onVolverInicio}
-              className="hidden sm:flex items-center gap-1 font-mono text-[10px] text-muted-foreground hover:text-primary transition-colors border-l border-border pl-4 ml-1 h-6"
-            >
+            <button onClick={onVolverInicio}
+              className="hidden sm:flex items-center gap-1 font-mono text-xs text-muted-foreground hover:text-primary transition-colors border-l border-border pl-3 h-5">
               <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                 <path d="M19 12H5M12 5l-7 7 7 7"/>
               </svg>
@@ -783,36 +785,27 @@ export default function AuditoriaFiscal({ empresaId: empresaIdProp = null, empre
             </button>
           )}
 
-          {/* Período actual — clickeable */}
+          <div className="flex-1"/>
+
+          {/* Período */}
           <div className="relative">
-            <button
-              onClick={() => setShowPeriodoModal(p => !p)}
-              className="flex items-center gap-2 px-3 py-1 rounded-md bg-primary/10 border border-primary/20 hover:bg-primary/20 hover:border-primary/40 transition-all duration-150 group"
-            >
-              <div className="font-mono text-[10px] text-muted-foreground tracking-wider">PERÍODO</div>
-              <div className="font-mono text-xs font-bold text-primary">{periodoLabel(periodoActual)}</div>
+            <button onClick={() => setShowPeriodoModal(p => !p)}
+              className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-primary/10 border border-primary/20 hover:bg-primary/15 transition-all group">
+              <span className="font-mono text-[10px] text-muted-foreground tracking-widest uppercase">Per.</span>
+              <span className="font-mono text-sm font-bold text-primary">{periodoLabel(periodoActual)}</span>
               {loading
                 ? <div className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse"/>
-                : <svg className="w-3 h-3 text-primary/50 group-hover:text-primary transition-colors" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                    <path d="M6 9l6 6 6-6"/>
-                  </svg>
+                : <svg className="w-3 h-3 text-primary/40 group-hover:text-primary transition-colors" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M6 9l6 6 6-6"/></svg>
               }
             </button>
             {showPeriodoModal && (
-              <div className="absolute top-full left-0 mt-1.5 bg-card border border-border rounded-lg shadow-xl z-50 p-3 min-w-[220px]">
+              <div className="absolute top-full right-0 mt-1.5 bg-card border border-border rounded-lg shadow-xl z-50 p-3 min-w-[220px]">
                 <div className="font-mono text-[9px] text-muted-foreground tracking-widest uppercase mb-2">Período de trabajo</div>
-                <input
-                  type="month"
-                  value={periodoUpload}
-                  onChange={e => cambiarPeriodo(e.target.value)}
-                  className="w-full bg-background border border-border rounded px-3 py-1.5 text-foreground font-mono text-sm focus:outline-none focus:border-primary"
-                  autoFocus
-                />
+                <input type="month" value={periodoUpload} onChange={e => cambiarPeriodo(e.target.value)}
+                  className="w-full bg-background border border-border rounded px-3 py-1.5 text-foreground font-mono text-sm focus:outline-none focus:border-primary" autoFocus/>
                 {periodoUpload !== getPeriodoSugerido() && (
-                  <button
-                    onClick={() => cambiarPeriodo(getPeriodoSugerido())}
-                    className="w-full mt-2 text-center font-mono text-[10px] text-primary hover:underline"
-                  >
+                  <button onClick={() => cambiarPeriodo(getPeriodoSugerido())}
+                    className="w-full mt-2 text-center font-mono text-[10px] text-primary hover:underline">
                     Usar sugerido ({periodoLabel(getPeriodoSugerido())})
                   </button>
                 )}
@@ -820,75 +813,75 @@ export default function AuditoriaFiscal({ empresaId: empresaIdProp = null, empre
             )}
           </div>
 
-          {/* Estado de cierre */}
+          {/* Estado cierre */}
           {cierreData && (
             <div className={cn(
-              "hidden md:flex items-center gap-1.5 px-3 py-1 rounded-md border font-mono text-[10px] font-bold",
+              "hidden md:flex items-center gap-1.5 px-2.5 py-1 rounded-lg border font-mono text-[10px] font-bold",
               cierreData.puede_cerrar
                 ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400"
                 : "bg-red-500/10 border-red-500/30 text-red-400"
             )}>
-              {cierreData.puede_cerrar ? "✓ Listo para cerrar" : `${cierreData.bloqueadores?.length ?? 0} bloqueadores`}
+              {cierreData.puede_cerrar ? "✓ Listo" : `${cierreData.bloqueadores?.length ?? 0} bloqueadores`}
             </div>
           )}
 
-          <div className="flex-1"/>
-
-          {/* Drill-down nav (secundaria) */}
-          <nav className="hidden lg:flex items-center gap-0">
-            {DRILL_TABS.map(([k,l])=>(
-              <button key={k} onClick={()=>setTab(k)}
-                className={cn(
-                  "px-4 h-14 text-[11px] font-mono border-b-2 transition-colors whitespace-nowrap",
-                  tab===k ? "text-primary border-primary font-semibold" : "text-muted-foreground border-transparent hover:text-foreground"
-                )}
-              >{l}</button>
-            ))}
-          </nav>
-
-          {/* Selector de empresa (si hay más de una) */}
+          {/* Selector empresa */}
           {empresas.length > 1 && (
-            <select
-              value={empresaId ?? ""}
+            <select value={empresaId ?? ""}
               onChange={e => {
-                const nuevaEmpresa = e.target.value;
-                const periodoPersistido = getPeriodoEmpresa(nuevaEmpresa);
-                setEmpresaId(nuevaEmpresa);
-                setPeriodoUpload(periodoPersistido);
-                setCierreData(null);
-                setAcisionables([]);
-                setEmitidosData(null);
-                fetchCierre(nuevaEmpresa, periodoPersistido);
-                fetchLegacy(nuevaEmpresa);
-                fetchAcisionables(nuevaEmpresa, periodoPersistido);
-                fetchEmitidos(nuevaEmpresa, periodoPersistido);
+                const eid = e.target.value;
+                const per = getPeriodoEmpresa(eid);
+                setEmpresaId(eid); setPeriodoUpload(per); setCierreData(null); setAcisionables([]); setEmitidosData(null);
+                fetchCierre(eid, per); fetchLegacy(eid); fetchAcisionables(eid, per); fetchEmitidos(eid, per);
               }}
-              className="font-mono text-[11px] bg-card border border-border rounded px-2 h-7 text-foreground focus:outline-none focus:border-primary transition-colors max-w-[200px] truncate"
-            >
-              {empresas.map(e => (
-                <option key={e.empresa_id} value={e.empresa_id}>
-                  {e.razon_social?.slice(0, 28) ?? e.rfc}
-                </option>
-              ))}
+              className="font-mono text-xs bg-card border border-border rounded px-2 h-8 text-foreground focus:outline-none focus:border-primary max-w-[160px] truncate">
+              {empresas.map(e => <option key={e.empresa_id} value={e.empresa_id}>{e.razon_social?.slice(0,24) ?? e.rfc}</option>)}
             </select>
           )}
 
-          {/* User */}
-          <div className="flex items-center gap-2.5 flex-shrink-0">
+          {/* Toggle tema */}
+          <button onClick={() => setTheme(t => t === "dark" ? "light" : "dark")}
+            className="w-8 h-8 rounded-lg border border-border flex items-center justify-center text-muted-foreground hover:text-primary hover:border-primary/40 transition-colors">
+            {theme === "dark" ? (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                <circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
+              </svg>
+            ) : (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+              </svg>
+            )}
+          </button>
+
+          {/* Avatar + salir */}
+          <div className="flex items-center gap-2">
             <Avatar className="w-8 h-8">
-              <AvatarFallback className="text-[10px]">{rfc.slice(0,2)}</AvatarFallback>
+              <AvatarFallback className="text-xs font-bold">{rfc.slice(0,2)}</AvatarFallback>
             </Avatar>
             {onLogout && (
               <Button variant="outline" size="sm" onClick={onLogout}
-                className="font-mono text-[10px] tracking-widest uppercase h-7 px-3">
-                Salir
-              </Button>
+                className="font-mono text-[10px] tracking-widest uppercase h-7 px-3">Salir</Button>
             )}
           </div>
         </div>
+
+        {/* Fila 2: Nav tabs centrada */}
+        <div className="max-w-5xl mx-auto px-6 flex items-center gap-0 border-t border-border/50">
+          <nav className="flex items-center gap-0 overflow-x-auto">
+            {DRILL_TABS.map(([k,l]) => (
+              <button key={k} onClick={() => setTab(k)}
+                className={cn(
+                  "px-4 h-9 text-[11px] font-mono border-b-2 transition-colors whitespace-nowrap",
+                  tab===k ? "text-primary border-primary font-semibold" : "text-muted-foreground border-transparent hover:text-foreground"
+                )}>
+                {l}
+              </button>
+            ))}
+          </nav>
+        </div>
       </header>
 
-      <main className="max-w-screen-xl mx-auto px-7 py-7">
+      <main className="max-w-5xl mx-auto px-6 py-7">
         {tab === null          && <VistaPrincipal/>}
         {tab === "emitidos" && (
           <TabEmitidos
