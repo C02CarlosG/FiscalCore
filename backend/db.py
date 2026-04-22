@@ -159,6 +159,9 @@ def init_db() -> None:
         # 016 es idempotente — tabla sat_solicitudes para tracking de Descarga Masiva del SAT
         _run_sql_file("016_sat_solicitudes.sql")
 
+        # 017 es idempotente — columna impuestos_declarar JSONB en empresas
+        _run_sql_file("017_impuestos_empresa.sql")
+
     except Exception as e:
         log.error("DB: init_db falló: %s", e)
         raise
