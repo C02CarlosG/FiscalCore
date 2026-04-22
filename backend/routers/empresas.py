@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 
 from .. import db
 from ..deps import get_current_user, empresa_or_404, validar_acceso_empresa, serializar
-from ..schemas import AgregarEmpresaRequest
+from ..schemas import AgregarEmpresaRequest, ImpuestosRequest
 
 _log = logging.getLogger(__name__)
 
@@ -117,3 +117,18 @@ async def agregar_empresa(
 async def obtener_empresa(empresa_id: str, current_user: dict = Depends(get_current_user)):
     validar_acceso_empresa(empresa_id, current_user)
     return serializar(empresa_or_404(empresa_id))
+
+
+@router.patch("/api/v1/empresas/{empresa_id}/impuestos")
+async def actualizar_impuestos(
+    empresa_id: str,
+    body: ImpuestosRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Actualiza la lista de impuestos a declarar para una empresa."""
+    validar_acceso_empresa(empresa_id, current_user)
+    db.execute(
+        "UPDATE empresas SET impuestos_declarar = %s::jsonb WHERE id = %s",
+        (json.dumps(body.impuestos), empresa_id),
+    )
+    return {"ok": True, "impuestos": body.impuestos}

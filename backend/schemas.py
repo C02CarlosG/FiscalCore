@@ -71,3 +71,16 @@ class ActualizarPerfilRequest(BaseModel):
 class AccionRequest(BaseModel):
     tipo: str
     notas: Optional[str] = None
+
+
+class ImpuestosRequest(BaseModel):
+    impuestos: list[str]
+
+    @field_validator("impuestos")
+    @classmethod
+    def validar_claves(cls, v: list[str]) -> list[str]:
+        VALIDAS = {"iva", "isr", "ieps", "ret_iva", "ret_isr", "diot"}
+        invalidas = [x for x in v if x not in VALIDAS]
+        if invalidas:
+            raise ValueError(f"Claves de impuesto inválidas: {invalidas}")
+        return v
