@@ -1,9 +1,8 @@
 // src/SelectorPeriodoPage.jsx
 import { useState, useEffect } from "react";
-import { Button } from "./components/ui/button";
 import { cn } from "./lib/utils";
 import { API_URL, authHeaders, MESES, periodoLabel } from "./lib/constants.js";
-import { getPeriodoSugerido } from "./auth.js";
+import { getPeriodoSugerido, getPeriodoEmpresa } from "./auth.js";
 
 function LogoMark() {
   return (
@@ -18,7 +17,7 @@ function LogoMark() {
 }
 
 export default function SelectorPeriodoPage({ empresaId, empresaData, onContinuar, onVolver }) {
-  const defaultPeriodo = getPeriodoSugerido();
+  const defaultPeriodo = getPeriodoEmpresa(empresaId) ?? getPeriodoSugerido();
   const [yearDisplay, setYearDisplay] = useState(() => parseInt(defaultPeriodo.split("-")[0], 10));
   const [periodoSel, setPeriodoSel]   = useState(defaultPeriodo);
   const [periodosConDatos, setPeriodosConDatos] = useState([]);
@@ -95,7 +94,8 @@ export default function SelectorPeriodoPage({ empresaId, empresaData, onContinua
           <div className="flex items-center justify-between mb-4">
             <button
               onClick={() => setYearDisplay(y => y - 1)}
-              className="w-8 h-8 rounded-md border border-border flex items-center justify-center hover:border-primary/40 transition-colors"
+              disabled={yearDisplay <= 2020}
+              className="w-8 h-8 rounded-md border border-border flex items-center justify-center hover:border-primary/40 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
             >
               <svg className="w-4 h-4 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M15 18l-6-6 6-6"/>
