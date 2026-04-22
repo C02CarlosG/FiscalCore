@@ -83,4 +83,4 @@ class ImpuestosRequest(BaseModel):
         invalidas = [x for x in v if x not in VALIDAS]
         if invalidas:
             raise ValueError(f"Claves de impuesto inválidas: {invalidas}")
-        return v
+        return list(dict.fromkeys(v))

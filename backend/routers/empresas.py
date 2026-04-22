@@ -127,6 +127,7 @@ async def actualizar_impuestos(
 ):
     """Actualiza la lista de impuestos a declarar para una empresa."""
     validar_acceso_empresa(empresa_id, current_user)
+    empresa_or_404(empresa_id)
     db.execute(
         "UPDATE empresas SET impuestos_declarar = %s::jsonb WHERE id = %s",
         (json.dumps(body.impuestos), empresa_id),
