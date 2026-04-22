@@ -153,8 +153,8 @@ export default function AgregarEmpresaModal({ open, onClose, onSuccess }) {
       // No bloquear el flujo si falla — los impuestos se pueden editar después
     } finally {
       setSavingImp(false);
-      _finalizar();
     }
+    _finalizar();
   }
 
   function _finalizar() {
