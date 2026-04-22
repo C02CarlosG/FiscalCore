@@ -22,7 +22,7 @@ import { TabSAT }          from "./tabs/TabSAT.jsx";
 
 
 /* ── Main Component ──────────────────────────────────────────── */
-export default function AuditoriaFiscal({ empresaId: empresaIdProp = null, empresaData = null, empresas: empresasProp = [], onLogout = null, onVolverInicio = null }) {
+export default function AuditoriaFiscal({ empresaId: empresaIdProp = null, empresaData = null, empresas: empresasProp = [], onLogout = null, onVolverInicio = null, initialTab = null }) {
   const [theme, setTheme] = useState(() => localStorage.getItem("fc_theme") ?? "dark");
 
   useEffect(() => {
@@ -30,7 +30,7 @@ export default function AuditoriaFiscal({ empresaId: empresaIdProp = null, empre
     localStorage.setItem("fc_theme", theme);
   }, [theme]);
 
-  const [tab, setTab]               = useState(null);      // null = vista principal
+  const [tab, setTab]               = useState(initialTab);  // null = vista principal, o tab específica del flujo
   const [detalle, setDetalle]       = useState(null);
   const [cierreData, setCierreData] = useState(null);
   const [legacyData, setLegacyData] = useState(null);      // para tabs de drill-down
