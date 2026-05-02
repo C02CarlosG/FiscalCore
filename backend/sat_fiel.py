@@ -94,6 +94,7 @@ def solicitar_descarga(
     fecha_inicio: date,
     fecha_fin: date,
     tipo_solicitud: str = "CFDI",
+    estado_comprobante: str = "Vigente",  # "Vigente", "Cancelado", "Todos"
 ) -> str:
     """Envía una solicitud de descarga masiva al SAT.
 
@@ -135,6 +136,7 @@ def solicitar_descarga(
                 fecha_final=fecha_fin,
                 rfc_emisor=rfc,
                 tipo_solicitud=tipo_desc,
+                estado_comprobante=estado_comprobante or None,
             )
         else:  # recibidos
             respuesta = sat_client.recover_comprobante_received_request(
@@ -142,6 +144,7 @@ def solicitar_descarga(
                 fecha_final=fecha_fin,
                 rfc_receptor=rfc,
                 tipo_solicitud=tipo_desc,
+                estado_comprobante=estado_comprobante or None,
             )
     except Exception as exc:
         raise FIELError(f"Error al solicitar descarga al SAT: {exc}") from exc

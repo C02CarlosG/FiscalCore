@@ -19,7 +19,7 @@ log = logging.getLogger(__name__)
 # ─── DATABASE_URL ─────────────────────────────────────────────
 # Railway inyecta DATABASE_URL automáticamente al vincular PostgreSQL.
 # El default solo aplica para desarrollo local con Docker Compose.
-_LOCAL_DEFAULT = "postgresql://postgres:fiscalcore2024@127.0.0.1:5432/auditoria_fiscal"
+_LOCAL_DEFAULT = "postgresql://postgres:postgres@127.0.0.1:5433/fiscalcore"
 DATABASE_URL = os.getenv("DATABASE_URL", _LOCAL_DEFAULT)
 
 if DATABASE_URL == _LOCAL_DEFAULT and os.getenv("RAILWAY_ENVIRONMENT"):
@@ -161,6 +161,9 @@ def init_db() -> None:
 
         # 017 es idempotente — columna impuestos_declarar JSONB en empresas
         _run_sql_file("017_impuestos_empresa.sql")
+
+        # 018 es idempotente — tabla empresas_fiel para credenciales FIEL cifradas
+        _run_sql_file("018_empresas_fiel.sql")
 
     except Exception as e:
         log.error("DB: init_db falló: %s", e)

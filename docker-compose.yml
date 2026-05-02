@@ -1,28 +1,16 @@
 services:
   db:
-    image: postgres:16-alpine
-    restart: unless-stopped
+    image: postgres:15
+    container_name: fiscalcore_db
+    restart: always
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: fiscalcore2024
-      POSTGRES_DB: auditoria_fiscal
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: fiscalcore
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
-      - pg_data:/var/lib/postgresql/data
-      - ./database/migrations/001_schema_inicial.sql:/docker-entrypoint-initdb.d/001_schema_inicial.sql:ro
-      - ./database/migrations/002_usuarios.sql:/docker-entrypoint-initdb.d/002_usuarios.sql:ro
-      - ./database/migrations/003_acciones.sql:/docker-entrypoint-initdb.d/003_acciones.sql:ro
-      - ./database/migrations/004_pagos_cfdi.sql:/docker-entrypoint-initdb.d/004_pagos_cfdi.sql:ro
-      - ./database/migrations/005_cfdi40_campos.sql:/docker-entrypoint-initdb.d/005_cfdi40_campos.sql:ro
-      - ./database/migrations/006_match_multiple.sql:/docker-entrypoint-initdb.d/006_match_multiple.sql:ro
-      - ./database/migrations/007_match_heuristico.sql:/docker-entrypoint-initdb.d/007_match_heuristico.sql:ro
-      - ./database/migrations/008_confianza_conciliacion.sql:/docker-entrypoint-initdb.d/008_confianza_conciliacion.sql:ro
-      - ./database/migrations/009_ppd_estados.sql:/docker-entrypoint-initdb.d/009_ppd_estados.sql:ro
-      - ./database/migrations/010_complemento_tipos.sql:/docker-entrypoint-initdb.d/010_complemento_tipos.sql:ro
-      - ./database/migrations/011_usuario_empresas.sql:/docker-entrypoint-initdb.d/011_usuario_empresas.sql:ro
-      - ./database/migrations/012_empresa_representante.sql:/docker-entrypoint-initdb.d/012_empresa_representante.sql:ro
-      - ./database/migrations/013_perfil_contador.sql:/docker-entrypoint-initdb.d/013_perfil_contador.sql:ro
+      - fiscalcore_data:/var/lib/postgresql/data
 
 volumes:
-  pg_data:
+  fiscalcore_data:

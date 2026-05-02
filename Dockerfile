@@ -3,7 +3,7 @@ FROM node:20-slim AS frontend-build
 WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN npm install
-COPY index.html vite.config.js tailwind.config.js postcss.config.js ./
+COPY index.html vite.config.mjs postcss.config.js ./
 COPY src/ ./src/
 RUN npm run build
 

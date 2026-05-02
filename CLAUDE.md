@@ -152,15 +152,32 @@ Toda propuesta funcional debe incluir:
 
 ### Levantar con Docker (recomendado)
 ```bash
-docker-compose up -d        # levanta PostgreSQL 16 + inicializa schema automáticamente (001 → 015)
-python -m uvicorn backend.main_api:app --reload --port 8000
+docker-compose up -d        # levanta PostgreSQL 16 + inicializa schema automáticamente (001 → 018)
+.venv/bin/python -m uvicorn backend.main_api:app --reload --port 8000
 ```
 
-### Backend manual (Python/FastAPI)
+### Backend manual — Arch Linux / Python 3.14 (entorno de desarrollo actual)
 ```bash
-pip install fastapi uvicorn python-multipart psycopg2-binary openpyxl pydantic python-jose bcrypt pdfplumber
+# Primera vez: instalar dependencias del sistema via pacman
+sudo pacman -S --needed python-fastapi uvicorn python-pydantic python-psycopg2 \
+  python-openpyxl python-bcrypt python-dotenv python-python-multipart python-jose
 
-# La DB se inicializa sola con docker-compose (scripts SQL 001 → 015).
+# Crear virtualenv con acceso a paquetes del sistema
+python3 -m venv .venv --system-site-packages
+
+# Instalar paquetes que no están en pacman
+.venv/bin/pip install pdfplumber satcfdi python-multipart
+
+# Arrancar (SIEMPRE con el Python del venv, no con el uvicorn del sistema)
+.venv/bin/python -m uvicorn backend.main_api:app --reload --port 8000
+# Docs interactivos: http://localhost:8000/docs
+```
+
+### Backend manual (otros sistemas)
+```bash
+pip install fastapi uvicorn python-multipart psycopg2-binary openpyxl pydantic python-jose bcrypt pdfplumber python-dotenv
+
+# La DB se inicializa sola con docker-compose (scripts SQL 001 → 018).
 # init_db() en backend/db.py aplica todas las migraciones al startup (Railway-ready).
 python -m uvicorn backend.main_api:app --reload --port 8000
 # Docs interactivos: http://localhost:8000/docs
@@ -204,7 +221,7 @@ backend/                  # Paquete Python (tiene __init__.py)
   banco_parser.py         # Parser CSV/XLSX bancario
   constancia_parser.py    # Parser Constancia PDF
 database/
-  migrations/             # Scripts SQL idempotentes (001 → 015)
+  migrations/             # Scripts SQL idempotentes (001 → 017)
 src/                      # Frontend React + Vite
   AuditoriaFiscalDashboard.jsx
   InicioPage.jsx          # Selector de empresa / onboarding post-login
@@ -250,6 +267,7 @@ src/                      # Frontend React + Vite
 | `014_cfdi_relacionados.sql` | Columna `cfdi_relacionados JSONB` + índice GIN en `cfdi` — almacena TipoRelacion + UUIDs del nodo CfdiRelacionados del XML (idempotente) |
 | `015_anticipo_sat.sql` | Columna `es_anticipo_sat BOOLEAN DEFAULT FALSE` en `cfdi` — calculada en el parser según reglas SAT (ClaveProdServ 84111506 + MetodoPago PUE + sin CfdiRelacionados) (idempotente) |
 | `016_sat_solicitudes.sql` | Tabla `sat_solicitudes` para tracking de solicitudes de Descarga Masiva SAT: estados `pendiente→solicitado→en_proceso→terminado→fallo→descargado`; columnas `id_solicitud_sat`, `num_cfdi`, `num_paquetes`, `paquetes_descargados`, `cfdi_importados`, `error_msg` (idempotente) |
+| `017_impuestos_empresa.sql` | Columna `impuestos_declarar JSONB DEFAULT '[]'` en `empresas` — array de claves de impuestos que el contador seleccionó declarar mensualmente (`iva`, `isr`, `ieps`, `ret_iva`, `ret_isr`, `diot`) (idempotente) |
 
 ### Módulos frontend (`src/`)
 
@@ -352,7 +370,7 @@ score ∈ [0, 100]
 - ✅ Schema DB, parsers, motor fiscal y API — diseñados y funcionales
 - ✅ Auth JWT — registro con Constancia PDF, login, token
 - ✅ **Modelo usuario-céntrico** — 1 contador → N empresas via `usuario_empresas` (M:N); `POST /api/v1/mis-empresas` crea/reutiliza empresa por RFC y la vincula al contador
-- ✅ Docker Compose — PostgreSQL 16 con auto-init de scripts SQL (001 → 016)
+- ✅ Docker Compose — PostgreSQL 16 con auto-init de scripts SQL (001 → 017)
 - ✅ Frontend migrado a Tailwind CSS v3 + shadcn/ui (tema dark navy + cyan)
 - ✅ **API conectada a PostgreSQL real** — pipeline ingesta → conciliación → riesgos → scoring persiste
 - ✅ **Dashboard conectado a la API** — llama a endpoints reales, sin datos hardcoded

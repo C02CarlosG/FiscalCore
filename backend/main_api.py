@@ -8,6 +8,10 @@ import logging
 import os
 
 from pathlib import Path
+from dotenv import load_dotenv
+
+# Cargar .env desde la raíz del proyecto
+load_dotenv(Path(__file__).parent.parent / ".env")
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware

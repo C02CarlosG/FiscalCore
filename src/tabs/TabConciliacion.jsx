@@ -1,4 +1,3 @@
-import { Card, CardContent } from "../components/ui/card";
 import { cn }     from "../lib/utils";
 import { ConciliacionBar } from "../components/ConciliacionBar.jsx";
 import { fmt, periodoLabel } from "../lib/constants.js";
@@ -10,76 +9,83 @@ export function TabConciliacion({ cierreData, legacyData, accionables, periodoAc
   const exacto = total - (concil.sin_cfdi??0) - (concil.sin_movimiento??0) - (concil.matches_debiles??0);
 
   return (
-    <div>
-      <h2 className="font-display text-2xl font-bold text-foreground mb-1">Conciliación Banco ↔ CFDI</h2>
-      <div className="text-sm text-muted-foreground mb-6">{periodoLabel(periodoActual)} · {total} movimientos analizados</div>
+    <div style={{ display:"flex", flexDirection:"column", gap:28 }}>
 
-      <div className="grid grid-cols-4 gap-3 mb-4">
+      {/* Encabezado */}
+      <div>
+        <h2 style={{ fontFamily:"var(--font-display)", fontWeight:700, fontSize:24, color:"var(--foreground)", margin:"0 0 8px", letterSpacing:"-0.02em" }}>Conciliación Banco ↔ CFDI</h2>
+        <div style={{ fontSize:14, color:"var(--muted-foreground)" }}>{periodoLabel(periodoActual)} · {total} movimientos analizados</div>
+      </div>
+
+      {/* Grid métricas */}
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:16 }}>
         {[
-          { label:"Match Exacto",   val:exacto,                     pct:total?Math.round(exacto/total*100):0,                         color:"#34D399" },
-          { label:"Match Parcial",  val:concil.matches_debiles??0,  pct:total?Math.round((concil.matches_debiles??0)/total*100):0,    color:"#06B6D4" },
-          { label:"Sin CFDI",       val:concil.sin_cfdi??0,         pct:total?Math.round((concil.sin_cfdi??0)/total*100):0,           color:"#F87171" },
-          { label:"Sin Movimiento", val:concil.sin_movimiento??0,   pct:total?Math.round((concil.sin_movimiento??0)/total*100):0,     color:"#FB923C" },
+          { label:"Match Exacto",   val:exacto,                    pct:total?Math.round(exacto/total*100):0,                        color:"#34D399" },
+          { label:"Match Parcial",  val:concil.matches_debiles??0, pct:total?Math.round((concil.matches_debiles??0)/total*100):0,   color:"#06B6D4" },
+          { label:"Sin CFDI",       val:concil.sin_cfdi??0,        pct:total?Math.round((concil.sin_cfdi??0)/total*100):0,          color:"#F87171" },
+          { label:"Sin Movimiento", val:concil.sin_movimiento??0,  pct:total?Math.round((concil.sin_movimiento??0)/total*100):0,    color:"#FB923C" },
         ].map(k=>(
-          <Card key={k.label} className="text-center" style={{ borderTopWidth:3, borderTopColor:k.color }}>
-            <CardContent className="pt-5">
-              <div className="font-mono text-[10px] text-muted-foreground tracking-widest uppercase">{k.label}</div>
-              <div className="font-mono text-4xl font-bold mt-2 leading-none" style={{ color:k.color }}>{k.val}</div>
-              <div className="text-[11px] text-muted-foreground mt-1">{k.pct}% del total</div>
-            </CardContent>
-          </Card>
+          <div key={k.label} style={{
+            borderRadius:12, padding:"20px", textAlign:"center",
+            background:"#0F1A2E", border:`1px solid ${k.color}25`, borderTop:`3px solid ${k.color}`,
+            boxShadow:`0 4px 20px rgba(0,0,0,0.4)`,
+          }}>
+            <div style={{ fontFamily:"var(--font-mono)", fontSize:12, letterSpacing:"0.08em", textTransform:"uppercase", color:k.color, opacity:0.7, marginBottom:12 }}>{k.label}</div>
+            <div style={{ fontFamily:"var(--font-mono)", fontSize:36, fontWeight:700, lineHeight:1, color:k.color }}>{k.val}</div>
+            <div style={{ fontSize:12, color:"var(--muted-foreground)", marginTop:8 }}>{k.pct}% del total</div>
+          </div>
         ))}
       </div>
 
-      <Card>
-        <CardContent className="pt-5">
-          <div className="font-mono text-[10px] text-muted-foreground tracking-widest uppercase mb-3">Distribución Visual</div>
-          <ConciliacionBar data={{ exacto, parcial:concil.matches_debiles??0, sin_cfdi:concil.sin_cfdi??0, sin_movimiento:concil.sin_movimiento??0 }}/>
-        </CardContent>
-      </Card>
+      {/* Barra visual */}
+      <div style={{ borderRadius:12, border:"1px solid rgba(255,255,255,0.07)", background:"#0F1A2E", padding:"20px 24px" }}>
+        <div style={{ fontFamily:"var(--font-mono)", fontSize:12, color:"var(--muted-foreground)", letterSpacing:"0.08em", textTransform:"uppercase", marginBottom:16 }}>Distribución Visual</div>
+        <ConciliacionBar data={{ exacto, parcial:concil.matches_debiles??0, sin_cfdi:concil.sin_cfdi??0, sin_movimiento:concil.sin_movimiento??0 }}/>
+      </div>
 
-      {/* Lista de movimientos accionables */}
+      {/* Movimientos accionables */}
       {accionables.length > 0 && (
-        <div className="mt-6">
-          <div className="font-mono text-[10px] text-muted-foreground tracking-widest uppercase mb-3">
+        <div>
+          <div style={{ fontFamily:"var(--font-mono)", fontSize:12, color:"var(--muted-foreground)", letterSpacing:"0.08em", textTransform:"uppercase", marginBottom:16 }}>
             Movimientos sin conciliar ({accionables.length})
           </div>
-          <div className="space-y-2">
+          <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
             {accionables.map(par => {
               const esSinCfdi = par.tipo_match === "sin_cfdi";
               return (
-                <div key={par.id}
-                  className="flex items-center gap-3 p-3 rounded-lg border bg-card"
-                  style={{ borderLeftWidth: 3, borderLeftColor: esSinCfdi ? "#F87171" : "#FBBF24" }}
-                >
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap mb-1">
-                      <span className="font-mono text-[10px] text-muted-foreground">
+                <div key={par.id} style={{
+                  display:"flex", alignItems:"center", gap:16, padding:"16px 20px",
+                  borderRadius:10, border:"1px solid rgba(255,255,255,0.07)", background:"#0F1A2E",
+                  borderLeft:`3px solid ${esSinCfdi ? "#F87171" : "#FBBF24"}`,
+                }}>
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <div style={{ display:"flex", alignItems:"center", gap:10, flexWrap:"wrap", marginBottom:8 }}>
+                      <span style={{ fontFamily:"var(--font-mono)", fontSize:11, color:"var(--muted-foreground)" }}>
                         {par.mov_fecha ? new Date(par.mov_fecha).toLocaleDateString("es-MX",{day:"2-digit",month:"short",year:"numeric"}) : "—"}
                       </span>
-                      <span className={cn(
-                        "font-mono text-[9px] font-bold px-1.5 py-0.5 rounded border",
-                        esSinCfdi
-                          ? "text-red-400 bg-red-400/10 border-red-400/20"
-                          : "text-amber-400 bg-amber-400/10 border-amber-400/20"
-                      )}>
+                      <span style={{
+                        fontFamily:"var(--font-mono)", fontSize:11, fontWeight:700, padding:"2px 8px", borderRadius:4,
+                        color: esSinCfdi ? "#F87171" : "#FBBF24",
+                        background: esSinCfdi ? "rgba(248,113,113,0.1)" : "rgba(251,191,36,0.1)",
+                        border: `1px solid ${esSinCfdi ? "rgba(248,113,113,0.25)" : "rgba(251,191,36,0.25)"}`,
+                      }}>
                         {esSinCfdi ? "SIN CFDI" : `PARCIAL ${par.porcentaje_match ?? 0}%`}
                       </span>
                       {par.mov_tipo && (
-                        <span className="font-mono text-[9px] text-muted-foreground uppercase">{par.mov_tipo}</span>
+                        <span style={{ fontFamily:"var(--font-mono)", fontSize:11, color:"var(--muted-foreground)", textTransform:"uppercase" }}>{par.mov_tipo}</span>
                       )}
                     </div>
-                    <div className="text-sm text-foreground truncate">{par.concepto ?? "Sin concepto"}</div>
+                    <div style={{ fontSize:14, color:"var(--foreground)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{par.concepto ?? "Sin concepto"}</div>
                     {par.rfc_detectado && (
-                      <div className="font-mono text-[10px] text-muted-foreground mt-0.5">{par.rfc_detectado}</div>
+                      <div style={{ fontFamily:"var(--font-mono)", fontSize:11, color:"var(--muted-foreground)", marginTop:4 }}>{par.rfc_detectado}</div>
                     )}
                   </div>
-                  <div className="text-right flex-shrink-0">
-                    <div className="font-mono text-base font-bold" style={{ color: esSinCfdi ? "#F87171" : "#FBBF24" }}>
+                  <div style={{ textAlign:"right", flexShrink:0 }}>
+                    <div style={{ fontFamily:"var(--font-mono)", fontSize:16, fontWeight:700, color: esSinCfdi ? "#F87171" : "#FBBF24" }}>
                       {fmt(par.mov_monto ?? par.monto_movimiento)}
                     </div>
                     {!esSinCfdi && par.diferencia != null && (
-                      <div className="font-mono text-[10px] text-muted-foreground">Δ {fmt(par.diferencia)}</div>
+                      <div style={{ fontFamily:"var(--font-mono)", fontSize:11, color:"var(--muted-foreground)", marginTop:4 }}>Δ {fmt(par.diferencia)}</div>
                     )}
                   </div>
                 </div>

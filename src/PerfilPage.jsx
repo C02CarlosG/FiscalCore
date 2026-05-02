@@ -1,61 +1,79 @@
 import { useState } from "react";
 import { Button } from "./components/ui/button";
-import { Input }  from "./components/ui/input";
-import { Label }  from "./components/ui/label";
-import { Alert, AlertDescription } from "./components/ui/alert";
 import { getToken, updateProfile } from "./auth.js";
 
-const API = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
+const API       = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 const RFC_REGEX = /^[A-ZÑ&]{3,4}\d{6}[A-Z0-9]{3}$/i;
 
 function authHeaders() {
   return { Authorization: `Bearer ${getToken()}`, "Content-Type": "application/json" };
 }
 
-function AvatarGrande({ nombre }) {
+function Avatar({ nombre }) {
   const initials = (nombre ?? "?")
-    .split(" ")
-    .slice(0, 2)
-    .map(p => p[0] ?? "")
-    .join("")
-    .toUpperCase() || "?";
+    .split(" ").slice(0, 2).map(p => p[0] ?? "").join("").toUpperCase() || "?";
   return (
-    <div className="w-20 h-20 rounded-2xl bg-primary/15 border-2 border-primary/30 flex items-center justify-center flex-shrink-0">
-      <span className="font-display font-bold text-2xl text-primary">{initials}</span>
+    <div style={{ width: 72, height: 72, borderRadius: 18, background: "rgba(6,182,212,0.12)", border: "2px solid rgba(6,182,212,0.35)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, boxShadow: "0 0 24px rgba(6,182,212,0.15)" }}>
+      <span style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 26, color: "var(--primary)" }}>{initials}</span>
     </div>
   );
 }
 
-function Campo({ id, label, value, onChange, placeholder, hint, maxLength, mono = false, readOnly = false }) {
+function Campo({ id, label, value, onChange, placeholder, hint, maxLength, mono = false, readOnly = false, type = "text" }) {
   return (
-    <div className="space-y-1.5">
-      <Label htmlFor={id} className="text-xs font-mono text-muted-foreground tracking-wider">
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <label htmlFor={id} style={{ fontFamily: "var(--font-mono)", fontSize: 12, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--muted-foreground)", fontWeight: 600 }}>
         {label}
-      </Label>
-      <Input
+      </label>
+      <input
         id={id}
+        type={type}
         value={value}
         onChange={onChange}
         placeholder={placeholder}
         maxLength={maxLength}
         readOnly={readOnly}
-        className={[
-          "bg-background border-border focus:border-primary",
-          mono ? "font-mono" : "",
-          readOnly ? "opacity-60 cursor-not-allowed" : "",
-        ].join(" ")}
+        style={{
+          background: readOnly ? "rgba(255,255,255,0.02)" : "rgba(255,255,255,0.04)",
+          border: "1px solid rgba(255,255,255,0.1)",
+          borderRadius: 8,
+          padding: "10px 14px",
+          fontSize: 13,
+          fontFamily: mono ? "var(--font-mono)" : "var(--font-sans)",
+          color: readOnly ? "var(--muted-foreground)" : "var(--foreground)",
+          outline: "none",
+          width: "100%",
+          boxSizing: "border-box",
+          opacity: readOnly ? 0.6 : 1,
+          cursor: readOnly ? "not-allowed" : "text",
+          transition: "border-color 0.15s",
+        }}
+        onFocus={e => { if (!readOnly) e.target.style.borderColor = "rgba(6,182,212,0.5)"; }}
+        onBlur={e => { e.target.style.borderColor = "rgba(255,255,255,0.1)"; }}
       />
-      {hint && <p className="font-mono text-[10px] text-muted-foreground">{hint}</p>}
+      {hint && <p style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted-foreground)", marginTop: 2 }}>{hint}</p>}
+    </div>
+  );
+}
+
+function Seccion({ titulo, color = "#06B6D4", children }) {
+  return (
+    <div style={{ borderRadius: 14, padding: "24px 28px", background: "#0C1628", border: `1px solid ${color}20`, borderLeft: `3px solid ${color}`, boxShadow: "0 4px 24px rgba(0,0,0,0.3)" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 24 }}>
+        <div style={{ width: 8, height: 8, borderRadius: "50%", background: color, boxShadow: `0 0 10px ${color}80`, flexShrink: 0 }} />
+        <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, letterSpacing: "0.08em", textTransform: "uppercase", color, fontWeight: 600 }}>{titulo}</span>
+      </div>
+      {children}
     </div>
   );
 }
 
 export default function PerfilPage({ userData, onVolver, onPerfilActualizado }) {
   const [form, setForm] = useState({
-    nombre:             userData?.nombre            ?? "",
-    telefono:           userData?.telefono          ?? "",
-    rfc:                userData?.rfc               ?? "",
-    nombre_despacho:    userData?.nombre_despacho   ?? "",
+    nombre:             userData?.nombre             ?? "",
+    telefono:           userData?.telefono           ?? "",
+    rfc:                userData?.rfc                ?? "",
+    nombre_despacho:    userData?.nombre_despacho    ?? "",
     cedula_profesional: userData?.cedula_profesional ?? "",
   });
   const [loading,  setLoading]  = useState(false);
@@ -77,7 +95,7 @@ export default function PerfilPage({ userData, onVolver, onPerfilActualizado }) 
 
     if (!form.nombre.trim()) { setError("El nombre es requerido"); return; }
     if (form.rfc && !RFC_REGEX.test(form.rfc.trim())) {
-      setError("RFC del contador inválido. Formato: AAA######XXX (PF) o AAA######XX (PM)");
+      setError("RFC del contador inválido — formato: AAAA######XXX");
       return;
     }
 
@@ -97,8 +115,8 @@ export default function PerfilPage({ userData, onVolver, onPerfilActualizado }) 
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail ?? "Error al guardar");
-      updateProfile(data);       // actualiza localStorage
-      onPerfilActualizado(data); // avisa a main.jsx para re-render si aplica
+      updateProfile(data);
+      onPerfilActualizado(data);
       setGuardado(true);
     } catch (err) {
       setError(err.message ?? "Error desconocido");
@@ -108,141 +126,130 @@ export default function PerfilPage({ userData, onVolver, onPerfilActualizado }) 
   }
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
+    <div style={{ minHeight: "100vh", background: "var(--background)", color: "var(--foreground)" }}>
 
       {/* Header */}
-      <header className="sticky top-0 z-50 bg-card/95 backdrop-blur-sm border-b border-border">
-        <div className="h-px bg-gradient-to-r from-transparent via-primary/50 to-transparent"/>
-        <div className="max-w-screen-xl mx-auto px-7 flex items-center gap-4 h-14">
+      <header style={{ position: "sticky", top: 0, zIndex: 50, background: "rgba(13,21,38,0.95)", backdropFilter: "blur(8px)", borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
+        <div style={{ height: 1, background: "linear-gradient(to right, transparent, rgba(6,182,212,0.5), transparent)" }} />
+        <div style={{ maxWidth: 1280, margin: "0 auto", padding: "0 28px", display: "flex", alignItems: "center", gap: 16, height: 56 }}>
 
           {/* Logo */}
-          <div className="flex items-center gap-2.5 flex-shrink-0">
-            <div className="w-7 h-7 rounded-md bg-primary/20 border border-primary/30 flex items-center justify-center">
-              <div className="grid grid-cols-2 gap-0.5">
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+            <div style={{ width: 28, height: 28, borderRadius: 7, background: "rgba(6,182,212,0.15)", border: "1px solid rgba(6,182,212,0.3)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 2 }}>
                 {[0.9, 0.4, 0.4, 0.9].map((o, i) => (
-                  <div key={i} className="w-1.5 h-1.5 rounded-sm bg-primary" style={{ opacity: o }} />
+                  <div key={i} style={{ width: 6, height: 6, borderRadius: 2, background: "var(--primary)", opacity: o }} />
                 ))}
               </div>
             </div>
             <div>
-              <div className="font-display font-bold text-sm text-foreground tracking-tight">
-                Fiscal<span className="text-primary">Core</span>
+              <div style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 14, letterSpacing: "-0.01em" }}>
+                Fiscal<span style={{ color: "var(--primary)" }}>Core</span>
               </div>
-              <div className="font-mono text-[8px] text-muted-foreground tracking-widest uppercase">AUDITORÍA · SAT MX</div>
+              <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted-foreground)", letterSpacing: "0.1em", textTransform: "uppercase" }}>AUDITORÍA · SAT MX</div>
             </div>
           </div>
 
-          {/* Volver */}
-          <button
-            onClick={onVolver}
-            className="hidden sm:flex items-center gap-1 font-mono text-[10px] text-muted-foreground hover:text-primary transition-colors border-l border-border pl-4 ml-1 h-6"
+          {/* Separador + volver */}
+          <div style={{ width: 1, height: 24, background: "rgba(255,255,255,0.08)", margin: "0 4px" }} />
+          <button onClick={onVolver} style={{ display: "flex", alignItems: "center", gap: 6, fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--muted-foreground)", background: "none", border: "none", cursor: "pointer", padding: 0, transition: "color 0.15s" }}
+            onMouseEnter={e => e.currentTarget.style.color = "var(--primary)"}
+            onMouseLeave={e => e.currentTarget.style.color = "var(--muted-foreground)"}
           >
-            <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
               <path d="M19 12H5M12 5l-7 7 7 7"/>
             </svg>
             Mis empresas
-          </button>
-
-          <div className="flex-1"/>
-
-          {/* Botón volver mobile */}
-          <button
-            onClick={onVolver}
-            className="sm:hidden font-mono text-[11px] text-muted-foreground hover:text-primary transition-colors"
-          >
-            ← Volver
           </button>
         </div>
       </header>
 
       {/* Contenido */}
-      <main className="max-w-screen-xl mx-auto px-7 py-10">
-        <div className="max-w-xl">
+      <main style={{ maxWidth: 720, margin: "0 auto", padding: "48px 28px 80px" }}>
 
-          {/* Título de sección */}
-          <p className="font-mono text-[11px] text-primary tracking-widest uppercase mb-6">
-            Mi perfil
-          </p>
+        {/* Breadcrumb */}
+        <p style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--primary)", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 32 }}>
+          Mi perfil
+        </p>
 
-          {/* Tarjeta de identidad */}
-          <div className="bg-card border border-border rounded-xl p-6 mb-8 flex items-center gap-5">
-            <AvatarGrande nombre={form.nombre || userData?.nombre} />
-            <div className="min-w-0">
-              <p className="font-display font-bold text-lg text-foreground truncate">
-                {form.nombre || "Sin nombre"}
+        {/* Card de identidad */}
+        <div style={{ borderRadius: 16, padding: "28px 32px", background: "#0F1A2E", border: "1px solid rgba(6,182,212,0.15)", borderTop: "3px solid #06B6D4", boxShadow: "0 4px 24px rgba(0,0,0,0.4)", marginBottom: 32, display: "flex", alignItems: "center", gap: 24 }}>
+          <Avatar nombre={form.nombre || userData?.nombre} />
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <p style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 22, color: "var(--foreground)", margin: 0, letterSpacing: "-0.02em", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {form.nombre || "Sin nombre"}
+            </p>
+            <p style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--primary)", marginTop: 6 }}>
+              {userData?.email ?? "—"}
+            </p>
+            {form.nombre_despacho && (
+              <p style={{ fontSize: 13, color: "var(--muted-foreground)", marginTop: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {form.nombre_despacho}
               </p>
-              <p className="font-mono text-[11px] text-primary mt-0.5">
-                {userData?.email ?? "—"}
-              </p>
-              {form.nombre_despacho && (
-                <p className="text-sm text-muted-foreground mt-1 truncate">{form.nombre_despacho}</p>
-              )}
-            </div>
+            )}
           </div>
+          {guardado && (
+            <div style={{ display: "flex", alignItems: "center", gap: 6, fontFamily: "var(--font-mono)", fontSize: 11, color: "#10B981", background: "rgba(16,185,129,0.1)", border: "1px solid rgba(16,185,129,0.3)", borderRadius: 99, padding: "4px 12px", flexShrink: 0 }}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M20 6L9 17l-5-5"/></svg>
+              Guardado
+            </div>
+          )}
+        </div>
 
-          {/* Formulario */}
-          <form onSubmit={handleGuardar} className="space-y-5">
+        <form onSubmit={handleGuardar} style={{ display: "flex", flexDirection: "column", gap: 24 }}>
 
-            {/* Datos personales */}
-            <div className="space-y-4">
-              <p className="font-mono text-[10px] text-muted-foreground tracking-widest uppercase border-b border-border pb-2">
-                Datos personales
-              </p>
-
+          {/* Datos personales */}
+          <Seccion titulo="Datos personales" color="#06B6D4">
+            <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
               <Campo
                 id="nombre"
-                label="NOMBRE COMPLETO *"
+                label="Nombre completo *"
                 value={form.nombre}
                 onChange={handleField("nombre")}
                 placeholder="Juan Pérez García"
               />
-
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+                <Campo
+                  id="telefono"
+                  label="Teléfono"
+                  value={form.telefono}
+                  onChange={handleField("telefono")}
+                  placeholder="+52 55 1234 5678"
+                  maxLength={20}
+                />
+                <Campo
+                  id="rfc"
+                  label="RFC del contador"
+                  value={form.rfc}
+                  onChange={handleField("rfc")}
+                  placeholder="PEGJ800101ABC"
+                  maxLength={13}
+                  mono
+                />
+              </div>
               <Campo
                 id="email"
-                label="CORREO ELECTRÓNICO"
+                label="Correo electrónico"
                 value={userData?.email ?? ""}
                 readOnly
                 hint="Para cambiar tu correo, contacta soporte"
               />
-
-              <Campo
-                id="telefono"
-                label="TELÉFONO"
-                value={form.telefono}
-                onChange={handleField("telefono")}
-                placeholder="+52 55 1234 5678"
-                maxLength={20}
-              />
-
-              <Campo
-                id="rfc"
-                label="RFC DEL CONTADOR"
-                value={form.rfc}
-                onChange={handleField("rfc")}
-                placeholder="PEGJ800101ABC"
-                maxLength={13}
-                mono
-                hint="Tu RFC personal como contador público"
-              />
             </div>
+          </Seccion>
 
-            {/* Datos del despacho */}
-            <div className="space-y-4">
-              <p className="font-mono text-[10px] text-muted-foreground tracking-widest uppercase border-b border-border pb-2">
-                Datos del despacho
-              </p>
-
+          {/* Datos del despacho */}
+          <Seccion titulo="Datos del despacho" color="#A78BFA">
+            <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
               <Campo
                 id="nombre_despacho"
-                label="NOMBRE DEL DESPACHO / FIRMA"
+                label="Nombre del despacho / firma"
                 value={form.nombre_despacho}
                 onChange={handleField("nombre_despacho")}
                 placeholder="Despacho Contable Pérez y Asociados"
               />
-
               <Campo
                 id="cedula"
-                label="CÉDULA PROFESIONAL"
+                label="Cédula profesional"
                 value={form.cedula_profesional}
                 onChange={handleField("cedula_profesional")}
                 placeholder="1234567"
@@ -250,49 +257,41 @@ export default function PerfilPage({ userData, onVolver, onPerfilActualizado }) 
                 mono
               />
             </div>
+          </Seccion>
 
-            {/* Feedback */}
-            {error && (
-              <Alert className="border-red-500/30 bg-red-500/10">
-                <AlertDescription className="text-red-400 text-sm">{error}</AlertDescription>
-              </Alert>
-            )}
-            {guardado && (
-              <Alert className="border-emerald-500/30 bg-emerald-500/10">
-                <AlertDescription className="text-emerald-400 text-sm flex items-center gap-2">
-                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                    <path d="M20 6L9 17l-5-5"/>
-                  </svg>
-                  Perfil actualizado correctamente
-                </AlertDescription>
-              </Alert>
-            )}
-
-            {/* Acciones */}
-            <div className="flex gap-3 pt-2">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={onVolver}
-                className="border-border text-muted-foreground hover:text-foreground"
-              >
-                Cancelar
-              </Button>
-              <Button
-                type="submit"
-                className="flex-1 bg-primary hover:bg-primary/90 text-primary-foreground font-semibold"
-                disabled={loading}
-              >
-                {loading ? (
-                  <>
-                    <span className="w-3.5 h-3.5 border-2 border-primary-foreground/40 border-t-primary-foreground rounded-full animate-spin mr-2"/>
-                    Guardando…
-                  </>
-                ) : "Guardar cambios"}
-              </Button>
+          {/* Error */}
+          {error && (
+            <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 18px", borderRadius: 10, background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.3)", fontFamily: "var(--font-mono)", fontSize: 13, color: "#F87171" }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
+              {error}
             </div>
-          </form>
-        </div>
+          )}
+
+          {/* Acciones */}
+          <div style={{ display: "flex", gap: 12, paddingTop: 8 }}>
+            <button
+              type="button"
+              onClick={onVolver}
+              style={{ padding: "10px 20px", borderRadius: 8, background: "transparent", border: "1px solid rgba(255,255,255,0.12)", color: "var(--muted-foreground)", fontFamily: "var(--font-mono)", fontSize: 13, cursor: "pointer", transition: "all 0.15s" }}
+              onMouseEnter={e => { e.currentTarget.style.borderColor = "rgba(255,255,255,0.25)"; e.currentTarget.style.color = "var(--foreground)"; }}
+              onMouseLeave={e => { e.currentTarget.style.borderColor = "rgba(255,255,255,0.12)"; e.currentTarget.style.color = "var(--muted-foreground)"; }}
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              disabled={loading}
+              style={{ flex: 1, padding: "10px 20px", borderRadius: 8, background: loading ? "rgba(6,182,212,0.4)" : "var(--primary)", border: "none", color: "#0A0F1E", fontFamily: "var(--font-mono)", fontSize: 13, fontWeight: 700, cursor: loading ? "not-allowed" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, transition: "background 0.15s" }}
+            >
+              {loading ? (
+                <>
+                  <span style={{ width: 14, height: 14, borderRadius: "50%", border: "2px solid rgba(10,15,30,0.4)", borderTopColor: "#0A0F1E", display: "inline-block", animation: "spin 0.7s linear infinite" }} />
+                  Guardando…
+                </>
+              ) : "Guardar cambios"}
+            </button>
+          </div>
+        </form>
       </main>
     </div>
   );

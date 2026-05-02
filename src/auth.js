@@ -20,10 +20,14 @@ export function getEmpresas() {
   return getUser()?.empresas ?? [];
 }
 
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 // Retorna la empresa activa (primera por defecto, o la que el usuario seleccionó)
 export function getEmpresaId() {
   const activa = localStorage.getItem("fc_empresa_activa");
-  if (activa) return activa;
+  // Validar que sea un UUID — si no, ignorar y limpiar
+  if (activa && UUID_REGEX.test(activa)) return activa;
+  if (activa) localStorage.removeItem("fc_empresa_activa"); // limpiar valor inválido
   return getEmpresas()[0]?.empresa_id ?? null;
 }
 

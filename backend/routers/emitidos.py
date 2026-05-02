@@ -128,18 +128,45 @@ async def get_emitidos(
                 "mensaje":      f"La factura {ing['uuid'][:8]}... aplica anticipo (TipoRel=07) pero no se encontro CFDI Egreso con FormaPago=30 en el periodo",
             })
 
+    # ── Complementos de pago (tipo P) emitidos en el período ─
+    pago_row = db.query_one(
+        """SELECT COUNT(*) AS n FROM cfdi
+           WHERE empresa_id = %s AND rfc_emisor = %s
+             AND tipo_comprobante = 'P'
+             AND fecha_emision::date BETWEEN %s AND %s""",
+        (empresa_id, empresa["rfc"], inicio, fin),
+    )
+    num_complementos_pago = int(pago_row["n"]) if pago_row else 0
+
     # ── Resumen ──────────────────────────────────────────────
     from decimal import Decimal as D
+    all_ingresos         = ventas_servicios + anticipos + facturas_con_anticipo
+    all_egresos          = notas_credito + aplicaciones_anticipo
     total_ventas         = sum(D(str(i["total"])) for i in ventas_servicios)
     total_fact_anticipo  = sum(D(str(i["total"])) for i in facturas_con_anticipo)
     total_anticipos_acum = sum(D(str(i["total"])) for i in anticipos)
     total_aplicaciones   = sum(D(str(e["total"])) for e in aplicaciones_anticipo)
     ingreso_neto         = total_ventas + total_fact_anticipo - total_aplicaciones
 
+    subtotal_total = sum(D(str(i["subtotal"])) for i in all_ingresos)
+    iva_total      = sum(D(str(i["iva"])) for i in all_ingresos)
+    monto_total    = sum(D(str(i["total"])) for i in all_ingresos)
+    vigentes_count   = sum(1 for i in all_ingresos if i.get("estado") != "cancelado")
+    canceladas_count = sum(1 for i in all_ingresos if i.get("estado") == "cancelado")
+
     return {
         "periodo": periodo,
         "empresa_rfc": empresa["rfc"],
         "resumen": {
+            "subtotal":                   float(subtotal_total),
+            "iva_trasladado":             float(iva_total),
+            "total_facturado":            float(monto_total),
+            "vigentes":                   vigentes_count,
+            "canceladas":                 canceladas_count,
+            "num_tipo_i":                 len(all_ingresos),
+            "num_tipo_e":                 len(all_egresos),
+            "num_tipo_p":                 num_complementos_pago,
+            "total_cfdi_periodo":         len(all_ingresos) + len(all_egresos) + num_complementos_pago,
             "total_ingresos":             float(total_ventas),
             "total_facturas_con_anticipo": float(total_fact_anticipo),
             "total_anticipos_acumulados": float(total_anticipos_acum),
@@ -160,4 +187,72 @@ async def get_emitidos(
             "notas_credito":         notas_credito,
             "aplicaciones_anticipo": aplicaciones_anticipo,
         },
+    }
+
+
+@router.get("/api/v1/empresas/{empresa_id}/recibidos")
+async def get_recibidos(
+    empresa_id: str,
+    periodo: str = Query(..., description="Período en formato YYYY-MM"),
+    current_user: dict = Depends(get_current_user),
+):
+    """CFDIs recibidos (compras y gastos) de la empresa en el período."""
+    validar_acceso_empresa(empresa_id, current_user)
+    empresa = empresa_or_404(empresa_id)
+
+    año, mes = periodo.split("-")
+    import calendar
+    ultimo = calendar.monthrange(int(año), int(mes))[1]
+    inicio = f"{año}-{mes}-01"
+    fin    = f"{año}-{mes}-{ultimo:02d}"
+
+    rows = db.query_all(
+        """
+        SELECT uuid, tipo_comprobante, serie, folio, fecha_emision::date AS fecha,
+               rfc_emisor, nombre_emisor, subtotal, descuento, total,
+               iva_trasladado, metodo_pago, forma_pago, moneda, estado
+        FROM cfdi
+        WHERE empresa_id = %s
+          AND rfc_receptor = %s
+          AND tipo_comprobante IN ('I', 'E')
+          AND fecha_emision::date BETWEEN %s AND %s
+        ORDER BY fecha_emision ASC
+        """,
+        (empresa_id, empresa["rfc"], inicio, fin),
+    )
+
+    def _row(r):
+        return {
+            "uuid":        r["uuid"],
+            "serie_folio": f"{r['serie'] or ''}{r['folio'] or ''}".strip() or None,
+            "fecha":       str(r["fecha"]),
+            "rfc_emisor":  r["rfc_emisor"],
+            "nombre_emisor": r["nombre_emisor"],
+            "subtotal":    float(r["subtotal"] or 0),
+            "total":       float(r["total"] or 0),
+            "iva":         float(r["iva_trasladado"] or 0),
+            "estado":      r["estado"],
+        }
+
+    compras = [_row(r) for r in rows if r["tipo_comprobante"] == "I"]
+    egresos = [_row(r) for r in rows if r["tipo_comprobante"] == "E"]
+
+    from decimal import Decimal as D
+    subtotal_c = sum(D(str(r["subtotal"])) for r in compras)
+    iva_c      = sum(D(str(r["iva"]))      for r in compras)
+    total_c    = sum(D(str(r["total"]))    for r in compras)
+
+    return {
+        "periodo": periodo,
+        "resumen": {
+            "subtotal":       float(subtotal_c),
+            "iva_acreditable": float(iva_c),
+            "total":          float(total_c),
+            "num_compras":    len(compras),
+            "num_egresos":    len(egresos),
+            "vigentes":       sum(1 for r in compras if r["estado"] != "cancelado"),
+            "canceladas":     sum(1 for r in compras if r["estado"] == "cancelado"),
+        },
+        "compras": compras,
+        "egresos": egresos,
     }

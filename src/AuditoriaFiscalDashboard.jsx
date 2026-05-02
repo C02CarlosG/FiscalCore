@@ -1,58 +1,95 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Button }   from "./components/ui/button";
 import { Badge }    from "./components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "./components/ui/card";
-import { Alert, AlertDescription } from "./components/ui/alert";
-import { Avatar, AvatarFallback } from "./components/ui/avatar";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./components/ui/dialog";
-import { cn } from "./lib/utils";
+import { StatCard } from "./components/StatCard.jsx";
 import { getToken, getPeriodoEmpresa, setPeriodoEmpresa, getPeriodoSugerido } from "./auth.js";
-import { API_URL, authHeaders, SEV_VARIANT, SEV_LABEL, SEV_COLOR, ESTADO_LABEL, MESES, fmt, fmtK, periodoLabel, scoreColor, scoreClasif } from "./lib/constants.js";
+import { API_URL, authHeaders, SEV_VARIANT, SEV_LABEL, SEV_COLOR, periodoLabel, fmt, fmtK } from "./lib/constants.js";
 import { parseCFDI } from "./lib/cfdiParser.js";
-import { ScoreGauge }       from "./components/ScoreGauge.jsx";
-import { TrendLine }         from "./components/TrendLine.jsx";
-import { ConciliacionBar }   from "./components/ConciliacionBar.jsx";
-import { AccionItem }        from "./components/AccionItem.jsx";
 import { TabEmitidos }     from "./tabs/TabEmitidos.jsx";
 import { TabRiesgos }      from "./tabs/TabRiesgos.jsx";
 import { TabConciliacion } from "./tabs/TabConciliacion.jsx";
 import { TabIngesta }      from "./tabs/TabIngesta.jsx";
 import { TabDiagnostico }  from "./tabs/TabDiagnostico.jsx";
 import { TabSAT }          from "./tabs/TabSAT.jsx";
+import { TabRecibidos }    from "./tabs/TabRecibidos.jsx";
 
 
-/* ── Main Component ──────────────────────────────────────────── */
-export default function AuditoriaFiscal({ empresaId: empresaIdProp = null, empresaData = null, empresas: empresasProp = [], onLogout = null, onVolverInicio = null, initialTab = null }) {
-  const [theme, setTheme] = useState(() => localStorage.getItem("fc_theme") ?? "dark");
+/* ── Helpers ───────────────────────────────────────────────────── */
+const DIAS  = ["domingo","lunes","martes","miércoles","jueves","viernes","sábado"];
+const MESES_L = ["enero","febrero","marzo","abril","mayo","junio","julio","agosto","septiembre","octubre","noviembre","diciembre"];
 
-  useEffect(() => {
-    document.documentElement.classList.toggle("light", theme === "light");
-    localStorage.setItem("fc_theme", theme);
-  }, [theme]);
+function saludoHora() {
+  const h = new Date().getHours();
+  if (h < 12) return "Buen día";
+  if (h < 19) return "Buenas tardes";
+  return "Buenas noches";
+}
 
-  const [tab, setTab]               = useState(initialTab);  // null = vista principal, o tab específica del flujo
-  const [detalle, setDetalle]       = useState(null);
-  const [cierreData, setCierreData] = useState(null);
-  const [legacyData, setLegacyData] = useState(null);      // para tabs de drill-down
-  const [empresaId, setEmpresaId]   = useState(empresaIdProp);
-  const [loading, setLoading]       = useState(false);
-  const [ejecutando, setEjecutando] = useState(null);      // id de detección en proceso
-  const [accionables, setAcisionables] = useState([]);     // pares sin_cfdi / parciales
-  const [empresas, setEmpresas]     = useState(empresasProp); // lista de empresas del contador
-  const [uploadState, setUploadState] = useState({ cfdi:false, banco:false });
-  const [uploadMsg, setUploadMsg]   = useState("");
-  const [diagnostico, setDiagnostico] = useState([]);
-  const [emitidosData, setEmitidosData] = useState(null);   // respuesta de /emitidos
-  const [loadingEmitidos, setLoadingEmitidos] = useState(false);
-  const [periodoUpload, setPeriodoUpload] = useState(() => getPeriodoEmpresa(empresaIdProp));
+function fechaLarga() {
+  const d = new Date();
+  return `${DIAS[d.getDay()]}, ${d.getDate()} de ${MESES_L[d.getMonth()]} de ${d.getFullYear()}`;
+}
+
+function SectionHeader({ color, title, subtitle }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14 }}>
+      <div style={{
+        width: 12, height: 12, borderRadius: "50%",
+        background: color, flexShrink: 0,
+        boxShadow: `0 0 0 4px ${color}25`,
+      }}/>
+      <div>
+        <div style={{ fontWeight: 700, fontSize: 22, color: "var(--foreground)", lineHeight: 1.2 }}>{title}</div>
+        {subtitle && (
+          <div style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--muted-foreground)", marginTop: 3 }}>{subtitle}</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+
+/* ── Main Component ─────────────────────────────────────────────── */
+export default function AuditoriaFiscal({
+  empresaId: empresaIdProp = null,
+  empresaData = null,
+  empresas: empresasProp = [],
+  userData = null,
+  onLogout = null,
+  onVolverInicio = null,
+  initialTab = null,
+}) {
+  const [tab,            setTab]           = useState(initialTab ?? "resumen");
+  const [detalle,        setDetalle]       = useState(null);
+  const [cierreData,     setCierreData]    = useState(null);
+  const [legacyData,     setLegacyData]    = useState(null);
+  const [empresaId,      setEmpresaId]     = useState(empresaIdProp);
+  const [loading,        setLoading]       = useState(false);
+  const [ejecutando,     setEjecutando]    = useState(null);
+  const [accionables,    setAccionables]   = useState([]);
+  const [empresas,       setEmpresas]      = useState(empresasProp);
+  const [uploadState,    setUploadState]   = useState({ cfdi:false, banco:false });
+  const [uploadMsg,      setUploadMsg]     = useState("");
+  const [diagnostico,    setDiagnostico]   = useState([]);
+  const [emitidosData,   setEmitidosData]  = useState(null);
+  const [recibidosData,  setRecibidosData] = useState(null);
+  const [loadingEmitidos,   setLoadingEmitidos]  = useState(false);
+  const [loadingRecibidos,  setLoadingRecibidos] = useState(false);
+  const [periodoUpload,  setPeriodoUpload] = useState(() => getPeriodoEmpresa(empresaIdProp) ?? getPeriodoSugerido());
   const [showPeriodoModal, setShowPeriodoModal] = useState(false);
 
-  const cfdiRef     = useRef(null);
-  const bancoRef    = useRef(null);
-  const emitidosRef = useRef(null);
+  const cfdiRef           = useRef(null);
+  const bancoRef          = useRef(null);
+  const emitidosRef       = useRef(null);
+  const periodoPopoverRef = useRef(null);
 
   const periodoActual = periodoUpload;
+  const empresaActiva = empresas.find(e => e.empresa_id === empresaId) ?? empresaData ?? null;
+  const rfc = empresaActiva?.rfc ?? "FC";
+  const nombreEmpresa = empresaActiva?.razon_social ?? rfc;
 
+  /* ── Fetch functions ──────────────────────────────────────────── */
   const fetchCierre = useCallback(async (eid, periodo) => {
     if (!eid) return;
     setLoading(true);
@@ -77,10 +114,7 @@ export default function AuditoriaFiscal({ empresaId: empresaIdProp = null, empre
     if (!eid) return;
     try {
       const res = await fetch(`${API_URL}/api/v1/empresas/${eid}/conciliaciones/accionables?periodo=${periodo}`, { headers: authHeaders() });
-      if (res.ok) {
-        const data = await res.json();
-        setAcisionables(data.pares ?? []);
-      }
+      if (res.ok) { const d = await res.json(); setAccionables(d.pares ?? []); }
     } catch(_) {}
   }, []);
 
@@ -95,20 +129,39 @@ export default function AuditoriaFiscal({ empresaId: empresaIdProp = null, empre
     finally { setLoadingEmitidos(false); }
   }, []);
 
+  const fetchRecibidos = useCallback(async (eid, periodo) => {
+    if (!eid) return;
+    setLoadingRecibidos(true);
+    try {
+      const res = await fetch(`${API_URL}/api/v1/empresas/${eid}/recibidos?periodo=${periodo}`, { headers: authHeaders() });
+      if (res.ok) setRecibidosData(await res.json());
+      else setRecibidosData(null);
+    } catch(_) { setRecibidosData(null); }
+    finally { setLoadingRecibidos(false); }
+  }, []);
+
   useEffect(() => {
     const init = async () => {
       setLoading(true);
       try {
-        const empresas = await fetch(`${API_URL}/api/v1/empresas`, { headers: authHeaders() }).then(r=>r.json());
-        if (Array.isArray(empresas)) setEmpresas(empresas);
-        if (!empresas.length) return;
-        const eid = empresaIdProp ?? empresas[0].id;
+        const empresasList = await fetch(`${API_URL}/api/v1/empresas`, { headers: authHeaders() }).then(r=>r.json());
+        // Normalizar — asegurar que cada empresa tenga empresa_id
+        const lista = (Array.isArray(empresasList) ? empresasList : [])
+          .map(e => ({ ...e, empresa_id: e.empresa_id ?? e.id }));
+        if (lista.length > 0) setEmpresas(lista);
+
+        // Priorizar empresa seleccionada por el usuario
+        const eid = (empresaIdProp && lista.find(e => e.empresa_id === empresaIdProp))
+          ? empresaIdProp
+          : lista[0]?.empresa_id;
+        if (!eid) return;
         setEmpresaId(eid);
         await Promise.all([
           fetchCierre(eid, periodoActual),
           fetchLegacy(eid),
           fetchAcisionables(eid, periodoActual),
           fetchEmitidos(eid, periodoActual),
+          fetchRecibidos(eid, periodoActual),
         ]);
       } catch(_) {} finally { setLoading(false); }
     };
@@ -117,21 +170,14 @@ export default function AuditoriaFiscal({ empresaId: empresaIdProp = null, empre
 
   const ejecutarAccion = async (deteccionId, tipo, notas = "") => {
     setEjecutando(deteccionId);
-    // Optimistic update
     setCierreData(prev => {
       if (!prev) return prev;
-      const patchEstado = (list) =>
-        list.map(a => a.id === deteccionId
-          ? { ...a, estado: { marcar_revisado:"en_revision", solicitar_cfdi:"en_espera_cfdi",
-                              emitir_cfdi:"en_espera_cfdi", confirmar_match:"confirmado",
-                              descartar:"descartado", resolver:"resuelto" }[tipo] ?? a.estado }
-          : a
-        );
-      return {
-        ...prev,
-        bloqueadores: patchEstado(prev.bloqueadores),
-        acciones:     patchEstado(prev.acciones),
-      };
+      const patchEstado = (list) => list.map(a => a.id === deteccionId
+        ? { ...a, estado: { marcar_revisado:"en_revision", solicitar_cfdi:"en_espera_cfdi",
+                            emitir_cfdi:"en_espera_cfdi", confirmar_match:"confirmado",
+                            descartar:"descartado", resolver:"resuelto" }[tipo] ?? a.estado }
+        : a);
+      return { ...prev, bloqueadores: patchEstado(prev.bloqueadores), acciones: patchEstado(prev.acciones) };
     });
     try {
       await fetch(`${API_URL}/api/v1/acciones/${deteccionId}/ejecutar`, {
@@ -139,27 +185,37 @@ export default function AuditoriaFiscal({ empresaId: empresaIdProp = null, empre
         headers: { "Content-Type":"application/json", ...authHeaders() },
         body: JSON.stringify({ tipo, notas }),
       });
-      // Refrescar para consistencia
-      await Promise.all([
-        fetchCierre(empresaId, periodoActual),
-        fetchAcisionables(empresaId, periodoActual),
-      ]);
+      await Promise.all([fetchCierre(empresaId, periodoActual), fetchAcisionables(empresaId, periodoActual)]);
     } catch(_) {} finally { setEjecutando(null); }
   };
 
-  const resolver = async (id) => ejecutarAccion(id, "resolver");
+  useEffect(() => {
+    if (!showPeriodoModal) return;
+    const handleClickOutside = (e) => {
+      if (periodoPopoverRef.current && !periodoPopoverRef.current.contains(e.target)) {
+        setShowPeriodoModal(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [showPeriodoModal]);
+
+  useEffect(() => {
+    const handleEscape = (e) => { if (e.key === "Escape") setShowPeriodoModal(false); };
+    document.addEventListener("keydown", handleEscape);
+    return () => document.removeEventListener("keydown", handleEscape);
+  }, []);
 
   const cambiarPeriodo = (nuevoPeriodo) => {
     setPeriodoUpload(nuevoPeriodo);
     setPeriodoEmpresa(empresaId, nuevoPeriodo);
     setShowPeriodoModal(false);
-    setCierreData(null);
-    setEmitidosData(null);
-    setAcisionables([]);
+    setCierreData(null); setEmitidosData(null); setRecibidosData(null); setAccionables([]);
     Promise.all([
       fetchCierre(empresaId, nuevoPeriodo),
       fetchAcisionables(empresaId, nuevoPeriodo),
       fetchEmitidos(empresaId, nuevoPeriodo),
+      fetchRecibidos(empresaId, nuevoPeriodo),
     ]);
   };
 
@@ -168,28 +224,20 @@ export default function AuditoriaFiscal({ empresaId: empresaIdProp = null, empre
     const parsed = await Promise.all([...files].map(async f => parseCFDI(await f.text(), f.name)));
     const valid = parsed.filter(Boolean);
     if (valid.length > 0) { setDiagnostico(prev=>[...prev,...valid]); setTab("diagnostico"); }
-    if (!empresaId) { setUploadMsg("Sin empresa activa — diagnóstico en pestaña «Diagnóstico»"); return; }
+    if (!empresaId) { setUploadMsg("Sin empresa activa"); return; }
     setUploadState(p=>({...p,cfdi:true})); setUploadMsg("");
     const fd = new FormData();
     for(const f of files) fd.append("archivos",f);
-    fd.append("periodo",periodoUpload);
+    fd.append("periodo", periodoUpload);
     try {
       const res = await fetch(`${API_URL}/api/v1/empresas/${empresaId}/cfdi/upload`,{method:"POST",body:fd,headers:authHeaders()}).then(r=>r.json());
       setUploadMsg(`✓ ${res.mensaje}`);
-      await Promise.all([
-        fetchCierre(empresaId, periodoActual),
-        fetchAcisionables(empresaId, periodoActual),
-        fetchEmitidos(empresaId, periodoActual),
-      ]);
+      await Promise.all([fetchCierre(empresaId,periodoActual), fetchAcisionables(empresaId,periodoActual), fetchEmitidos(empresaId,periodoActual), fetchRecibidos(empresaId,periodoActual)]);
     } catch(_) { setUploadMsg("✗ Error al subir CFDI."); }
     finally { setUploadState(p=>({...p,cfdi:false})); }
   };
 
-  const uploadCfdi = async (e) => {
-    const files = e.target.files;
-    await procesarCfdi(files);
-    e.target.value = "";
-  };
+  const uploadCfdi = async (e) => { await procesarCfdi(e.target.files); e.target.value = ""; };
 
   const procesarBanco = async (file) => {
     if (!file || !empresaId) return;
@@ -199,721 +247,384 @@ export default function AuditoriaFiscal({ empresaId: empresaIdProp = null, empre
     try {
       const res = await fetch(`${API_URL}/api/v1/empresas/${empresaId}/banco/upload`,{method:"POST",body:fd,headers:authHeaders()}).then(r=>r.json());
       setUploadMsg(`✓ ${res.mensaje}`);
-      await Promise.all([fetchCierre(empresaId, periodoActual), fetchAcisionables(empresaId, periodoActual)]);
+      await Promise.all([fetchCierre(empresaId,periodoActual), fetchAcisionables(empresaId,periodoActual)]);
     } catch(_) { setUploadMsg("✗ Error al subir estado de cuenta."); }
     finally { setUploadState(p=>({...p,banco:false})); }
   };
 
-  const uploadBanco = async (e) => {
-    await procesarBanco(e.target.files[0]);
-    e.target.value = "";
+  const uploadBanco = async (e) => { await procesarBanco(e.target.files[0]); e.target.value = ""; };
+
+  const sincronizar = () => {
+    setEmitidosData(null); setRecibidosData(null); setCierreData(null);
+    Promise.all([
+      fetchCierre(empresaId, periodoActual),
+      fetchAcisionables(empresaId, periodoActual),
+      fetchEmitidos(empresaId, periodoActual),
+      fetchRecibidos(empresaId, periodoActual),
+    ]);
   };
 
-  const empresaActiva = empresas.find(e => e.empresa_id === empresaId) ?? empresaData ?? null;
-  const rfc = empresaActiva?.rfc ?? cierreData?.empresa?.rfc ?? "FC";
 
-  const totalEmitidos = emitidosData
-    ? (emitidosData.resumen?.num_ingresos ?? 0) + (emitidosData.resumen?.num_anticipos ?? 0)
-      + (emitidosData.resumen?.num_facturas_con_anticipo ?? 0) + (emitidosData.resumen?.num_egresos ?? 0)
-    : 0;
+  /* ── Vista Resumen ──────────────────────────────────────────── */
+  const ResumenView = () => {
+    const nombre     = userData?.nombre ?? "Contador";
+    const primerNombre = nombre.split(" ")[0];
 
-  const DRILL_TABS = [
-    ["emitidos",      totalEmitidos > 0 ? `Emitidos (${totalEmitidos})` : "Emitidos"],
-    ["riesgos",       "Todos los riesgos"],
-    ["conciliacion",  "Conciliación"],
-    ["ingesta",       "Cargar archivos"],
-    ["diagnostico",   diagnostico.length > 0 ? `Diagnóstico (${diagnostico.length})` : "Diagnóstico CFDI"],
-    ["sat",           "Descarga SAT"],
-  ];
+    // Datos Ingresos (emitidos)
+    const resE = emitidosData?.resumen ?? {};
+    const subtotalEmit  = resE.subtotal       ?? 0;
+    const ivaEmit       = resE.iva_trasladado ?? 0;
+    const totalEmit     = resE.total_facturado ?? 0;
+    const vigentesEmit  = resE.vigentes        ?? 0;
+    const canceladasEmit= resE.canceladas      ?? 0;
+    const numTipoI      = resE.num_tipo_i      ?? 0;
+    const numTipoE      = resE.num_tipo_e      ?? 0;
+    const numTipoP      = resE.num_tipo_p      ?? 0;
+    const totalCFDI     = resE.total_cfdi_periodo ?? (numTipoI + numTipoE + numTipoP);
 
-  /* ── Onboarding: sin datos en el período ────────────────────── */
-  const SinDatos = () => {
-    const [arrastrandoEmit,  setArrastrandoEmit]  = useState(false);
-    const [arrastrandoBanco, setArrastrandoBanco] = useState(false);
-    const [emitOk,  setEmitOk]  = useState(false);
-    const [bancoOk, setBancoOk] = useState(false);
+    // Datos Compras (recibidos)
+    const resR = recibidosData?.resumen ?? {};
+    const subtotalComp  = resR.subtotal        ?? 0;
+    const ivaComp       = resR.iva_acreditable ?? 0;
+    const totalComp     = resR.total           ?? 0;
+    const vigentesComp  = resR.vigentes        ?? 0;
+    const canceladasComp= resR.canceladas      ?? 0;
+    const numCompras    = resR.num_compras      ?? 0;
+    const numEgresosComp= resR.num_egresos      ?? 0;
+    const totalCFDIComp = numCompras + numEgresosComp;
 
-    const handleDropEmitidos = e => {
-      e.preventDefault(); setArrastrandoEmit(false);
-      const files = [...e.dataTransfer.files].filter(f => f.name.endsWith(".xml"));
-      if (!files.length) return;
-      setEmitOk(true);
-      procesarCfdi(files);
-    };
-
-    const handleDropBanco = e => {
-      e.preventDefault(); setArrastrandoBanco(false);
-      const files = [...e.dataTransfer.files].filter(f => /\.(csv|xlsx)$/i.test(f.name));
-      if (!files.length) return;
-      setBancoOk(true);
-      procesarBanco(files[0]);
-    };
+    const hayDatos = totalCFDI > 0 || totalComp > 0;
 
     return (
-      <div className="space-y-6">
-        {/* Período */}
-        <div className="flex items-center gap-4 flex-wrap">
-          <div>
-            <h2 className="font-display font-bold text-xl text-foreground">Bienvenido al período</h2>
-            <p className="text-sm text-muted-foreground mt-0.5">
-              Carga los CFDIs emitidos para comenzar el análisis de{" "}
-              <span className="text-primary font-semibold">{periodoLabel(periodoActual)}</span>
-            </p>
-          </div>
+      <div style={{ maxWidth: 1120, margin: "0 auto" }}>
+
+        {/* ── Greeting ── */}
+        <div style={{ marginBottom: 28 }}>
+          <h1 style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 26, color: "var(--foreground)", letterSpacing: "-0.025em", margin: 0, marginBottom: 4 }}>
+            {saludoHora()}, {primerNombre}
+          </h1>
+          <p style={{ fontFamily: "var(--font-mono)", fontSize: 13, color: "var(--muted-foreground)", margin: 0 }}>
+            {fechaLarga()} · {nombreEmpresa.split(" ").slice(0, 5).join(" ")}
+          </p>
         </div>
 
-        {uploadMsg && (
-          <div className={cn(
-            "flex items-center gap-2 px-4 py-2.5 rounded-lg border font-mono text-sm",
-            uploadMsg.startsWith("✓")
-              ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400"
-              : "bg-red-500/10 border-red-500/30 text-red-400"
-          )}>
-            {uploadMsg}
+        {/* ── Sin datos onboarding ── */}
+        {!hayDatos && !loadingEmitidos && (
+          <div style={{ textAlign: "center", padding: "64px 32px", marginBottom: 24 }}>
+            <div style={{ width: 72, height: 72, borderRadius: 20, margin: "0 auto 24px", background: "linear-gradient(135deg, rgba(6,182,212,0.15), rgba(6,182,212,0.05))", border: "1px solid rgba(6,182,212,0.2)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="rgba(6,182,212,0.65)" strokeWidth="1.5">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                <polyline points="14,2 14,8 20,8"/>
+                <line x1="16" y1="13" x2="8" y2="13"/>
+                <line x1="16" y1="17" x2="8" y2="17"/>
+                <polyline points="10,9 9,9 8,9"/>
+              </svg>
+            </div>
+            <h3 style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 20, color: "var(--foreground)", margin: "0 0 10px", letterSpacing: "-0.02em" }}>
+              Sin CFDIs para {periodoLabel(periodoActual)}
+            </h3>
+            <p style={{ color: "var(--muted-foreground)", fontSize: 14, maxWidth: 340, margin: "0 auto 28px", lineHeight: 1.6 }}>
+              Descarga tus comprobantes directamente del SAT o carga archivos XML para analizar el período.
+            </p>
+            <div style={{ display: "flex", gap: 12, justifyContent: "center", flexWrap: "wrap" }}>
+              <button onClick={() => setTab("sat")} style={{ height: 38, padding: "0 20px", borderRadius: 8, background: "var(--primary)", color: "#060B16", border: "none", cursor: "pointer", fontFamily: "var(--font-mono)", fontSize: 12, fontWeight: 700, letterSpacing: "0.02em" }}>
+                Descargar del SAT →
+              </button>
+              <button onClick={() => setTab("banco")} style={{ height: 38, padding: "0 20px", borderRadius: 8, background: "rgba(255,255,255,0.04)", color: "var(--foreground)", border: "1px solid rgba(255,255,255,0.1)", cursor: "pointer", fontFamily: "var(--font-mono)", fontSize: 12 }}>
+                Cargar XMLs
+              </button>
+            </div>
           </div>
         )}
 
-        {/* ── Tarjetas principales: Emitidos / Recibidos ── */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {/* ── INGRESOS ── */}
+        {(totalCFDI > 0 || loadingEmitidos) && (
+          <section style={{ marginBottom: 24 }}>
+            <SectionHeader
+              color="#22C55E"
+              title="Ingresos"
+              subtitle={loadingEmitidos ? "Cargando…" : `Facturas emitidas · ${totalCFDI} CFDI en el periodo`}
+            />
 
-          {/* EMITIDOS */}
-          <div
-            onDragOver={e => { e.preventDefault(); setArrastrandoEmit(true); }}
-            onDragLeave={() => setArrastrandoEmit(false)}
-            onDrop={handleDropEmitidos}
-            className={cn(
-              "relative rounded-xl border-2 p-6 transition-all duration-200",
-              arrastrandoEmit
-                ? "border-primary bg-primary/10 scale-[1.01]"
-                : uploadState.cfdi
-                ? "border-primary/50 bg-primary/5"
-                : emitOk
-                ? "border-emerald-500/60 bg-emerald-500/5"
-                : "border-primary/30 bg-primary/5"
-            )}
-          >
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 rounded-lg bg-primary/15 border border-primary/30 flex items-center justify-center flex-shrink-0">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#06B6D4" strokeWidth="1.5" strokeLinecap="round">
-                  <path d="M12 19V5M12 5l-4 4M12 5l4 4"/>
-                  <path d="M3 19h18"/>
-                </svg>
-              </div>
-              <div>
-                <div className="font-display font-bold text-base text-foreground">Facturas Emitidas</div>
-                <div className="font-mono text-[10px] text-muted-foreground tracking-widest">EMITIDOS · XML</div>
-              </div>
-              {emitOk && <span className="ml-auto font-mono text-[10px] bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 rounded-full px-2 py-0.5">Cargado</span>}
+            {/* Fila 1: métricas financieras */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 10, marginBottom: 10 }}>
+              <StatCard label="Subtotal" value={fmt(subtotalEmit)} large />
+              <StatCard label="IVA Trasladado" value={fmt(ivaEmit)} sub="De facturas emitidas" />
+              <StatCard label="Total Facturado" value={fmt(totalEmit)} accent="#FFFFFF" large />
+              <StatCard label="Vigentes" value={vigentesEmit.toLocaleString()} accent="#4ADE80" />
+              <StatCard label="Canceladas" value={canceladasEmit.toLocaleString()} accent={canceladasEmit > 0 ? "#F87171" : "var(--foreground)"} />
             </div>
 
-            <p className="text-sm text-muted-foreground mb-5">
-              Carga los XMLs de las facturas que emitiste en el período: ingresos, notas de crédito y anticipos.
-            </p>
+            {/* Fila 2: conteo por tipo */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
+              <StatCard label="Ingreso" value={numTipoI.toLocaleString()} sub="Facturas de venta" />
+              <StatCard label="Egreso" value={numTipoE.toLocaleString()} sub="Notas de crédito" />
+              <StatCard label="Pago (REP)" value={numTipoP.toLocaleString()} sub="Complementos de pago" />
+            </div>
+          </section>
+        )}
 
-            <div className="flex flex-wrap gap-2 mb-5">
-              {["Ingresos (Ventas)", "Egresos (Notas crédito)", "Anticipos (Rel. 07)"].map(t => (
-                <span key={t} className="font-mono text-[10px] bg-primary/10 text-primary/70 border border-primary/20 rounded-full px-2.5 py-0.5">{t}</span>
-              ))}
+        {/* ── COMPRAS Y GASTOS ── */}
+        {(totalComp > 0 || loadingRecibidos) && (
+          <section style={{ marginBottom: 24 }}>
+            <SectionHeader
+              color="#60A5FA"
+              title="Compras y gastos"
+              subtitle={loadingRecibidos ? "Cargando…" : `Facturas recibidas · ${totalCFDIComp} CFDI en el periodo`}
+            />
+
+            {/* Fila 1: métricas financieras */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 10, marginBottom: 10 }}>
+              <StatCard label="Subtotal" value={fmt(subtotalComp)} large />
+              <StatCard label="IVA Acreditable" value={fmt(ivaComp)} sub="De facturas recibidas" />
+              <StatCard label="Total con IVA" value={fmt(totalComp)} accent="#FFFFFF" large />
+              <StatCard label="Vigentes" value={vigentesComp.toLocaleString()} accent="#4ADE80" />
+              <StatCard label="Canceladas" value={canceladasComp.toLocaleString()} accent={canceladasComp > 0 ? "#F87171" : "var(--foreground)"} />
             </div>
 
-            <Button
-              onClick={() => emitidosRef.current?.click()}
-              disabled={uploadState.cfdi}
-              className="w-full"
-            >
-              {uploadState.cfdi
-                ? <><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin mr-2 inline-block"/>Procesando…</>
-                : emitOk ? "Cargar más XMLs Emitidos" : "Cargar XMLs Emitidos"
-              }
-            </Button>
-
-            {emitOk && (
-              <button
-                onClick={() => setTab("emitidos")}
-                className="w-full mt-2 text-center font-mono text-xs text-primary hover:underline"
-              >
-                Ver análisis de emitidos →
-              </button>
-            )}
-
-            {arrastrandoEmit && (
-              <div className="absolute inset-0 rounded-xl bg-primary/5 border-2 border-primary flex items-center justify-center pointer-events-none">
-                <span className="font-mono text-sm text-primary font-bold">Soltar XMLs aquí</span>
-              </div>
-            )}
-          </div>
-
-          {/* RECIBIDOS (próximamente) */}
-          <div className="relative rounded-xl border-2 border-border/40 p-6 opacity-50">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 rounded-lg bg-muted/30 border border-border flex items-center justify-center flex-shrink-0">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#6B7280" strokeWidth="1.5" strokeLinecap="round">
-                  <path d="M12 5v14M12 19l-4-4M12 19l4-4"/>
-                  <path d="M3 5h18"/>
-                </svg>
-              </div>
-              <div>
-                <div className="font-display font-bold text-base text-muted-foreground">Facturas Recibidas</div>
-                <div className="font-mono text-[10px] text-muted-foreground tracking-widest">RECIBIDOS · GASTOS</div>
-              </div>
-              <span className="ml-auto font-mono text-[10px] bg-muted/20 text-muted-foreground border border-border rounded-full px-2 py-0.5">Próximamente</span>
+            {/* Fila 2: conteo por tipo */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 10 }}>
+              <StatCard label="Compras / Gastos" value={numCompras.toLocaleString()} sub="Facturas de compra" />
+              <StatCard label="Egreso" value={numEgresosComp.toLocaleString()} sub="Notas de crédito recibidas" />
             </div>
-            <p className="text-sm text-muted-foreground mb-5">
-              Carga los XMLs de las facturas que recibiste de tus proveedores: gastos, compras y servicios.
-            </p>
-            <div className="flex flex-wrap gap-2 mb-5">
-              {["Gastos deducibles", "Compras", "Servicios recibidos"].map(t => (
-                <span key={t} className="font-mono text-[10px] bg-muted/10 text-muted-foreground border border-border/50 rounded-full px-2.5 py-0.5">{t}</span>
-              ))}
-            </div>
-            <div className="w-full h-9 rounded-md bg-muted/20 border border-border flex items-center justify-center">
-              <span className="font-mono text-xs text-muted-foreground">Disponible próximamente</span>
-            </div>
-          </div>
-        </div>
+          </section>
+        )}
 
-        {/* Estado de cuenta (secundario) */}
-        <div>
-          <p className="font-mono text-[10px] text-muted-foreground tracking-widest uppercase mb-3">Estado de cuenta bancario</p>
-          <div
-            onDragOver={e => { e.preventDefault(); setArrastrandoBanco(true); }}
-            onDragLeave={() => setArrastrandoBanco(false)}
-            onDrop={handleDropBanco}
-            onClick={() => bancoRef.current?.click()}
-            className={cn(
-              "relative rounded-xl border-2 border-dashed p-5 cursor-pointer transition-all duration-200 flex items-center gap-4 group",
-              arrastrandoBanco ? "border-primary bg-primary/10" : bancoOk ? "border-emerald-500/60 bg-emerald-500/5" : "border-border hover:border-primary/40 hover:bg-primary/5"
-            )}
-          >
-            <div className={cn("w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0", bancoOk ? "bg-emerald-500/15" : "bg-muted/20")}>
-              {uploadState.banco
-                ? <span className="w-5 h-5 border-2 border-primary/40 border-t-primary rounded-full animate-spin block"/>
-                : bancoOk
-                ? <svg className="w-5 h-5 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 6L9 17l-5-5"/></svg>
-                : <svg className="w-5 h-5 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M3 3h18v18H3zM3 9h18M9 21V9"/></svg>
-              }
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="font-display font-semibold text-sm text-foreground">
-                {uploadState.banco ? "Procesando movimientos…" : bancoOk ? "Estado de cuenta cargado" : "Estado de Cuenta"}
-              </div>
-              <div className="text-xs text-muted-foreground mt-0.5">
-                {bancoOk ? "Archivo procesado correctamente" : "CSV o XLSX · BBVA, Santander, Banamex, Banorte y más · Arrastra o haz clic"}
-              </div>
-            </div>
-            {arrastrandoBanco && (
-              <div className="absolute inset-0 rounded-xl bg-primary/5 border-2 border-primary flex items-center justify-center pointer-events-none">
-                <span className="font-mono text-sm text-primary font-bold">Soltar archivo aquí</span>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Qué pasa después */}
-        <div className="rounded-lg border border-border bg-card/50 p-5">
-          <p className="font-mono text-[10px] text-muted-foreground tracking-widest uppercase mb-4">
-            Qué genera FiscalCore al procesar
-          </p>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            {[
-              { icon: "⚡", title: "Estado de cierre", desc: "¿Puedes cerrar el mes sin riesgo?" },
-              { icon: "🛡", title: "Riesgos detectados", desc: "Ingresos no facturados, IVA, RFC inválidos…" },
-              { icon: "🔗", title: "Conciliación banco↔CFDI", desc: "Matching automático con score de confianza" },
-              { icon: "📊", title: "Score fiscal 0–100", desc: "Salud fiscal del cliente en un número" },
-            ].map(({ icon, title, desc }) => (
-              <div key={title} className="flex flex-col gap-1.5">
-                <span className="text-xl">{icon}</span>
-                <p className="font-display font-semibold text-sm text-foreground">{title}</p>
-                <p className="text-[11px] text-muted-foreground leading-relaxed">{desc}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-  /* ── Vista principal ─────────────────────────────────────────── */
-  const VistaPrincipal = () => {
-    const cierre = cierreData;
-    const accionesActivas = cierre?.acciones?.filter(
-      a => !["resuelto","descartado","falso_positivo"].includes(a.estado)
-    ) ?? [];
-    const concil = cierre?.conciliacion ?? {};
-    const score  = cierre?.score ?? null;
-    const tendencia = legacyData?.dash?.tendencia_score?.map(t => ({
-      mes: MESES[parseInt(t.periodo.split("-")[1],10)-1], score: t.score
-    })) ?? [];
-
-    // índice de detecciones por movimiento_id para cruzar con pares accionables
-    const deteccionPorMovimiento = Object.fromEntries(
-      (cierre?.acciones ?? [])
-        .filter(a => a.movimiento_id && !["resuelto","descartado","falso_positivo"].includes(a.estado))
-        .map(a => [a.movimiento_id, a])
-    );
-
-    // Pares accionables del período actual (sin_cfdi y parciales), máximo 6 en vista principal
-    const paresActivos = accionables.slice(0, 6);
-
-    // Sin datos: no hay CFDIs ni movimientos bancarios en el período
-    const sinDatos = !loading && (
-      !cierre ||
-      ((cierre.conciliacion?.total ?? 0) === 0 && (cierre.acciones?.length ?? 0) === 0)
-    );
-    if (sinDatos) return <SinDatos />;
-
-    return (
-      <div className="space-y-5">
-
-        {/* ── Tarjetas de módulos: Emitidos / Recibidos ── */}
-        <div className="grid grid-cols-2 gap-3">
-          {/* EMITIDOS */}
-          <button
-            onClick={() => emitidosData ? setTab("emitidos") : emitidosRef.current?.click()}
-            className="rounded-xl border border-primary/30 bg-primary/5 p-4 text-left hover:bg-primary/10 transition-colors group"
-          >
-            <div className="flex items-center gap-3 mb-2">
-              <div className="w-8 h-8 rounded-lg bg-primary/15 border border-primary/30 flex items-center justify-center flex-shrink-0">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#06B6D4" strokeWidth="2" strokeLinecap="round">
-                  <path d="M12 19V5M12 5l-4 4M12 5l4 4"/><path d="M3 19h18"/>
-                </svg>
-              </div>
-              <span className="font-display font-bold text-sm text-foreground">Emitidos</span>
-              {loadingEmitidos && <span className="ml-auto w-3 h-3 border border-primary/40 border-t-primary rounded-full animate-spin block"/>}
-              {!loadingEmitidos && emitidosData && (
-                <span className="ml-auto font-mono text-[10px] bg-primary/10 text-primary border border-primary/20 rounded-full px-1.5 py-0.5">
-                  {totalEmitidos} CFDIs
-                </span>
-              )}
-            </div>
-            {emitidosData ? (
-              <div className="space-y-0.5">
-                <div className="font-mono text-xs text-foreground">
-                  Ingresos: <span className="text-emerald-400">${(emitidosData.resumen?.total_ingresos ?? 0).toLocaleString("es-MX",{minimumFractionDigits:2})}</span>
-                </div>
-                <div className="font-mono text-xs text-muted-foreground">
-                  Egresos: {emitidosData.resumen?.num_egresos ?? 0} notas · Ver detalle →
-                </div>
-                {(emitidosData.resumen?.advertencias?.length ?? 0) > 0 && (
-                  <div className="font-mono text-[10px] text-amber-400">
-                    ⚠ {emitidosData.resumen.advertencias.length} advertencia(s)
+        {/* ── PLACEHOLDER: secciones con datos disponibles en cierre ── */}
+        {cierreData && (
+          <section style={{ marginBottom: 24 }}>
+            {/* Bloqueadores activos */}
+            {(cierreData.bloqueadores?.filter(b => !["resuelto","descartado"].includes(b.estado))?.length ?? 0) > 0 && (
+              <div style={{
+                borderRadius: 10, border: "1px solid rgba(248,113,113,0.3)",
+                background: "rgba(248,113,113,0.05)", padding: "14px 16px",
+                display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12,
+              }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#F87171", flexShrink: 0 }}/>
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: 14, color: "var(--foreground)" }}>
+                      {cierreData.bloqueadores.filter(b => !["resuelto","descartado"].includes(b.estado)).length} bloqueadores activos
+                    </div>
+                    <div style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--muted-foreground)", marginTop: 2 }}>
+                      Riesgos que impiden el cierre del período
+                    </div>
                   </div>
-                )}
-              </div>
-            ) : (
-              <p className="text-xs text-muted-foreground">Sin CFDIs emitidos en el período · Haz clic para cargar</p>
-            )}
-          </button>
-
-          {/* RECIBIDOS (próximamente) */}
-          <div className="rounded-xl border border-border/40 bg-muted/10 p-4 opacity-50">
-            <div className="flex items-center gap-3 mb-2">
-              <div className="w-8 h-8 rounded-lg bg-muted/20 border border-border flex items-center justify-center flex-shrink-0">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6B7280" strokeWidth="2" strokeLinecap="round">
-                  <path d="M12 5v14M12 19l-4-4M12 19l4-4"/><path d="M3 5h18"/>
-                </svg>
-              </div>
-              <span className="font-display font-bold text-sm text-muted-foreground">Recibidos</span>
-              <span className="ml-auto font-mono text-[9px] bg-muted/20 text-muted-foreground border border-border rounded-full px-1.5 py-0.5">Próx.</span>
-            </div>
-            <p className="text-xs text-muted-foreground">Gastos y compras · Disponible próximamente</p>
-          </div>
-        </div>
-
-        {/* ── Bloque 1: ¿Puedo cerrar el mes? ── */}
-        <div className={cn(
-          "rounded-lg border-2 p-4 flex items-start gap-4",
-          cierre?.puede_cerrar
-            ? "border-emerald-500/40 bg-emerald-500/5"
-            : "border-red-500/30 bg-red-500/5"
-        )}>
-          <div className={cn(
-            "w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 text-lg font-bold mt-0.5",
-            cierre?.puede_cerrar ? "bg-emerald-500/20 text-emerald-400" : "bg-red-500/20 text-red-400"
-          )}>
-            {cierre?.puede_cerrar ? "✓" : "!"}
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-3 flex-wrap">
-              <span className="font-display font-bold text-lg text-foreground">
-                {cierre?.puede_cerrar ? "Puedes cerrar el mes" : "No puedes cerrar todavía"}
-              </span>
-              {score !== null && (
-                <span className="font-mono text-sm font-bold" style={{ color:scoreColor(score) }}>
-                  Score {score}
-                </span>
-              )}
-              <span className="font-mono text-[10px] text-muted-foreground tracking-wider">
-                {periodoLabel(periodoActual)}
-              </span>
-            </div>
-            {cierre?.razon_bloqueo && (
-              <div className="text-sm text-muted-foreground mt-1">{cierre.razon_bloqueo}</div>
-            )}
-            {!cierre && (
-              <div className="text-sm text-muted-foreground mt-1">
-                {loading ? "Cargando…" : "Carga CFDIs y estados de cuenta para ver el diagnóstico de cierre"}
-              </div>
-            )}
-          </div>
-          {score !== null && (
-            <div className="flex-shrink-0 hidden md:block">
-              <ScoreGauge score={score}/>
-            </div>
-          )}
-        </div>
-
-        {/* ── Bloque 2: Acciones del día ── */}
-        <div>
-          <div className="flex items-center justify-between mb-3">
-            <div>
-              <div className="font-display font-bold text-lg text-foreground">Acciones del día</div>
-              <div className="font-mono text-[11px] text-muted-foreground mt-0.5">
-                {accionesActivas.length === 0
-                  ? "Sin acciones pendientes"
-                  : `${accionesActivas.length} detección${accionesActivas.length>1?"es":""} · ${fmt(accionesActivas.reduce((s,a)=>s+(a.monto_afectado??0),0))} en riesgo`
-                }
-              </div>
-            </div>
-            <Button variant="ghost" size="sm" onClick={()=>setTab("riesgos")}
-              className="font-mono text-[11px] text-muted-foreground">
-              Ver todos →
-            </Button>
-          </div>
-
-          {accionesActivas.length === 0 ? (
-            <Card>
-              <CardContent className="py-10 text-center text-sm text-muted-foreground pt-10">
-                {loading ? "Cargando acciones…" : "Sin detecciones activas · Carga archivos para comenzar el análisis"}
-              </CardContent>
-            </Card>
-          ) : (
-            <div className="space-y-2.5">
-              {accionesActivas.map(item => (
-                <AccionItem
-                  key={item.id}
-                  item={item}
-                  onEjecutar={ejecutarAccion}
-                  onDetalle={setDetalle}
-                  ejecutando={ejecutando}
-                />
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* ── Bloque 3: Conciliación ── */}
-        <Card>
-          <CardContent className="pt-5">
-            <div className="flex justify-between items-start mb-3">
-              <div>
-                <div className="font-mono text-[10px] text-muted-foreground tracking-widest uppercase">
-                  Conciliación del período
                 </div>
-                <div className="font-mono text-2xl font-bold text-foreground mt-1">
-                  {concil.pct_conciliado ?? 0}%
-                  <span className="text-sm text-muted-foreground font-normal ml-2">conciliado</span>
-                </div>
-              </div>
-              <div className="text-right space-y-1">
-                {concil.sin_cfdi > 0 && (
-                  <div className="font-mono text-[11px] text-red-400">
-                    {concil.sin_cfdi} sin CFDI
-                  </div>
-                )}
-                {concil.matches_debiles > 0 && (
-                  <div className="font-mono text-[11px] text-amber-400">
-                    {concil.matches_debiles} matches débiles
-                  </div>
-                )}
-                <button onClick={()=>setTab("conciliacion")}
-                  className="font-mono text-[11px] text-primary hover:underline bg-transparent border-none cursor-pointer block ml-auto">
-                  Ver detalle →
+                <button onClick={() => setTab("riesgos")}
+                  style={{ fontFamily: "var(--font-mono)", fontSize: 12, fontWeight: 600, color: "#F87171", background: "transparent", border: "none", cursor: "pointer", whiteSpace: "nowrap" }}>
+                  Ver riesgos →
                 </button>
               </div>
-            </div>
-            <ConciliacionBar data={{
-              exacto:         (concil.total ?? 0) - (concil.sin_cfdi ?? 0) - (concil.sin_movimiento ?? 0) - (concil.matches_debiles ?? 0),
-              parcial:        concil.matches_debiles ?? 0,
-              sin_cfdi:       concil.sin_cfdi ?? 0,
-              sin_movimiento: concil.sin_movimiento ?? 0,
-            }}/>
-          </CardContent>
-        </Card>
-
-        {/* ── Bloque 4: Movimientos por conciliar ── */}
-        {paresActivos.length > 0 && (
-          <div>
-            <div className="flex items-center justify-between mb-3">
-              <div>
-                <div className="font-display font-bold text-lg text-foreground">Movimientos por conciliar</div>
-                <div className="font-mono text-[11px] text-muted-foreground mt-0.5">
-                  {accionables.length} movimiento{accionables.length !== 1 ? "s" : ""} sin CFDI o con match débil
-                </div>
-              </div>
-              <Button variant="ghost" size="sm" onClick={() => setTab("conciliacion")}
-                className="font-mono text-[11px] text-muted-foreground">
-                Ver todos →
-              </Button>
-            </div>
-            <div className="space-y-2">
-              {paresActivos.map(par => {
-                const deteccion = deteccionPorMovimiento[par.movimiento_id];
-                const esSinCfdi = par.tipo_match === "sin_cfdi";
-                return (
-                  <div key={par.id}
-                    className="flex items-center gap-3 p-3.5 rounded-lg border bg-card"
-                    style={{ borderLeftWidth: 3, borderLeftColor: esSinCfdi ? "#F87171" : "#FBBF24" }}
-                  >
-                    {/* Fecha y concepto */}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-mono text-[10px] text-muted-foreground">
-                          {par.mov_fecha ? new Date(par.mov_fecha).toLocaleDateString("es-MX",{day:"2-digit",month:"short"}) : "—"}
-                        </span>
-                        <span className={cn(
-                          "font-mono text-[9px] font-bold px-1.5 py-0.5 rounded border",
-                          esSinCfdi
-                            ? "text-red-400 bg-red-400/10 border-red-400/20"
-                            : "text-amber-400 bg-amber-400/10 border-amber-400/20"
-                        )}>
-                          {esSinCfdi ? "SIN CFDI" : "PARCIAL"}
-                        </span>
-                        {par.mov_tipo && (
-                          <span className="font-mono text-[9px] text-muted-foreground uppercase">{par.mov_tipo}</span>
-                        )}
-                      </div>
-                      <div className="text-sm text-foreground mt-0.5 truncate">
-                        {par.concepto ?? "Sin concepto"}
-                      </div>
-                      {par.rfc_detectado && (
-                        <div className="font-mono text-[10px] text-muted-foreground mt-0.5">{par.rfc_detectado}</div>
-                      )}
-                    </div>
-
-                    {/* Monto */}
-                    <div className="text-right flex-shrink-0">
-                      <div className="font-mono text-base font-bold" style={{ color: esSinCfdi ? "#F87171" : "#FBBF24" }}>
-                        {fmt(par.mov_monto ?? par.monto_movimiento)}
-                      </div>
-                      {!esSinCfdi && par.diferencia != null && (
-                        <div className="font-mono text-[10px] text-muted-foreground">
-                          Δ {fmt(par.diferencia)}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Acción inline: si hay detección asociada, usar ejecutarAccion */}
-                    <div className="flex-shrink-0">
-                      {deteccion ? (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={ejecutando === deteccion.id}
-                          onClick={() => ejecutarAccion(
-                            deteccion.id,
-                            esSinCfdi ? "solicitar_cfdi" : "confirmar_match"
-                          )}
-                          className="font-mono text-[10px] h-7 px-2.5"
-                        >
-                          {ejecutando === deteccion.id
-                            ? "…"
-                            : esSinCfdi ? "Solicitar CFDI" : "Confirmar match"
-                          }
-                        </Button>
-                      ) : (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => setTab("conciliacion")}
-                          className="font-mono text-[10px] h-7 px-2.5 text-muted-foreground"
-                        >
-                          Ver →
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
+            )}
+          </section>
         )}
 
-        {/* Tendencia (si hay historial) */}
-        {tendencia.length >= 2 && (
-          <Card>
-            <CardHeader className="pb-0">
-              <div className="font-mono text-[10px] text-muted-foreground tracking-widest uppercase">Tendencia del Score</div>
-            </CardHeader>
-            <CardContent className="pt-3"><TrendLine data={tendencia}/></CardContent>
-          </Card>
-        )}
       </div>
     );
   };
 
 
-  /* ── Render ──────────────────────────────────────────────────── */
+  /* ── Tab navigation ─────────────────────────────────────────── */
+  const TABS = [
+    { key: "resumen",      label: "Resumen" },
+    { key: "sat",          label: "Descarga SAT" },
+    { key: "cfdi",         label: "CFDI Emitidos" },
+    { key: "recibidos",    label: "CFDI Recibidos" },
+    { key: "banco",        label: "Estados de cuenta" },
+    { key: "conciliacion", label: "Conciliación" },
+    { key: "reportes",     label: "Reportes" },
+  ];
+
+
+  /* ── Render ─────────────────────────────────────────────────── */
   return (
-    <div className="min-h-screen bg-background text-foreground">
+    <div style={{ display: "flex", flexDirection: "column", height: "100vh", overflow: "hidden", background: "var(--background)", color: "var(--foreground)" }}>
 
-      {/* Header */}
-      <header className="sticky top-0 z-50 bg-card/95 backdrop-blur-sm border-b border-border">
-        <div className="h-px bg-gradient-to-r from-transparent via-primary/60 to-transparent"/>
+      {/* ── Header ── */}
+      <header style={{ flexShrink: 0, background: "rgba(10,15,28,0.97)", backdropFilter: "blur(8px)", borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
+        {/* Línea de acento superior */}
+        <div style={{ height: 1, background: "linear-gradient(to right, transparent, rgba(6,182,212,0.5), transparent)" }} />
 
-        {/* Fila 1: Logo + controles */}
-        <div className="max-w-5xl mx-auto px-6 flex items-center gap-4 h-16">
+        <div style={{ display: "flex", alignItems: "center", height: 52, padding: "0 24px", gap: 12 }}>
 
           {/* Logo */}
-          <button onClick={()=>setTab(null)} className="flex items-center gap-2.5 flex-shrink-0 bg-transparent border-none cursor-pointer">
-            <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center flex-shrink-0">
-              <span className="font-brand font-black text-[13px] text-primary-foreground leading-none tracking-tighter">FC</span>
+          <button onClick={() => setTab("resumen")} style={{ display: "flex", alignItems: "center", gap: 9, background: "none", border: "none", cursor: "pointer", flexShrink: 0, padding: 0 }}>
+            <div style={{ width: 28, height: 28, borderRadius: 7, background: "rgba(6,182,212,0.15)", border: "1px solid rgba(6,182,212,0.3)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 2 }}>
+                {[0.9, 0.4, 0.4, 0.9].map((o, i) => (
+                  <div key={i} style={{ width: 5, height: 5, borderRadius: 1.5, background: "#06B6D4", opacity: o }} />
+                ))}
+              </div>
             </div>
-            <span className="font-brand font-black text-xl leading-none tracking-[-0.03em] text-foreground">
-              Fiscal<span className="text-primary">Core</span>
+            <span style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 15, color: "var(--foreground)", letterSpacing: "-0.02em" }}>
+              Fiscal<span style={{ color: "var(--primary)" }}>Core</span>
             </span>
           </button>
 
-          {/* Volver a inicio */}
-          {onVolverInicio && (
-            <button onClick={onVolverInicio}
-              className="hidden sm:flex items-center gap-1 font-mono text-xs text-muted-foreground hover:text-primary transition-colors border-l border-border pl-3 h-5">
-              <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                <path d="M19 12H5M12 5l-7 7 7 7"/>
-              </svg>
-              Mis empresas
-            </button>
+          {/* Separador */}
+          <div style={{ width: 1, height: 22, background: "rgba(255,255,255,0.08)", flexShrink: 0, margin: "0 4px" }} />
+
+          {/* Empresa */}
+          {empresas.length > 1 ? (
+            <select
+              value={empresaId ?? ""}
+              onChange={e => {
+                const eid = e.target.value;
+                const per = getPeriodoEmpresa(eid) ?? getPeriodoSugerido();
+                setEmpresaId(eid); setPeriodoUpload(per);
+                setCierreData(null); setAccionables([]); setEmitidosData(null); setRecibidosData(null);
+                Promise.all([fetchCierre(eid,per), fetchLegacy(eid), fetchAcisionables(eid,per), fetchEmitidos(eid,per), fetchRecibidos(eid,per)]);
+              }}
+              style={{ fontFamily: "var(--font-sans)", fontSize: 13, fontWeight: 600, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: "5px 10px", color: "var(--foreground)", outline: "none", cursor: "pointer", maxWidth: 260, flexShrink: 0 }}
+            >
+              {empresas.map(e => <option key={e.empresa_id} value={e.empresa_id}>{e.razon_social ?? e.rfc}</option>)}
+            </select>
+          ) : (
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+              <div style={{ width: 28, height: 28, borderRadius: 7, background: "rgba(6,182,212,0.12)", border: "1px solid rgba(6,182,212,0.22)", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "var(--font-mono)", fontWeight: 800, fontSize: 11, color: "var(--primary)", flexShrink: 0 }}>
+                {rfc.slice(0, 2)}
+              </div>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: "var(--foreground)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 240 }}>
+                  {nombreEmpresa}
+                </div>
+                <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted-foreground)", letterSpacing: "0.04em" }}>{rfc}</div>
+              </div>
+            </div>
           )}
 
-          <div className="flex-1"/>
-
           {/* Período */}
-          <div className="relative">
-            <button onClick={() => setShowPeriodoModal(p => !p)}
-              className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-primary/10 border border-primary/20 hover:bg-primary/15 transition-all group">
-              <span className="font-mono text-[10px] text-muted-foreground tracking-widest uppercase">Per.</span>
-              <span className="font-mono text-sm font-bold text-primary">{periodoLabel(periodoActual)}</span>
-              {loading
-                ? <div className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse"/>
-                : <svg className="w-3 h-3 text-primary/40 group-hover:text-primary transition-colors" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M6 9l6 6 6-6"/></svg>
-              }
+          <div ref={periodoPopoverRef} style={{ position: "relative", flexShrink: 0 }}>
+            <button
+              onClick={() => setShowPeriodoModal(p => !p)}
+              style={{ display: "flex", alignItems: "center", gap: 6, height: 30, padding: "0 12px", borderRadius: 99, border: "1px solid rgba(6,182,212,0.25)", background: "rgba(6,182,212,0.08)", fontFamily: "var(--font-mono)", fontSize: 12, fontWeight: 600, color: "var(--primary)", cursor: "pointer" }}
+            >
+              <svg style={{ width: 11, height: 11 }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
+              </svg>
+              {periodoLabel(periodoActual)}
             </button>
             {showPeriodoModal && (
-              <div className="absolute top-full right-0 mt-1.5 bg-card border border-border rounded-lg shadow-xl z-50 p-3 min-w-[220px]">
-                <div className="font-mono text-[9px] text-muted-foreground tracking-widest uppercase mb-2">Período de trabajo</div>
+              <div style={{ position: "absolute", left: 0, top: "calc(100% + 8px)", width: 220, background: "#0D1626", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, boxShadow: "0 12px 32px rgba(0,0,0,0.4)", zIndex: 50, padding: 14 }}>
+                <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 10 }}>Período de trabajo</div>
                 <input type="month" value={periodoUpload} onChange={e => cambiarPeriodo(e.target.value)}
-                  className="w-full bg-background border border-border rounded px-3 py-1.5 text-foreground font-mono text-sm focus:outline-none focus:border-primary" autoFocus/>
-                {periodoUpload !== getPeriodoSugerido() && (
-                  <button onClick={() => cambiarPeriodo(getPeriodoSugerido())}
-                    className="w-full mt-2 text-center font-mono text-[10px] text-primary hover:underline">
-                    Usar sugerido ({periodoLabel(getPeriodoSugerido())})
-                  </button>
-                )}
+                  style={{ width: "100%", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 7, padding: "7px 10px", color: "var(--foreground)", fontFamily: "var(--font-mono)", fontSize: 12, outline: "none", boxSizing: "border-box" }} autoFocus />
               </div>
             )}
           </div>
 
-          {/* Estado cierre */}
-          {cierreData && (
-            <div className={cn(
-              "hidden md:flex items-center gap-1.5 px-2.5 py-1 rounded-lg border font-mono text-[10px] font-bold",
-              cierreData.puede_cerrar
-                ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400"
-                : "bg-red-500/10 border-red-500/30 text-red-400"
-            )}>
-              {cierreData.puede_cerrar ? "✓ Listo" : `${cierreData.bloqueadores?.length ?? 0} bloqueadores`}
-            </div>
-          )}
+          <div style={{ flex: 1 }} />
 
-          {/* Selector empresa */}
-          {empresas.length > 1 && (
-            <select value={empresaId ?? ""}
-              onChange={e => {
-                const eid = e.target.value;
-                const per = getPeriodoEmpresa(eid);
-                setEmpresaId(eid); setPeriodoUpload(per); setCierreData(null); setAcisionables([]); setEmitidosData(null);
-                fetchCierre(eid, per); fetchLegacy(eid); fetchAcisionables(eid, per); fetchEmitidos(eid, per);
-              }}
-              className="font-mono text-xs bg-card border border-border rounded px-2 h-8 text-foreground focus:outline-none focus:border-primary max-w-[160px] truncate">
-              {empresas.map(e => <option key={e.empresa_id} value={e.empresa_id}>{e.razon_social?.slice(0,24) ?? e.rfc}</option>)}
-            </select>
-          )}
-
-          {/* Toggle tema */}
-          <button onClick={() => setTheme(t => t === "dark" ? "light" : "dark")}
-            className="w-8 h-8 rounded-lg border border-border flex items-center justify-center text-muted-foreground hover:text-primary hover:border-primary/40 transition-colors">
-            {theme === "dark" ? (
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                <circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
-              </svg>
-            ) : (
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
-              </svg>
-            )}
+          {/* Sync */}
+          <button
+            onClick={sincronizar}
+            disabled={loadingEmitidos || loadingRecibidos}
+            style={{ display: "flex", alignItems: "center", gap: 6, height: 30, padding: "0 12px", borderRadius: 7, border: "1px solid rgba(255,255,255,0.1)", background: "rgba(255,255,255,0.04)", fontFamily: "var(--font-mono)", fontSize: 11, fontWeight: 600, color: "var(--foreground)", cursor: "pointer", opacity: (loadingEmitidos || loadingRecibidos) ? 0.5 : 1, flexShrink: 0 }}
+          >
+            <svg style={{ width: 12, height: 12, animation: (loadingEmitidos || loadingRecibidos) ? "spin 1s linear infinite" : "none" }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M23 4v6h-6"/><path d="M1 20v-6h6"/>
+              <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+            </svg>
+            Actualizar
           </button>
 
-          {/* Avatar + salir */}
-          <div className="flex items-center gap-2">
-            <Avatar className="w-8 h-8">
-              <AvatarFallback className="text-xs font-bold">{rfc.slice(0,2)}</AvatarFallback>
-            </Avatar>
-            {onLogout && (
-              <Button variant="outline" size="sm" onClick={onLogout}
-                className="font-mono text-[10px] tracking-widest uppercase h-7 px-3">Salir</Button>
-            )}
-          </div>
-        </div>
+          {/* Empresas */}
+          {onVolverInicio && (
+            <button onClick={onVolverInicio} style={{ display: "flex", alignItems: "center", gap: 6, height: 30, padding: "0 12px", borderRadius: 7, border: "1px solid rgba(255,255,255,0.1)", background: "rgba(255,255,255,0.04)", fontFamily: "var(--font-mono)", fontSize: 11, fontWeight: 600, color: "var(--muted-foreground)", cursor: "pointer", flexShrink: 0, whiteSpace: "nowrap" }}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/>
+              </svg>
+              Empresas
+            </button>
+          )}
 
-        {/* Fila 2: Nav tabs centrada */}
-        <div className="max-w-5xl mx-auto px-6 flex items-center gap-0 border-t border-border/50">
-          <nav className="flex items-center gap-0 overflow-x-auto">
-            {DRILL_TABS.map(([k,l]) => (
-              <button key={k} onClick={() => setTab(k)}
-                className={cn(
-                  "px-4 h-9 text-[11px] font-mono border-b-2 transition-colors whitespace-nowrap",
-                  tab===k ? "text-primary border-primary font-semibold" : "text-muted-foreground border-transparent hover:text-foreground"
-                )}>
-                {l}
-              </button>
-            ))}
-          </nav>
+          {/* Logout */}
+          {onLogout && (
+            <button onClick={onLogout} style={{ width: 30, height: 30, borderRadius: 7, border: "1px solid rgba(255,255,255,0.08)", background: "transparent", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: "var(--muted-foreground)", flexShrink: 0 }}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16,17 21,12 16,7"/><line x1="21" y1="12" x2="9" y2="12"/>
+              </svg>
+            </button>
+          )}
         </div>
       </header>
 
-      <main className="max-w-5xl mx-auto px-6 py-7">
-        {tab === null          && <VistaPrincipal/>}
-        {tab === "emitidos" && (
+      {/* ── Tab navigation (debajo del header) ── */}
+      <nav style={{
+        flexShrink: 0,
+        display: "flex", alignItems: "center",
+        background: "var(--card)",
+        borderBottom: "1px solid var(--border)",
+        padding: "0 24px",
+        gap: 2,
+        height: 46,
+      }}>
+        {TABS.map(({ key, label }) => {
+          const active = tab === key;
+          return (
+            <button
+              key={key}
+              onClick={() => setTab(key)}
+              onMouseEnter={e => { if (!active) { e.currentTarget.style.opacity = "1"; e.currentTarget.style.background = "rgba(255,255,255,0.03)"; }}}
+              onMouseLeave={e => { if (!active) { e.currentTarget.style.opacity = "0.75"; e.currentTarget.style.background = "transparent"; }}}
+              style={{
+                height: 46, padding: "0 16px",
+                border: "none",
+                borderBottom: active ? "2px solid var(--primary)" : "2px solid transparent",
+                background: "transparent",
+                color: active ? "var(--primary)" : "var(--foreground)",
+                fontFamily: "var(--font-sans)", fontSize: 15,
+                fontWeight: active ? 700 : 500,
+                cursor: "pointer",
+                whiteSpace: "nowrap",
+                transition: "color 0.1s, border-color 0.1s, opacity 0.1s, background 0.1s",
+                opacity: active ? 1 : 0.75,
+              }}
+            >
+              {label}
+            </button>
+          );
+        })}
+      </nav>
+
+      {/* ── Main content ── */}
+      <main style={{ flex: 1, overflow: "auto", padding: "28px 32px" }}>
+        <div style={{ maxWidth: 1200, margin: "0 auto" }}>
+        {tab === "resumen"      && <ResumenView />}
+        {tab === "sat"          && (
+          <TabSAT
+            empresaId={empresaId}
+            periodoActual={periodoActual}
+            onCfdiImportado={() => Promise.all([fetchCierre(empresaId,periodoActual), fetchEmitidos(empresaId,periodoActual), fetchRecibidos(empresaId,periodoActual)])}
+          />
+        )}
+        {tab === "cfdi"         && (
           <TabEmitidos
             emitidosData={emitidosData}
             loadingEmitidos={loadingEmitidos}
             uploadState={uploadState}
             uploadMsg={uploadMsg}
             periodoActual={periodoActual}
-            totalEmitidos={totalEmitidos}
+            totalEmitidos={(emitidosData?.resumen?.num_tipo_i ?? 0) + (emitidosData?.resumen?.num_tipo_e ?? 0)}
             emitidosRef={emitidosRef}
             fetchEmitidos={fetchEmitidos}
             empresaId={empresaId}
           />
         )}
-        {tab === "riesgos" && (
-          <TabRiesgos
-            cierreData={cierreData}
+        {tab === "recibidos"    && (
+          <TabRecibidos
+            recibidosData={recibidosData}
+            loadingRecibidos={loadingRecibidos}
+            uploadState={uploadState}
+            uploadMsg={uploadMsg}
             periodoActual={periodoActual}
+            emitidosRef={emitidosRef}
+            fetchRecibidos={fetchRecibidos}
             empresaId={empresaId}
-            fetchCierre={fetchCierre}
-            setDetalle={setDetalle}
           />
         )}
-        {tab === "conciliacion" && (
-          <TabConciliacion
-            cierreData={cierreData}
-            legacyData={legacyData}
-            accionables={accionables}
-            periodoActual={periodoActual}
-          />
-        )}
-        {tab === "ingesta" && (
+        {tab === "banco"        && (
           <TabIngesta
             periodoActual={periodoActual}
             uploadState={uploadState}
@@ -928,32 +639,47 @@ export default function AuditoriaFiscal({ empresaId: empresaIdProp = null, empre
             procesarBanco={procesarBanco}
           />
         )}
-        {tab === "diagnostico" && (
+        {tab === "conciliacion" && (
+          <TabConciliacion
+            cierreData={cierreData}
+            legacyData={legacyData}
+            accionables={accionables}
+            periodoActual={periodoActual}
+          />
+        )}
+        {tab === "riesgos"      && (
+          <TabRiesgos
+            cierreData={cierreData}
+            periodoActual={periodoActual}
+            empresaId={empresaId}
+            fetchCierre={fetchCierre}
+            setDetalle={setDetalle}
+          />
+        )}
+        {tab === "diagnostico"  && (
           <TabDiagnostico
             diagnostico={diagnostico}
             setDiagnostico={setDiagnostico}
-            onIrIngesta={() => setTab("ingesta")}
+            onIrIngesta={() => setTab("banco")}
           />
         )}
-        {tab === "sat" && (
-          <TabSAT
-            empresaId={empresaId}
-            periodoActual={periodoActual}
-            onCfdiImportado={() => Promise.all([
-              fetchCierre(empresaId, periodoActual),
-              fetchEmitidos(empresaId, periodoActual),
-            ])}
-          />
+        {tab === "reportes"     && (
+          <div style={{ maxWidth: 480, margin: "80px auto", textAlign: "center" }}>
+            <div style={{ width: 64, height: 64, borderRadius: 18, margin: "0 auto 20px", background: "rgba(167,139,250,0.1)", border: "1px solid rgba(167,139,250,0.2)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="rgba(167,139,250,0.6)" strokeWidth="1.5">
+                <line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/>
+              </svg>
+            </div>
+            <h3 style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 18, color: "var(--foreground)", margin: "0 0 8px", letterSpacing: "-0.02em" }}>Reportes</h3>
+            <p style={{ color: "var(--muted-foreground)", fontSize: 13, lineHeight: 1.6 }}>
+              Exporta resúmenes fiscales, conciliaciones y análisis de riesgo en PDF y Excel. Disponible próximamente.
+            </p>
+          </div>
         )}
+        </div>
       </main>
 
-      <footer className="border-t border-border py-4 text-center mt-7">
-        <span className="font-mono text-[9px] text-muted-foreground/40 tracking-widest">
-          FISCALCORE v1.0 · AUDITORÍA SAT MX · DETECCIÓN PREVENTIVA
-        </span>
-      </footer>
-
-      {/* Detail Dialog */}
+      {/* ── Detail Dialog ── */}
       <Dialog open={!!detalle} onOpenChange={(o)=>!o&&setDetalle(null)}>
         {detalle && (
           <DialogContent className="max-w-md border-l-4" style={{ borderLeftColor:SEV_COLOR[detalle.severidad]??"#6B7280" }}>
@@ -964,7 +690,6 @@ export default function AuditoriaFiscal({ empresaId: empresaIdProp = null, empre
               </div>
               <DialogTitle className="text-base leading-snug">{detalle.nombre}</DialogTitle>
             </DialogHeader>
-
             <div className="p-4 rounded-md border mb-4"
               style={{ borderColor:(SEV_COLOR[detalle.severidad]??"#6B7280")+"30", background:(SEV_COLOR[detalle.severidad]??"#6B7280")+"0D" }}>
               <p className="text-sm text-muted-foreground mb-3 leading-relaxed">{detalle.descripcion}</p>
@@ -972,19 +697,6 @@ export default function AuditoriaFiscal({ empresaId: empresaIdProp = null, empre
                 {fmt(detalle.monto_afectado)}
               </div>
             </div>
-
-            {detalle.contexto && Object.keys(detalle.contexto).length > 1 && (
-              <div className="mb-4 p-3 bg-muted/20 rounded-md border border-border">
-                <div className="font-mono text-[9px] text-muted-foreground tracking-widest uppercase mb-2">Contexto</div>
-                {Object.entries(detalle.contexto).filter(([k])=>k!=="tipo").map(([k,v])=>(
-                  <div key={k} className="flex justify-between font-mono text-[11px] py-0.5">
-                    <span className="text-muted-foreground capitalize">{k.replace("_"," ")}</span>
-                    <span className="text-foreground">{typeof v==="number"?fmt(v):String(v).substring(0,40)}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-
             {detalle.accion_sugerida && (
               <div className="mb-4">
                 <div className="font-mono text-[10px] text-muted-foreground tracking-widest uppercase mb-2">Acción recomendada</div>
@@ -994,7 +706,6 @@ export default function AuditoriaFiscal({ empresaId: empresaIdProp = null, empre
                 </div>
               </div>
             )}
-
             {["abierto","pendiente","en_revision","en_espera_cfdi"].includes(detalle.estado) && detalle.accion_sugerida?.puede_resolverse_inline && (
               <div className="flex gap-2">
                 <Button className="flex-1" disabled={ejecutando===detalle.id}
@@ -1007,6 +718,8 @@ export default function AuditoriaFiscal({ empresaId: empresaIdProp = null, empre
           </DialogContent>
         )}
       </Dialog>
+
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   );
 }

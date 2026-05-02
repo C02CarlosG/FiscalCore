@@ -31,6 +31,7 @@ async def solicitar_descarga_cfdi(
     tipo: str = Form(...),
     fecha_inicio: str = Form(...),  # YYYY-MM-DD
     fecha_fin: str = Form(...),     # YYYY-MM-DD
+    estado_comprobante: str = Form("Vigente"),  # "Vigente", "Cancelado", "Todos"
     cer_file: UploadFile = File(...),
     key_file: UploadFile = File(...),
     password: str = Form(...),
@@ -77,7 +78,8 @@ async def solicitar_descarga_cfdi(
     solicitud_id = str(registro["id"])
 
     try:
-        id_sat = solicitar_descarga(creds, empresa["rfc"], tipo, fecha_ini, fecha_fin_d)
+        id_sat = solicitar_descarga(creds, empresa["rfc"], tipo, fecha_ini, fecha_fin_d,
+                                    estado_comprobante=estado_comprobante)
         db.execute(
             "UPDATE sat_solicitudes SET id_solicitud_sat=%s, estado='solicitado', updated_at=NOW() WHERE id=%s",
             (id_sat, solicitud_id),
@@ -354,3 +356,243 @@ def _insertar_cfdi(empresa_id: str, resultado, periodo: str, xml_raw_bytes: byte
             resultado.es_anticipo_sat,
         ),
     )
+
+
+# ===========================================================================
+# FIEL GUARDADA — endpoints para almacenar y usar FIEL por empresa
+# ===========================================================================
+
+@router.post("/empresas/{empresa_id}/fiel/guardar")
+async def guardar_fiel_empresa(
+    empresa_id: str,
+    cer_file: UploadFile = File(...),
+    key_file: UploadFile = File(...),
+    password: str = Form(...),
+    current_user: dict = Depends(get_current_user),
+):
+    """Guarda la FIEL cifrada para una empresa. Reemplaza cualquier FIEL previa."""
+    validar_acceso_empresa(empresa_id, current_user)
+
+    empresa = db.query_one("SELECT id FROM empresas WHERE id = %s", (empresa_id,))
+    if not empresa:
+        raise HTTPException(status_code=404, detail="Empresa no encontrada")
+
+    from ..fiel_store import guardar_fiel
+    try:
+        resultado = guardar_fiel(
+            db=db,
+            empresa_id=empresa_id,
+            cer_bytes=await cer_file.read(),
+            key_bytes=await key_file.read(),
+            password=password,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    return resultado
+
+
+@router.get("/empresas/{empresa_id}/fiel/estado")
+async def estado_fiel_empresa(
+    empresa_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Devuelve metadatos de la FIEL guardada (sin exponer credenciales)."""
+    validar_acceso_empresa(empresa_id, current_user)
+    from ..fiel_store import estado_fiel
+    info = estado_fiel(db, empresa_id)
+    return info if info else {"tiene_fiel": False}
+
+
+@router.delete("/empresas/{empresa_id}/fiel")
+async def eliminar_fiel_empresa(
+    empresa_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Elimina la FIEL guardada de la empresa."""
+    validar_acceso_empresa(empresa_id, current_user)
+    from ..fiel_store import eliminar_fiel
+    eliminada = eliminar_fiel(db, empresa_id)
+    return {"eliminada": eliminada}
+
+
+@router.post("/empresas/{empresa_id}/fiel/sync")
+async def sync_completo_fiel(
+    empresa_id: str,
+    background_tasks: BackgroundTasks,
+    tipo: str = Form(...),          # "emitidos" | "recibidos" | "ambos"
+    periodo: str = Form(...),       # YYYY-MM
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Ciclo completo automatizado usando la FIEL guardada:
+    1. Solicitar descarga al SAT
+    2. Verificar en loop hasta que esté lista (máx 30 min)
+    3. Descargar paquetes e importar CFDIs
+    4. Correr pipeline (conciliación + riesgos + scoring)
+
+    Requiere que la empresa tenga una FIEL guardada previamente.
+    """
+    validar_acceso_empresa(empresa_id, current_user)
+
+    empresa = db.query_one("SELECT rfc FROM empresas WHERE id = %s", (empresa_id,))
+    if not empresa:
+        raise HTTPException(status_code=404, detail="Empresa no encontrada")
+
+    from ..fiel_store import obtener_signer, estado_fiel
+    info = estado_fiel(db, empresa_id)
+    if not info:
+        raise HTTPException(status_code=422, detail="No hay FIEL guardada para esta empresa. Guárdala primero.")
+    if info.get("vencida"):
+        raise HTTPException(status_code=422, detail="La FIEL guardada está vencida. Actualízala.")
+
+    # Determinar tipos a solicitar
+    tipos = ["emitidos", "recibidos"] if tipo == "ambos" else [tipo]
+    if not all(t in ("emitidos", "recibidos") for t in tipos):
+        raise HTTPException(status_code=400, detail="tipo debe ser 'emitidos', 'recibidos' o 'ambos'")
+
+    # Calcular fechas del período
+    import calendar
+    año, mes = periodo.split("-")
+    fecha_inicio = date(int(año), int(mes), 1)
+    ultimo_dia = calendar.monthrange(int(año), int(mes))[1]
+    fecha_fin = date(int(año), int(mes), ultimo_dia)
+
+    # Crear registros de solicitud
+    solicitud_ids = []
+    try:
+        creds = obtener_signer(db, empresa_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+    for t in tipos:
+        registro = db.execute(
+            """INSERT INTO sat_solicitudes
+               (empresa_id, usuario_id, tipo, periodo_inicio, periodo_fin, estado)
+               VALUES (%s, %s, %s, %s, %s, 'pendiente') RETURNING *""",
+            (empresa_id, current_user["user_id"], t, periodo, periodo),
+            returning=True,
+        )
+        solicitud_ids.append({"id": str(registro["id"]), "tipo": t})
+
+        try:
+            id_sat = solicitar_descarga(creds, empresa["rfc"], t, fecha_inicio, fecha_fin,
+                                    estado_comprobante="Vigente")
+            db.execute(
+                "UPDATE sat_solicitudes SET id_solicitud_sat=%s, estado='solicitado', updated_at=NOW() WHERE id=%s",
+                (id_sat, str(registro["id"])),
+            )
+        except FIELError as exc:
+            db.execute(
+                "UPDATE sat_solicitudes SET estado='fallo', error_msg=%s, updated_at=NOW() WHERE id=%s",
+                (str(exc), str(registro["id"])),
+            )
+            raise HTTPException(status_code=502, detail=f"Error SAT al solicitar {t}: {exc}")
+
+    # Lanzar background task que verifica y descarga automáticamente
+    background_tasks.add_task(
+        _sync_completo_bg,
+        empresa_id=empresa_id,
+        periodo=periodo,
+        solicitudes=solicitud_ids,
+    )
+
+    return {
+        "mensaje": f"Sync iniciado para {len(tipos)} tipo(s). Se verificará y descargará automáticamente.",
+        "solicitudes": solicitud_ids,
+        "periodo": periodo,
+        "tipos": tipos,
+    }
+
+
+def _sync_completo_bg(empresa_id: str, periodo: str, solicitudes: list[dict]) -> None:
+    """
+    Background task: verifica en loop y descarga automáticamente.
+    Reintenta cada 30 segundos por hasta 30 minutos.
+    """
+    import time
+    from ..fiel_store import obtener_signer
+
+    MAX_INTENTOS = 60       # 60 × 30s = 30 minutos
+    ESPERA_SEG   = 30
+
+    try:
+        creds = obtener_signer(db, empresa_id)
+    except Exception as exc:
+        _log.error("sync_completo_bg: no se pudo obtener FIEL: %s", exc)
+        for s in solicitudes:
+            db.execute(
+                "UPDATE sat_solicitudes SET estado='fallo', error_msg=%s, updated_at=NOW() WHERE id=%s",
+                (f"Error FIEL: {exc}", s["id"]),
+            )
+        return
+
+    empresa = db.query_one("SELECT rfc FROM empresas WHERE id = %s", (empresa_id,))
+    if not empresa:
+        return
+
+    pendientes = {s["id"]: s for s in solicitudes}
+
+    for intento in range(MAX_INTENTOS):
+        if not pendientes:
+            break
+
+        time.sleep(ESPERA_SEG)
+        _log.info("sync_completo_bg intento %d/%d, %d solicitudes pendientes", intento+1, MAX_INTENTOS, len(pendientes))
+
+        for sol_id in list(pendientes.keys()):
+            row = db.query_one("SELECT id_solicitud_sat, estado FROM sat_solicitudes WHERE id = %s", (sol_id,))
+            if not row or not row.get("id_solicitud_sat"):
+                continue
+
+            try:
+                resultado = verificar_solicitud(creds, row["id_solicitud_sat"])
+            except FIELError as exc:
+                _log.warning("Error verificando %s: %s", sol_id, exc)
+                continue
+
+            estado_raw = resultado.get("estado")
+            estado_str = (
+                str(estado_raw.value).lower().strip()
+                if hasattr(estado_raw, "value")
+                else str(estado_raw or "").lower().strip()
+            )
+            id_paquetes = resultado.get("id_paquetes", [])
+            num_cfdi    = resultado.get("num_cfdi", 0)
+
+            if estado_str in ("terminada", "terminado"):
+                db.execute(
+                    "UPDATE sat_solicitudes SET estado='terminado', num_cfdi=%s, num_paquetes=%s, updated_at=NOW() WHERE id=%s",
+                    (num_cfdi, len(id_paquetes), sol_id),
+                )
+                if id_paquetes:
+                    _importar_paquetes_bg(
+                        creds=creds,
+                        solicitud_id=sol_id,
+                        empresa_id=empresa_id,
+                        periodo=periodo,
+                        paquetes=id_paquetes,
+                    )
+                del pendientes[sol_id]
+
+            elif estado_str in ("error", "rechazada", "fallo", "falla", "vencida"):
+                db.execute(
+                    "UPDATE sat_solicitudes SET estado='fallo', error_msg=%s, updated_at=NOW() WHERE id=%s",
+                    (f"SAT reportó estado: {estado_str}", sol_id),
+                )
+                del pendientes[sol_id]
+            else:
+                # En proceso — actualizar contadores y seguir esperando
+                db.execute(
+                    "UPDATE sat_solicitudes SET estado='en_proceso', num_cfdi=%s, updated_at=NOW() WHERE id=%s",
+                    (num_cfdi, sol_id),
+                )
+
+    # Marcar como fallo las que no terminaron a tiempo
+    for sol_id in pendientes:
+        db.execute(
+            "UPDATE sat_solicitudes SET estado='fallo', error_msg='Timeout: el SAT tardó más de 30 minutos', updated_at=NOW() WHERE id=%s",
+            (sol_id,),
+        )
