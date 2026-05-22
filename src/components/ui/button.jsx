@@ -1,35 +1,35 @@
-import * as React from "react";
 import { Slot } from "@radix-ui/react-slot";
 import { cva } from "class-variance-authority";
-import { cn } from "../../lib/utils";
+import { cn } from "../../lib/utils.js";
 
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-semibold tracking-wide transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50",
+  "inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-sm text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-45 cursor-pointer font-[inherit]",
   {
     variants: {
       variant: {
-        default:     "bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm",
+        default:   "bg-card text-foreground border border-border shadow-2xs hover:bg-muted",
+        primary:   "bg-primary text-primary-foreground border border-primary shadow-xs hover:brightness-108",
+        ghost:     "border-transparent bg-transparent shadow-none hover:bg-muted",
+        danger:    "text-destructive border border-[var(--danger-border)] bg-[var(--danger-bg)]",
+        outline:   "border border-border bg-background hover:bg-muted",
+        secondary: "bg-secondary text-secondary-foreground hover:bg-secondary/80",
         destructive: "bg-destructive/20 text-destructive border border-destructive/30 hover:bg-destructive/30",
-        outline:     "border border-border bg-transparent text-foreground hover:bg-secondary hover:border-primary/40",
-        secondary:   "bg-secondary text-secondary-foreground hover:bg-secondary/80",
-        ghost:       "hover:bg-secondary text-muted-foreground hover:text-foreground",
-        link:        "text-primary underline-offset-4 hover:underline",
+        link:      "text-primary underline-offset-4 hover:underline",
       },
       size: {
-        default: "h-10 px-5 py-2",
-        sm:      "h-8 px-3 py-1.5 text-xs",
-        lg:      "h-12 px-8 text-base",
-        icon:    "h-9 w-9",
+        default: "h-[30px] px-3",
+        sm:      "h-6 px-2 text-[11px]",
+        lg:      "h-[38px] px-4 text-[13px]",
+        icon:    "h-[30px] w-[30px]",
       },
     },
     defaultVariants: { variant: "default", size: "default" },
   }
 );
 
-const Button = React.forwardRef(({ className, variant, size, asChild = false, ...props }, ref) => {
+export function Button({ className, variant, size, asChild = false, ...props }) {
   const Comp = asChild ? Slot : "button";
-  return <Comp className={cn(buttonVariants({ variant, size, className }))} ref={ref} {...props} />;
-});
-Button.displayName = "Button";
+  return <Comp className={cn(buttonVariants({ variant, size }), className)} {...props} />;
+}
 
-export { Button, buttonVariants };
+export { buttonVariants };

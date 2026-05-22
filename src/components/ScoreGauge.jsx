@@ -44,7 +44,7 @@ export function ScoreGauge({ score }) {
           <path
             d={`M 24 100 A ${R} ${R} 0 0 1 176 100`}
             fill="none"
-            stroke="rgba(255,255,255,0.07)"
+            stroke="#E2E8F0"
             strokeWidth={10}
             strokeLinecap="round"
           />

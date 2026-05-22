@@ -1,0 +1,2873 @@
+openapi: 3.0.0
+
+info:
+  title: Plataforma de Auditoria Fiscal Preventiva (CFDI Intelligence)
+  version: 1.0.0
+  description: |
+    API REST para la plataforma de deteccion automatica de riesgos fiscales.
+    Permite gestionar empresas, ingestar CFDIs y estados de cuenta bancarios,
+    conciliar movimientos, detectar riesgos fiscales, calcular scoring de
+    cumplimiento y descargar CFDIs directamente del SAT via FIEL (e.firma).
+
+    **Autenticacion**: Todos los endpoints (excepto /auth/register, /auth/login
+    y /health) requieren un Bearer Token JWT obtenido al autenticarse.
+
+    **Vencimiento del token**: 8 horas desde su emision.
+
+servers:
+  - url: https://api.cfdi-intelligence.com
+    description: Produccion
+  - url: http://localhost:8000
+    description: Desarrollo local
+
+tags:
+  - name: Sistema
+    description: Estado y salud del sistema
+  - name: Auth
+    description: Registro, login y perfil de usuario
+  - name: Empresas
+    description: Gestion de empresas vinculadas al contador
+  - name: Constancia
+    description: Extraccion de datos desde la Constancia de Situacion Fiscal del SAT
+  - name: Ingesta
+    description: Carga de CFDIs (XML) y estados de cuenta bancarios
+  - name: Riesgos
+    description: Deteccion y gestion de riesgos fiscales
+  - name: Acciones
+    description: Ejecucion de acciones sobre detecciones de riesgo
+  - name: Scoring
+    description: Scoring de cumplimiento fiscal por empresa y periodo
+  - name: Conciliacion
+    description: Conciliacion de movimientos bancarios con CFDIs
+  - name: Cierre
+    description: Vista de cierre mensual con bloqueos y acciones pendientes
+  - name: Emitidos
+    description: CFDIs emitidos y recibidos por la empresa
+  - name: Dashboard
+    description: Vista consolidada de indicadores fiscales
+  - name: SAT FIEL
+    description: Descarga masiva de CFDIs directamente del SAT usando la e.firma
+
+security:
+  - BearerAuth: []
+
+paths:
+
+  # ============================================================
+  # SISTEMA
+  # ============================================================
+
+  /api/health:
+    get:
+      operationId: healthCheck
+      tags: [Sistema]
+      summary: Verificar estado del sistema
+      description: Retorna el estado operativo de la API y su version. No requiere autenticacion.
+      security: []
+      responses:
+        '200':
+          description: Sistema operativo
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+              example:
+                estado: operativo
+                version: "1.0.0"
+
+  # ============================================================
+  # AUTH
+  # ============================================================
+
+  /api/v1/auth/register:
+    post:
+      operationId: registrarUsuario
+      tags: [Auth]
+      summary: Registrar nuevo contador
+      description: |
+        Crea una cuenta de usuario (contador) y retorna un JWT listo para usarse.
+        Las empresas se vinculan posteriormente mediante POST /api/v1/mis-empresas.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+            example:
+              email: contador@despacho.com
+              password: "Segura2024!"
+              nombre: "Carlos Hernandez"
+      responses:
+        '201':
+          description: Usuario registrado correctamente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+              example:
+                access_token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                token_type: bearer
+                user_id: "550e8400-e29b-41d4-a716-446655440000"
+                email: contador@despacho.com
+                nombre: "Carlos Hernandez"
+                empresas: []
+        '409':
+          $ref: '#/components/responses/ConflictError'
+
+  /api/v1/auth/login:
+    post:
+      operationId: loginUsuario
+      tags: [Auth]
+      summary: Autenticar contador
+      description: |
+        Autentica al contador y retorna un JWT junto con la lista de empresas
+        que administra.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+            example:
+              email: contador@despacho.com
+              password: "Segura2024!"
+      responses:
+        '200':
+          description: Autenticacion exitosa
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+              example:
+                access_token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                token_type: bearer
+                user_id: "550e8400-e29b-41d4-a716-446655440000"
+                nombre: "Carlos Hernandez"
+                empresas:
+                  - empresa_id: "a1b2c3d4-0001-0001-0001-000000000001"
+                    rfc: XAXX010101000
+                    razon_social: "Empresa Ejemplo SA de CV"
+                    regimen_fiscal: "601"
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /api/v1/auth/me:
+    get:
+      operationId: obtenerPerfil
+      tags: [Auth]
+      summary: Obtener perfil del usuario autenticado
+      description: |
+        Retorna los datos del usuario autenticado y la lista de empresas
+        que administra.
+      responses:
+        '200':
+          description: Datos del usuario
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UsuarioPerfil'
+              example:
+                id: "550e8400-e29b-41d4-a716-446655440000"
+                email: contador@despacho.com
+                nombre: "Carlos Hernandez"
+                telefono: "5512345678"
+                rfc: "HECA800101ABC"
+                nombre_despacho: "Despacho Fiscal Hernandez"
+                cedula_profesional: "12345678"
+                empresas:
+                  - empresa_id: "a1b2c3d4-0001-0001-0001-000000000001"
+                    rfc: XAXX010101000
+                    razon_social: "Empresa Ejemplo SA de CV"
+                    regimen_fiscal: "601"
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/v1/usuarios/perfil:
+    patch:
+      operationId: actualizarPerfil
+      tags: [Auth]
+      summary: Actualizar perfil del contador
+      description: |
+        Actualiza uno o mas campos del perfil del usuario autenticado.
+        Solo se actualizan los campos enviados en el cuerpo.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ActualizarPerfilRequest'
+            example:
+              nombre: "Carlos G. Hernandez"
+              telefono: "5598765432"
+              nombre_despacho: "Despacho Fiscal HGC"
+      responses:
+        '200':
+          description: Perfil actualizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UsuarioPerfil'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  # ============================================================
+  # CONSTANCIA
+  # ============================================================
+
+  /api/v1/constancia/parsear:
+    post:
+      operationId: parsearConstancia
+      tags: [Constancia]
+      summary: Extraer datos de Constancia de Situacion Fiscal
+      description: |
+        Recibe un archivo PDF de la Constancia de Situacion Fiscal emitida por el SAT
+        y extrae los datos fiscales estructurados: RFC, razon social, regimen fiscal,
+        codigo postal, CURP, obligaciones, etc.
+
+        El archivo PDF es guardado en el servidor y se retorna su nombre para
+        referencia posterior al crear la empresa.
+      security: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [archivo]
+              properties:
+                archivo:
+                  type: string
+                  format: binary
+                  description: Archivo PDF de la Constancia de Situacion Fiscal del SAT
+      responses:
+        '200':
+          description: Datos fiscales extraidos del PDF
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConstanciaParseada'
+              example:
+                rfc: "XAXX010101000"
+                razon_social: "Empresa Ejemplo SA de CV"
+                regimen_fiscal: "601"
+                cp_fiscal: "06600"
+                curp: null
+                obligaciones: ["IVA mensual", "ISR mensual"]
+                representante_legal: "Juan Perez Lopez"
+                rfc_representante: "PELJ800101ABC"
+                constancia_path: "3fa85f64-5717-4562-b3fc-2c963f66afa6.pdf"
+        '400':
+          description: El archivo no es PDF
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                detail: "El archivo debe ser PDF"
+        '422':
+          $ref: '#/components/responses/UnprocessableError'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  # ============================================================
+  # EMPRESAS
+  # ============================================================
+
+  /api/v1/empresas:
+    get:
+      operationId: listarEmpresas
+      tags: [Empresas]
+      summary: Listar empresas del contador
+      description: |
+        Retorna todas las empresas activas vinculadas al contador autenticado,
+        ordenadas por fecha de vinculacion ascendente.
+      responses:
+        '200':
+          description: Lista de empresas
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Empresa'
+              example:
+                - id: "a1b2c3d4-0001-0001-0001-000000000001"
+                  rfc: "XAXX010101000"
+                  razon_social: "Empresa Ejemplo SA de CV"
+                  regimen_fiscal: "601"
+                  cp_fiscal: "06600"
+                  activo: true
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /api/v1/mis-empresas:
+    post:
+      operationId: agregarEmpresa
+      tags: [Empresas]
+      summary: Agregar empresa al contador
+      description: |
+        Crea una nueva empresa (o reutiliza una existente por RFC) y la vincula
+        al contador autenticado. La operacion es idempotente: si la empresa ya
+        esta vinculada, no se crea un duplicado.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgregarEmpresaRequest'
+            example:
+              rfc: "XAXX010101000"
+              razon_social: "Empresa Ejemplo SA de CV"
+              regimen_fiscal: "601"
+              cp_fiscal: "06600"
+              curp: null
+              obligaciones: ["IVA mensual", "ISR mensual"]
+              representante_legal: "Juan Perez Lopez"
+              rfc_representante: "PELJ800101ABC"
+      responses:
+        '201':
+          description: Empresa vinculada correctamente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmpresaVinculadaResponse'
+              example:
+                mensaje: "Empresa vinculada correctamente"
+                empresa_id: "a1b2c3d4-0001-0001-0001-000000000001"
+                rfc: "XAXX010101000"
+                razon_social: "Empresa Ejemplo SA de CV"
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /api/v1/empresas/{empresa_id}:
+    get:
+      operationId: obtenerEmpresa
+      tags: [Empresas]
+      summary: Obtener detalle de una empresa
+      description: |
+        Retorna todos los datos de una empresa especifica. El usuario autenticado
+        debe tener acceso a la empresa.
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+      responses:
+        '200':
+          description: Datos de la empresa
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Empresa'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/v1/empresas/{empresa_id}/impuestos:
+    patch:
+      operationId: actualizarImpuestos
+      tags: [Empresas]
+      summary: Actualizar impuestos a declarar
+      description: |
+        Actualiza la lista de impuestos que la empresa debe declarar.
+        Valores validos: iva, isr, ieps, ret_iva, ret_isr, diot.
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ImpuestosRequest'
+            example:
+              impuestos: ["iva", "isr", "ret_iva"]
+      responses:
+        '200':
+          description: Impuestos actualizados
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                  impuestos:
+                    type: array
+                    items:
+                      type: string
+              example:
+                ok: true
+                impuestos: ["iva", "isr", "ret_iva"]
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  # ============================================================
+  # INGESTA
+  # ============================================================
+
+  /api/v1/empresas/{empresa_id}/cfdi/upload:
+    post:
+      operationId: subirCFDI
+      tags: [Ingesta]
+      summary: Cargar archivos CFDI (XML)
+      description: |
+        Recibe uno o varios archivos XML de CFDI, los parsea, inserta en la base
+        de datos y ejecuta el pipeline completo:
+        - Conciliacion bancaria
+        - Deteccion de riesgos fiscales
+        - Calculo de scoring fiscal
+
+        Los CFDIs duplicados (mismo UUID) son ignorados silenciosamente.
+        Si el CFDI es un Complemento de Pago (tipo P), se procesan y vinculan
+        los documentos relacionados automaticamente.
+
+        **Formato periodo**: YYYY-MM (ejemplo: 2024-01)
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [archivos, periodo]
+              properties:
+                archivos:
+                  type: array
+                  items:
+                    type: string
+                    format: binary
+                  description: Uno o varios archivos XML de CFDI
+                periodo:
+                  type: string
+                  pattern: '^\d{4}-\d{2}$'
+                  description: Periodo fiscal en formato YYYY-MM
+                  example: "2024-01"
+      responses:
+        '200':
+          description: Resultado del procesamiento
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IngestaResponse'
+              example:
+                mensaje: "5 CFDI procesados correctamente"
+                registros_procesados: 5
+                errores: ["factura_erronea.xml: UUID invalido"]
+                periodo: "2024-01"
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/v1/empresas/{empresa_id}/banco/upload:
+    post:
+      operationId: subirEstadoCuenta
+      tags: [Ingesta]
+      summary: Cargar estado de cuenta bancario
+      description: |
+        Recibe un estado de cuenta en formato CSV o XLSX, parsea los movimientos
+        bancarios y ejecuta el pipeline de conciliacion, riesgos y scoring.
+
+        El parser detecta automaticamente el formato segun la extension del archivo
+        (.xlsx o .csv) y el banco especificado.
+
+        **Formato periodo**: YYYY-MM (ejemplo: 2024-01)
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [archivo, banco, periodo]
+              properties:
+                archivo:
+                  type: string
+                  format: binary
+                  description: Archivo CSV o XLSX del estado de cuenta bancario
+                banco:
+                  type: string
+                  description: Identificador del banco (bbva, santander, banamex, etc.)
+                  example: "bbva"
+                periodo:
+                  type: string
+                  pattern: '^\d{4}-\d{2}$'
+                  description: Periodo fiscal en formato YYYY-MM
+                  example: "2024-01"
+      responses:
+        '200':
+          description: Resultado del procesamiento
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IngestaResponse'
+              example:
+                mensaje: "42 movimientos procesados"
+                registros_procesados: 42
+                errores: []
+                periodo: "2024-01"
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  # ============================================================
+  # RIESGOS
+  # ============================================================
+
+  /api/v1/empresas/{empresa_id}/riesgos:
+    get:
+      operationId: listarRiesgos
+      tags: [Riesgos]
+      summary: Listar riesgos fiscales detectados
+      description: |
+        Retorna las detecciones de riesgo fiscal para la empresa, ordenadas
+        por severidad (critico > alto > medio > bajo) y fecha de deteccion.
+
+        Se puede filtrar por periodo, severidad y estado.
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - name: periodo
+          in: query
+          schema:
+            type: string
+            pattern: '^\d{4}-\d{2}$'
+          description: Filtrar por periodo YYYY-MM
+          example: "2024-01"
+        - name: severidad
+          in: query
+          schema:
+            type: string
+            enum: [critico, alto, medio, bajo]
+          description: Filtrar por nivel de severidad
+        - name: estado
+          in: query
+          schema:
+            type: string
+            enum: [abierto, en_revision, en_espera_cfdi, confirmado, resuelto, descartado, pendiente]
+            default: abierto
+          description: Filtrar por estado de la deteccion
+      responses:
+        '200':
+          description: Lista de riesgos detectados
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RiesgosResponse'
+              example:
+                total: 3
+                riesgos:
+                  - id: "d1e2f3a4-0001-0001-0001-000000000001"
+                    codigo: "R001"
+                    nombre: "Ingreso sin CFDI"
+                    severidad: critico
+                    monto_afectado: 50000.00
+                    descripcion: "Deposito bancario sin comprobante fiscal correspondiente"
+                    estado: abierto
+                    periodo: "2024-01"
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/v1/riesgos/{riesgo_id}/resolver:
+    patch:
+      operationId: resolverRiesgo
+      tags: [Riesgos]
+      summary: Marcar riesgo como resuelto
+      description: |
+        Marca una deteccion de riesgo como resuelta. Opcionalmente se pueden
+        agregar notas de resolucion.
+      parameters:
+        - name: riesgo_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: ID de la deteccion de riesgo
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                notas:
+                  type: string
+                  description: Notas sobre la resolucion del riesgo
+            example:
+              notas: "Se emitio el CFDI faltante con folio 2024-0123"
+      responses:
+        '200':
+          description: Riesgo marcado como resuelto
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  mensaje:
+                    type: string
+                  riesgo_id:
+                    type: string
+                  estado:
+                    type: string
+              example:
+                mensaje: "Riesgo marcado como resuelto"
+                riesgo_id: "d1e2f3a4-0001-0001-0001-000000000001"
+                estado: resuelto
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  # ============================================================
+  # PATRONES DE RIESGO — Búsqueda híbrida (AgentDB-style)
+  # ============================================================
+
+  /api/v1/riesgos/patrones/buscar:
+    get:
+      operationId: buscarPatronesRiesgo
+      tags: [Riesgos]
+      summary: Búsqueda híbrida de patrones de riesgo
+      description: |
+        Recupera patrones de riesgo similares usando búsqueda híbrida:
+        70% similitud textual (pg_trgm) + 30% confianza del patrón + filtros de metadata.
+
+        Opcionalmente aplica MMR (Maximal Marginal Relevance) para maximizar
+        la diversidad de resultados y evitar redundancia.
+
+        Incluye síntesis de contexto: tasa de éxito histórica, resoluciones
+        frecuentes y severidad predominante.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Texto de búsqueda (descripción del riesgo a buscar)
+          example: "depósito bancario sin CFDI de ingreso correspondiente"
+        - name: tipo_riesgo
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [INGRESO_NO_FACTURADO, GASTO_SIN_CFDI, CFDI_NO_COBRADO, CFDI_NO_PAGADO,
+                   DIFERENCIA_IVA, RFC_INVALIDO, CFDI_CANCELADO_COBRADO, DIFERENCIA_TIPO_CAMBIO]
+          description: Filtrar por tipo de riesgo
+        - name: severidad
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [critico, alto, medio, bajo]
+          description: Filtrar por severidad
+        - name: categoria
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Filtrar por categoría fiscal (IVA, ISR, COMPROBACION, etc.)
+        - $ref: '#/components/parameters/EmpresaId'
+        - name: mmr
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: true
+          description: Aplicar MMR para diversificar resultados
+        - name: lambda_mmr
+          in: query
+          required: false
+          schema:
+            type: number
+            minimum: 0
+            maximum: 1
+            default: 0.5
+          description: "Balance MMR: 0=máxima relevancia, 1=máxima diversidad"
+        - name: k
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 10
+          description: Número máximo de patrones a retornar
+      responses:
+        '200':
+          description: Patrones similares con contexto sintetizado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total:
+                    type: integer
+                  patrones:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/RiskPattern'
+                  contexto:
+                    $ref: '#/components/schemas/ContextoSintetizado'
+              example:
+                total: 3
+                patrones:
+                  - id: "a1b2c3d4-0001-0001-0001-000000000001"
+                    tipo_riesgo: "INGRESO_NO_FACTURADO"
+                    severidad: "critico"
+                    categoria: "ISR/IVA"
+                    descripcion: "Depósito de $45,000 sin CFDI de ingreso"
+                    resolucion: "Se emitió CFDI retroactivo con folio 2024-0123"
+                    confianza: 0.95
+                    uso_count: 12
+                    similitud: 0.8734
+                  - id: "a1b2c3d4-0002-0002-0002-000000000002"
+                    tipo_riesgo: "INGRESO_NO_FACTURADO"
+                    severidad: "critico"
+                    categoria: "ISR/IVA"
+                    descripcion: "Transferencia recibida $32,500 sin factura"
+                    resolucion: "Ingreso correspondía a préstamo de socio, se documentó"
+                    confianza: 0.88
+                    uso_count: 5
+                    similitud: 0.7621
+                contexto:
+                  total_patrones: 3
+                  tasa_exito: 0.93
+                  severidad_predominante: "critico"
+                  resoluciones_frecuentes:
+                    - "Se emitió CFDI retroactivo con folio 2024-0123"
+                    - "Ingreso correspondía a préstamo de socio, se documentó"
+                  resumen: "Basado en 3 casos similares: 93% resueltos exitosamente. Severidad predominante: critico. Resolución más frecuente: Se emitió CFDI retroactivo."
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /api/v1/riesgos/{riesgo_id}/guardar-patron:
+    post:
+      operationId: guardarPatronRiesgo
+      tags: [Riesgos]
+      summary: Guardar detección resuelta como patrón
+      description: |
+        Persiste una detección resuelta como patrón reutilizable en la base de
+        conocimiento. Alimenta la búsqueda híbrida para casos futuros similares.
+
+        Se recomienda llamar este endpoint al resolver o descartar una detección
+        para que el sistema aprenda de cada resolución.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: riesgo_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: ID de la detección a guardar como patrón
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [resolucion]
+              properties:
+                resolucion:
+                  type: string
+                  description: Descripción de cómo se resolvió el riesgo
+                fue_falso_positivo:
+                  type: boolean
+                  default: false
+                  description: Marcar si era un falso positivo para excluir de búsquedas
+                confianza:
+                  type: number
+                  minimum: 0
+                  maximum: 1
+                  default: 1.0
+                  description: Confianza en la calidad de esta resolución (0.0–1.0)
+            example:
+              resolucion: "Depósito correspondía a anticipo de cliente. Se emitió CFDI tipo ingreso folio A-2024-089."
+              fue_falso_positivo: false
+              confianza: 0.95
+      responses:
+        '200':
+          description: Patrón guardado correctamente
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  patron_id:
+                    type: string
+                    format: uuid
+                  mensaje:
+                    type: string
+              example:
+                patron_id: "f9e8d7c6-0001-0001-0001-000000000001"
+                mensaje: "Patrón guardado correctamente"
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  # ============================================================
+  # ACCIONES
+  # ============================================================
+
+  /api/v1/acciones/{deteccion_id}/ejecutar:
+    post:
+      operationId: ejecutarAccion
+      tags: [Acciones]
+      summary: Ejecutar accion sobre una deteccion
+      description: |
+        Ejecuta una accion de flujo de trabajo sobre una deteccion de riesgo
+        y actualiza su estado segun la accion:
+
+        | Accion | Estado resultante |
+        |--------|------------------|
+        | marcar_revisado | en_revision |
+        | solicitar_cfdi | en_espera_cfdi |
+        | emitir_cfdi | en_espera_cfdi |
+        | confirmar_match | confirmado |
+        | descartar | descartado |
+        | resolver | resuelto |
+      parameters:
+        - name: deteccion_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: ID de la deteccion sobre la que se ejecuta la accion
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AccionRequest'
+            example:
+              tipo: marcar_revisado
+              notas: "Pendiente de verificacion con el cliente"
+      responses:
+        '200':
+          description: Accion ejecutada correctamente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccionResponse'
+              example:
+                deteccion_id: "d1e2f3a4-0001-0001-0001-000000000001"
+                estado_anterior: abierto
+                estado_nuevo: en_revision
+        '400':
+          description: Tipo de accion desconocido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                detail: "Tipo de accion desconocido: accion_invalida"
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  # ============================================================
+  # SCORING
+  # ============================================================
+
+  /api/v1/empresas/{empresa_id}/scoring:
+    get:
+      operationId: obtenerScoring
+      tags: [Scoring]
+      summary: Obtener scoring fiscal
+      description: |
+        Retorna el scoring de cumplimiento fiscal para la empresa.
+        Si se especifica periodo, retorna el scoring de ese periodo especifico.
+        Si no, retorna el scoring del periodo mas reciente disponible.
+
+        **Clasificaciones**: AAA (95-100), AA (85-94), A (75-84), BBB (60-74),
+        BB (45-59), B (30-44), CCC (<30)
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - name: periodo
+          in: query
+          schema:
+            type: string
+            pattern: '^\d{4}-\d{2}$'
+          description: Periodo YYYY-MM (si se omite retorna el mas reciente)
+          example: "2024-01"
+      responses:
+        '200':
+          description: Scoring fiscal del periodo
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScoringFiscal'
+              example:
+                id: "s1s2s3s4-0001-0001-0001-000000000001"
+                empresa_id: "a1b2c3d4-0001-0001-0001-000000000001"
+                periodo: "2024-01"
+                score_total: 82.5
+                clasificacion: "A"
+                total_cfdi_ingresos: 15
+                total_cfdi_egresos: 8
+                total_movimientos: 45
+                total_conciliados: 38
+                total_riesgos_criticos: 0
+                total_riesgos_altos: 1
+                total_riesgos_medios: 3
+                total_riesgos_bajos: 2
+                total_ingresos_cfdi: 250000.00
+                total_egresos_cfdi: 85000.00
+                total_depositos_banco: 255000.00
+                total_cargos_banco: 90000.00
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          description: Sin scoring para este periodo
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                detail: "Sin scoring para este periodo"
+
+  /api/v1/empresas/{empresa_id}/scoring/historial:
+    get:
+      operationId: historialScoring
+      tags: [Scoring]
+      summary: Historial de scoring fiscal
+      description: |
+        Retorna el historial completo de scoring fiscal de la empresa,
+        ordenado cronologicamente. Util para graficar tendencias de cumplimiento.
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+      responses:
+        '200':
+          description: Historial de scores
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HistorialScoringResponse'
+              example:
+                historial:
+                  - periodo: "2023-11"
+                    score: 75.0
+                    clasificacion: "A"
+                  - periodo: "2023-12"
+                    score: 80.0
+                    clasificacion: "A"
+                  - periodo: "2024-01"
+                    score: 82.5
+                    clasificacion: "A"
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+
+  # ============================================================
+  # CONCILIACION
+  # ============================================================
+
+  /api/v1/empresas/{empresa_id}/conciliaciones:
+    get:
+      operationId: listarConciliaciones
+      tags: [Conciliacion]
+      summary: Resumen de conciliacion bancaria
+      description: |
+        Retorna un resumen de los tipos de match en la conciliacion bancaria.
+        El porcentaje de conciliacion incluye matches exactos y parciales.
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - name: periodo
+          in: query
+          schema:
+            type: string
+            pattern: '^\d{4}-\d{2}$'
+          description: Filtrar por periodo YYYY-MM
+          example: "2024-01"
+      responses:
+        '200':
+          description: Resumen de conciliacion
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResumenConciliacion'
+              example:
+                total: 45
+                exacto: 30
+                parcial: 8
+                sin_cfdi: 5
+                sin_movimiento: 2
+                pct_conciliado: 84.4
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+
+  /api/v1/empresas/{empresa_id}/conciliaciones/accionables:
+    get:
+      operationId: conciliacionesAccionables
+      tags: [Conciliacion]
+      summary: Conciliaciones accionables
+      description: |
+        Retorna los pares sin_cfdi y parciales con contexto completo del
+        movimiento bancario. Util para mostrar al usuario que movimientos
+        necesitan accion. Limitado a 100 registros por consulta.
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - name: periodo
+          in: query
+          schema:
+            type: string
+            pattern: '^\d{4}-\d{2}$'
+          description: Filtrar por periodo YYYY-MM
+          example: "2024-01"
+      responses:
+        '200':
+          description: Pares accionables de conciliacion
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConciliacionesAccionablesResponse'
+              example:
+                total: 5
+                pares:
+                  - id: "c1c2c3c4-0001-0001-0001-000000000001"
+                    tipo_match: sin_cfdi
+                    monto_movimiento: 15000.00
+                    monto_cfdi: null
+                    diferencia: 15000.00
+                    porcentaje_match: 0.0
+                    periodo: "2024-01"
+                    movimiento_id: "m1m2m3m4-0001-0001-0001-000000000001"
+                    mov_fecha: "2024-01-15"
+                    concepto: "DEPOSITO CLIENTE XYZ"
+                    mov_monto: 15000.00
+                    mov_tipo: deposito
+                    rfc_detectado: "XAXX010101000"
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+
+  # ============================================================
+  # CIERRE
+  # ============================================================
+
+  /api/v1/empresas/{empresa_id}/periodos:
+    get:
+      operationId: listarPeriodos
+      tags: [Cierre]
+      summary: Listar periodos con datos
+      description: |
+        Lista los ultimos 24 periodos (YYYY-MM) que tienen datos cargados
+        para la empresa (CFDIs, movimientos bancarios o scoring).
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+      responses:
+        '200':
+          description: Lista de periodos disponibles
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  periodos:
+                    type: array
+                    items:
+                      type: string
+              example:
+                periodos: ["2024-01", "2023-12", "2023-11"]
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+
+  /api/v1/empresas/{empresa_id}/cierre/{periodo}:
+    get:
+      operationId: vistaCierre
+      tags: [Cierre]
+      summary: Vista de cierre mensual
+      description: |
+        Vista consolidada para el cierre mensual. Responde:
+        - Puede cerrar el periodo?
+        - Que bloquea el cierre?
+        - Que acciones hay pendientes?
+
+        **Criterios para poder cerrar**:
+        - Sin riesgos criticos o altos abiertos
+        - Conciliacion >= 80%
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - name: periodo
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: '^\d{4}-\d{2}$'
+          description: Periodo fiscal YYYY-MM
+          example: "2024-01"
+      responses:
+        '200':
+          description: Estado del cierre mensual
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VistaCierre'
+              example:
+                periodo: "2024-01"
+                puede_cerrar: false
+                razon_bloqueo: "2 riesgos altos abiertos · conciliacion al 76.5% (minimo 80%)"
+                score: 75.0
+                bloqueadores: []
+                acciones: []
+                conciliacion:
+                  sin_cfdi: 5
+                  sin_movimiento: 2
+                  matches_debiles: 3
+                  pct_conciliado: 76.5
+                  total: 38
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+
+  # ============================================================
+  # EMITIDOS / RECIBIDOS
+  # ============================================================
+
+  /api/v1/empresas/{empresa_id}/emitidos:
+    get:
+      operationId: getEmitidos
+      tags: [Emitidos]
+      summary: CFDIs emitidos por la empresa en el periodo
+      description: |
+        Retorna los CFDIs emitidos por la empresa en el periodo especificado,
+        clasificados segun la logica SAT:
+
+        **Ingresos**:
+        - ventas_servicios: CFDIs regulares de ingreso
+        - anticipos: CFDIs con ClaveProdServ 84111506 + MetodoPago PUE + sin CFDI relacionado
+        - facturas_con_anticipo: CFDIs de ingreso con TipoRelacion=07
+
+        **Egresos**:
+        - notas_credito: CFDIs de egreso regulares
+        - aplicaciones_anticipo: CFDIs de egreso con FormaPago=30
+
+        Incluye advertencias cuando una factura con anticipo no tiene su
+        CFDI Egreso de aplicacion correspondiente.
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - name: periodo
+          in: query
+          required: true
+          schema:
+            type: string
+            pattern: '^\d{4}-\d{2}$'
+          description: Periodo fiscal YYYY-MM
+          example: "2024-01"
+      responses:
+        '200':
+          description: CFDIs emitidos clasificados
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmitidosResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+
+  /api/v1/empresas/{empresa_id}/recibidos:
+    get:
+      operationId: getRecibidos
+      tags: [Emitidos]
+      summary: CFDIs recibidos por la empresa en el periodo
+      description: |
+        Retorna los CFDIs recibidos (compras y gastos) por la empresa en el
+        periodo especificado, con resumen de IVA acreditable.
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - name: periodo
+          in: query
+          required: true
+          schema:
+            type: string
+            pattern: '^\d{4}-\d{2}$'
+          description: Periodo fiscal YYYY-MM
+          example: "2024-01"
+      responses:
+        '200':
+          description: CFDIs recibidos clasificados
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RecibidosResponse'
+              example:
+                periodo: "2024-01"
+                resumen:
+                  subtotal: 72000.00
+                  iva_acreditable: 11520.00
+                  total: 83520.00
+                  num_compras: 12
+                  num_egresos: 1
+                  vigentes: 12
+                  canceladas: 1
+                compras: []
+                egresos: []
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+
+  # ============================================================
+  # DASHBOARD
+  # ============================================================
+
+  /api/v1/dashboard/{empresa_id}:
+    get:
+      operationId: getDashboard
+      tags: [Dashboard]
+      summary: Dashboard consolidado de indicadores fiscales
+      description: |
+        Retorna una vista consolidada con:
+        - Datos de la empresa
+        - Score fiscal actual (o del periodo solicitado)
+        - Riesgos abiertos con resumen por severidad
+        - Tendencia historica de scores
+        - Indicadores de brechas entre CFDIs y movimientos bancarios
+      parameters:
+        - name: empresa_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: ID de la empresa
+        - name: periodo
+          in: query
+          schema:
+            type: string
+            pattern: '^\d{4}-\d{2}$'
+          description: Periodo YYYY-MM (si se omite, usa el mas reciente)
+          example: "2024-01"
+      responses:
+        '200':
+          description: Dashboard consolidado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardResponse'
+              example:
+                empresa:
+                  id: "a1b2c3d4-0001-0001-0001-000000000001"
+                  rfc: "XAXX010101000"
+                  razon_social: "Empresa Ejemplo SA de CV"
+                score_actual:
+                  score_total: 82.5
+                  clasificacion: "A"
+                  periodo: "2024-01"
+                riesgos_abiertos: []
+                resumen_riesgos:
+                  critico: 0
+                  alto: 1
+                  medio: 2
+                  bajo: 1
+                  monto_total_en_riesgo: 35000.00
+                tendencia_score:
+                  - periodo: "2023-12"
+                    score: 79.0
+                  - periodo: "2024-01"
+                    score: 82.5
+                indicadores:
+                  ingresos_cfdi: 250000.00
+                  egresos_cfdi: 85000.00
+                  depositos_banco: 255000.00
+                  cargos_banco: 90000.00
+                  brecha_ingresos: 5000.00
+                  brecha_egresos: 5000.00
+                  pct_conciliacion: 84.4
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+
+  # ============================================================
+  # SAT FIEL
+  # ============================================================
+
+  /api/v1/sat/solicitar:
+    post:
+      operationId: solicitarDescargaSAT
+      tags: [SAT FIEL]
+      summary: Solicitar descarga masiva al SAT
+      description: |
+        Envia una solicitud de descarga masiva de CFDIs al SAT usando la
+        e.firma (FIEL) del contribuyente.
+
+        **Flujo recomendado**:
+        1. POST /solicitar — crear solicitud
+        2. POST /solicitudes/{id}/verificar — verificar estado (puede tomar minutos)
+        3. POST /solicitudes/{id}/descargar — descargar cuando este lista
+
+        O bien usar POST /empresas/{id}/fiel/sync para el ciclo automatico.
+
+        **Tipos**: emitidos | recibidos
+        **Estado comprobante**: Vigente | Cancelado | Todos
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [empresa_id, tipo, fecha_inicio, fecha_fin, cer_file, key_file, password]
+              properties:
+                empresa_id:
+                  type: string
+                  format: uuid
+                  description: ID de la empresa
+                tipo:
+                  type: string
+                  enum: [emitidos, recibidos]
+                  description: Tipo de CFDIs a descargar
+                fecha_inicio:
+                  type: string
+                  format: date
+                  description: Fecha de inicio del periodo (YYYY-MM-DD)
+                  example: "2024-01-01"
+                fecha_fin:
+                  type: string
+                  format: date
+                  description: Fecha de fin del periodo (YYYY-MM-DD)
+                  example: "2024-01-31"
+                estado_comprobante:
+                  type: string
+                  enum: [Vigente, Cancelado, Todos]
+                  default: Vigente
+                  description: Estado de los comprobantes a descargar
+                cer_file:
+                  type: string
+                  format: binary
+                  description: Archivo .cer del certificado de la FIEL
+                key_file:
+                  type: string
+                  format: binary
+                  description: Archivo .key de la llave privada de la FIEL
+                password:
+                  type: string
+                  description: Contrasena de la llave privada FIEL
+      responses:
+        '200':
+          description: Solicitud enviada al SAT
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SolicitudSATResponse'
+              example:
+                solicitud_id: "sol-uuid-0001"
+                id_solicitud_sat: "SAT-UUID-XXXX"
+                estado: solicitado
+                mensaje: "Solicitud enviada al SAT. Usa /verificar para consultar el estado."
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '422':
+          description: FIEL invalida o no se pudo cargar
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: Error en la comunicacion con el SAT
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                detail: "Error SAT: Certificado vencido"
+
+  /api/v1/sat/solicitudes:
+    get:
+      operationId: listarSolicitudesSAT
+      tags: [SAT FIEL]
+      summary: Listar solicitudes de descarga masiva
+      description: |
+        Lista las ultimas 20 solicitudes de descarga masiva del SAT
+        para la empresa especificada.
+      parameters:
+        - name: empresa_id
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: ID de la empresa
+      responses:
+        '200':
+          description: Lista de solicitudes
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SolicitudSAT'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+
+  /api/v1/sat/solicitudes/{solicitud_id}/verificar:
+    post:
+      operationId: verificarSolicitudSAT
+      tags: [SAT FIEL]
+      summary: Verificar estado de solicitud en el SAT
+      description: |
+        Consulta el estado actual de una solicitud de descarga masiva en el SAT
+        y actualiza el registro local.
+
+        **Estados posibles**: en_proceso, terminado, fallo
+      parameters:
+        - name: solicitud_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: ID de la solicitud local
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [cer_file, key_file, password]
+              properties:
+                cer_file:
+                  type: string
+                  format: binary
+                key_file:
+                  type: string
+                  format: binary
+                password:
+                  type: string
+      responses:
+        '200':
+          description: Estado actualizado de la solicitud
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VerificacionSATResponse'
+              example:
+                solicitud_id: "sol-uuid-0001"
+                estado: terminado
+                num_cfdi: 47
+                num_paquetes: 2
+                id_paquetes: ["pkg-uuid-001", "pkg-uuid-002"]
+                mensaje: ""
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '502':
+          $ref: '#/components/responses/GatewayError'
+
+  /api/v1/sat/solicitudes/{solicitud_id}/descargar:
+    post:
+      operationId: descargarCFDISAT
+      tags: [SAT FIEL]
+      summary: Descargar paquetes ZIP del SAT e importar CFDIs
+      description: |
+        Descarga los paquetes ZIP del SAT en background, extrae los XMLs
+        e importa los CFDIs a la base de datos. Al terminar ejecuta el
+        pipeline completo (conciliacion + riesgos + scoring).
+
+        La respuesta es inmediata (la descarga ocurre en background).
+        Consultar el estado de la solicitud para saber cuando termino.
+      parameters:
+        - name: solicitud_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: ID de la solicitud
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [cer_file, key_file, password, id_paquetes]
+              properties:
+                cer_file:
+                  type: string
+                  format: binary
+                key_file:
+                  type: string
+                  format: binary
+                password:
+                  type: string
+                id_paquetes:
+                  type: string
+                  description: Array JSON con los IDs de paquetes a descargar
+                  example: '["pkg-uuid-001", "pkg-uuid-002"]'
+      responses:
+        '200':
+          description: Descarga iniciada en background
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  mensaje:
+                    type: string
+                  paquetes:
+                    type: integer
+                  solicitud_id:
+                    type: string
+              example:
+                mensaje: "Descarga iniciada en background"
+                paquetes: 2
+                solicitud_id: "sol-uuid-0001"
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '422':
+          $ref: '#/components/responses/UnprocessableError'
+
+  /api/v1/sat/empresas/{empresa_id}/fiel/guardar:
+    post:
+      operationId: guardarFIEL
+      tags: [SAT FIEL]
+      summary: Guardar FIEL cifrada para la empresa
+      description: |
+        Guarda la e.firma (FIEL) del contribuyente de forma cifrada en la base
+        de datos. Permite luego usar el sync automatico sin subir la FIEL
+        manualmente cada vez. Reemplaza cualquier FIEL previa.
+
+        La llave privada se almacena cifrada. La contrasena NO se guarda.
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [cer_file, key_file, password]
+              properties:
+                cer_file:
+                  type: string
+                  format: binary
+                  description: Archivo .cer del certificado de la FIEL
+                key_file:
+                  type: string
+                  format: binary
+                  description: Archivo .key de la llave privada de la FIEL
+                password:
+                  type: string
+                  description: Contrasena de la llave privada FIEL
+      responses:
+        '200':
+          description: FIEL guardada correctamente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FIELGuardadaResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '422':
+          $ref: '#/components/responses/UnprocessableError'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/sat/empresas/{empresa_id}/fiel/estado:
+    get:
+      operationId: estadoFIEL
+      tags: [SAT FIEL]
+      summary: Consultar estado de la FIEL guardada
+      description: |
+        Retorna los metadatos de la FIEL guardada para la empresa (rfc, vigencia,
+        numero de certificado) sin exponer las credenciales.
+
+        Si no hay FIEL guardada, retorna {"tiene_fiel": false}.
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+      responses:
+        '200':
+          description: Metadatos de la FIEL
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FIELEstadoResponse'
+              example:
+                tiene_fiel: true
+                rfc: "XAXX010101000"
+                numero_certificado: "00001000000504465028"
+                vigencia_inicio: "2022-01-01"
+                vigencia_fin: "2026-01-01"
+                vencida: false
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+
+  /api/v1/sat/empresas/{empresa_id}/fiel:
+    delete:
+      operationId: eliminarFIEL
+      tags: [SAT FIEL]
+      summary: Eliminar FIEL guardada de la empresa
+      description: Elimina la FIEL cifrada almacenada para la empresa.
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+      responses:
+        '200':
+          description: Resultado de la eliminacion
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  eliminada:
+                    type: boolean
+              example:
+                eliminada: true
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+
+  /api/v1/sat/empresas/{empresa_id}/fiel/sync:
+    post:
+      operationId: syncCompletoFIEL
+      tags: [SAT FIEL]
+      summary: Sincronizacion automatica completa via FIEL guardada
+      description: |
+        Ejecuta el ciclo completo de descarga del SAT de forma automatica
+        usando la FIEL previamente guardada:
+
+        1. Solicita descarga al SAT
+        2. Verifica en loop cada 30 segundos (maximo 30 minutos)
+        3. Descarga paquetes ZIP e importa CFDIs
+        4. Ejecuta pipeline completo (conciliacion + riesgos + scoring)
+
+        Todo ocurre en background. Requiere FIEL guardada y vigente.
+
+        **Tipo**: emitidos | recibidos | ambos
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [tipo, periodo]
+              properties:
+                tipo:
+                  type: string
+                  enum: [emitidos, recibidos, ambos]
+                  description: Tipo de CFDIs a sincronizar
+                periodo:
+                  type: string
+                  pattern: '^\d{4}-\d{2}$'
+                  description: Periodo fiscal YYYY-MM
+                  example: "2024-01"
+      responses:
+        '200':
+          description: Sync iniciado en background
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SyncIniciadoResponse'
+              example:
+                mensaje: "Sync iniciado para 2 tipo(s). Se verificara y descargara automaticamente."
+                solicitudes:
+                  - id: "sol-uuid-0001"
+                    tipo: emitidos
+                  - id: "sol-uuid-0002"
+                    tipo: recibidos
+                periodo: "2024-01"
+                tipos: [emitidos, recibidos]
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '422':
+          description: Sin FIEL guardada o FIEL vencida
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                detail: "No hay FIEL guardada para esta empresa. Guardala primero."
+        '502':
+          $ref: '#/components/responses/GatewayError'
+
+# ============================================================
+# COMPONENTS
+# ============================================================
+
+components:
+
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        Token JWT obtenido al registrarse o hacer login.
+        Incluir en el header: Authorization: Bearer {token}
+        Duracion: 8 horas.
+
+  parameters:
+    EmpresaId:
+      name: empresa_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: ID unico de la empresa (UUID)
+      example: "a1b2c3d4-0001-0001-0001-000000000001"
+
+  responses:
+    UnauthorizedError:
+      description: Token JWT ausente, invalido o expirado
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            detail: "Se requiere autenticacion"
+
+    ForbiddenError:
+      description: El usuario no tiene acceso a este recurso
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            detail: "Sin acceso a esta empresa"
+
+    NotFoundError:
+      description: El recurso solicitado no existe
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            detail: "Empresa no encontrada"
+
+    BadRequestError:
+      description: La solicitud contiene datos invalidos
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            detail: "Sin campos para actualizar"
+
+    ConflictError:
+      description: El recurso ya existe (conflicto)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            detail: "El correo ya esta registrado"
+
+    UnprocessableError:
+      description: La entidad no pudo procesarse (datos semanticamente invalidos)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            detail: "FIEL invalida: certificado corrupto"
+
+    InternalError:
+      description: Error interno del servidor
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            detail: "Error inesperado en el servidor"
+
+    GatewayError:
+      description: Error en la comunicacion con el SAT
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            detail: "Error SAT: Servicio no disponible"
+
+  schemas:
+
+    RiskPattern:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        tipo_riesgo:
+          type: string
+          description: Código del tipo de riesgo
+        severidad:
+          type: string
+          enum: [critico, alto, medio, bajo]
+        categoria:
+          type: string
+          description: Categoría fiscal (IVA, ISR, COMPROBACION, etc.)
+        descripcion:
+          type: string
+          description: Descripción del caso de riesgo
+        resolucion:
+          type: string
+          nullable: true
+          description: Cómo se resolvió este caso
+        confianza:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Calidad del patrón (0.0–1.0)
+        uso_count:
+          type: integer
+          description: Número de veces que se ha consultado este patrón
+        similitud:
+          type: number
+          description: Score de similitud con la búsqueda (0.0–1.0)
+
+    ContextoSintetizado:
+      type: object
+      properties:
+        total_patrones:
+          type: integer
+        tasa_exito:
+          type: number
+          description: Porcentaje de casos resueltos exitosamente (0.0–1.0)
+        severidad_predominante:
+          type: string
+          enum: [critico, alto, medio, bajo, ""]
+        resoluciones_frecuentes:
+          type: array
+          items:
+            type: string
+          description: Top 3 resoluciones más frecuentes
+        resumen:
+          type: string
+          description: Resumen narrativo generado automáticamente
+
+    ErrorResponse:
+      type: object
+      required: [detail]
+      properties:
+        detail:
+          type: string
+          description: Descripcion del error
+
+    HealthResponse:
+      type: object
+      properties:
+        estado:
+          type: string
+          example: operativo
+        version:
+          type: string
+          example: "1.0.0"
+
+    RegisterRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+          description: Correo electronico del contador
+        password:
+          type: string
+          minLength: 8
+          description: Contrasena de acceso
+        nombre:
+          type: string
+          nullable: true
+          description: Nombre completo del contador
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+
+    AuthResponse:
+      type: object
+      properties:
+        access_token:
+          type: string
+          description: JWT de acceso
+        token_type:
+          type: string
+          example: bearer
+        user_id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        nombre:
+          type: string
+          nullable: true
+        empresas:
+          type: array
+          items:
+            $ref: '#/components/schemas/EmpresaResumen'
+
+    UsuarioPerfil:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        nombre:
+          type: string
+          nullable: true
+        telefono:
+          type: string
+          nullable: true
+        rfc:
+          type: string
+          nullable: true
+        nombre_despacho:
+          type: string
+          nullable: true
+        cedula_profesional:
+          type: string
+          nullable: true
+        empresas:
+          type: array
+          items:
+            $ref: '#/components/schemas/EmpresaResumen'
+
+    ActualizarPerfilRequest:
+      type: object
+      properties:
+        nombre:
+          type: string
+          nullable: true
+        telefono:
+          type: string
+          nullable: true
+        rfc:
+          type: string
+          nullable: true
+          description: RFC del contador (se convierte a mayusculas)
+        nombre_despacho:
+          type: string
+          nullable: true
+        cedula_profesional:
+          type: string
+          nullable: true
+
+    EmpresaResumen:
+      type: object
+      properties:
+        empresa_id:
+          type: string
+          format: uuid
+        rfc:
+          type: string
+          example: "XAXX010101000"
+        razon_social:
+          type: string
+        regimen_fiscal:
+          type: string
+          nullable: true
+          description: Clave del regimen fiscal SAT (ej. 601 = General de Ley)
+
+    Empresa:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        rfc:
+          type: string
+          example: "XAXX010101000"
+        razon_social:
+          type: string
+        regimen_fiscal:
+          type: string
+          nullable: true
+        cp_fiscal:
+          type: string
+          nullable: true
+          description: Codigo postal del domicilio fiscal
+        curp:
+          type: string
+          nullable: true
+          description: CURP (solo personas fisicas)
+        obligaciones:
+          type: array
+          nullable: true
+          items:
+            type: string
+          description: Lista de obligaciones fiscales
+        representante_legal:
+          type: string
+          nullable: true
+        rfc_representante:
+          type: string
+          nullable: true
+        impuestos_declarar:
+          type: array
+          nullable: true
+          items:
+            type: string
+          description: Impuestos configurados para declarar
+        activo:
+          type: boolean
+
+    AgregarEmpresaRequest:
+      type: object
+      required: [rfc, razon_social]
+      properties:
+        rfc:
+          type: string
+          description: RFC de la empresa (se convierte a mayusculas)
+          example: "XAXX010101000"
+        razon_social:
+          type: string
+        regimen_fiscal:
+          type: string
+          nullable: true
+        cp_fiscal:
+          type: string
+          nullable: true
+        curp:
+          type: string
+          nullable: true
+        obligaciones:
+          type: array
+          nullable: true
+          items:
+            type: object
+        representante_legal:
+          type: string
+          nullable: true
+        rfc_representante:
+          type: string
+          nullable: true
+
+    EmpresaVinculadaResponse:
+      type: object
+      properties:
+        mensaje:
+          type: string
+        empresa_id:
+          type: string
+          format: uuid
+        rfc:
+          type: string
+        razon_social:
+          type: string
+
+    ImpuestosRequest:
+      type: object
+      required: [impuestos]
+      properties:
+        impuestos:
+          type: array
+          items:
+            type: string
+            enum: [iva, isr, ieps, ret_iva, ret_isr, diot]
+          description: Lista de claves de impuestos a declarar
+
+    ConstanciaParseada:
+      type: object
+      properties:
+        rfc:
+          type: string
+        razon_social:
+          type: string
+        regimen_fiscal:
+          type: string
+          nullable: true
+        cp_fiscal:
+          type: string
+          nullable: true
+        curp:
+          type: string
+          nullable: true
+        obligaciones:
+          type: array
+          nullable: true
+          items:
+            type: string
+        representante_legal:
+          type: string
+          nullable: true
+        rfc_representante:
+          type: string
+          nullable: true
+        constancia_path:
+          type: string
+          description: Nombre del archivo PDF guardado en el servidor
+
+    IngestaResponse:
+      type: object
+      properties:
+        mensaje:
+          type: string
+        registros_procesados:
+          type: integer
+        errores:
+          type: array
+          items:
+            type: string
+          description: Lista de errores no bloqueantes o advertencias por archivo
+        periodo:
+          type: string
+          nullable: true
+          example: "2024-01"
+
+    Riesgo:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        codigo:
+          type: string
+          description: Codigo unico del tipo de riesgo (ej. R001)
+        nombre:
+          type: string
+          description: Nombre descriptivo del riesgo
+        severidad:
+          type: string
+          enum: [critico, alto, medio, bajo]
+        monto_afectado:
+          type: number
+          format: float
+          nullable: true
+        descripcion:
+          type: string
+          nullable: true
+        cfdi_id:
+          type: string
+          format: uuid
+          nullable: true
+        movimiento_id:
+          type: string
+          format: uuid
+          nullable: true
+        estado:
+          type: string
+          enum: [abierto, pendiente, en_revision, en_espera_cfdi, confirmado, resuelto, descartado]
+        periodo:
+          type: string
+          example: "2024-01"
+        created_at:
+          type: string
+          format: date-time
+
+    RiesgosResponse:
+      type: object
+      properties:
+        total:
+          type: integer
+        riesgos:
+          type: array
+          items:
+            $ref: '#/components/schemas/Riesgo'
+
+    AccionRequest:
+      type: object
+      required: [tipo]
+      properties:
+        tipo:
+          type: string
+          enum: [marcar_revisado, solicitar_cfdi, emitir_cfdi, confirmar_match, descartar, resolver]
+          description: Tipo de accion a ejecutar
+        notas:
+          type: string
+          nullable: true
+          description: Notas opcionales sobre la accion
+
+    AccionResponse:
+      type: object
+      properties:
+        deteccion_id:
+          type: string
+          format: uuid
+        estado_anterior:
+          type: string
+        estado_nuevo:
+          type: string
+
+    ScoringFiscal:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        empresa_id:
+          type: string
+          format: uuid
+        periodo:
+          type: string
+          example: "2024-01"
+        score_total:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 100
+          description: Puntuacion total de cumplimiento fiscal (0-100)
+        clasificacion:
+          type: string
+          enum: [AAA, AA, A, BBB, BB, B, CCC]
+          description: Clasificacion crediticia del cumplimiento fiscal
+        total_cfdi_ingresos:
+          type: integer
+        total_cfdi_egresos:
+          type: integer
+        total_movimientos:
+          type: integer
+        total_conciliados:
+          type: integer
+        total_riesgos_criticos:
+          type: integer
+        total_riesgos_altos:
+          type: integer
+        total_riesgos_medios:
+          type: integer
+        total_riesgos_bajos:
+          type: integer
+        total_ingresos_cfdi:
+          type: number
+          format: float
+        total_egresos_cfdi:
+          type: number
+          format: float
+        total_depositos_banco:
+          type: number
+          format: float
+        total_cargos_banco:
+          type: number
+          format: float
+
+    HistorialScoringResponse:
+      type: object
+      properties:
+        historial:
+          type: array
+          items:
+            type: object
+            properties:
+              periodo:
+                type: string
+              score:
+                type: number
+                format: float
+              clasificacion:
+                type: string
+
+    ResumenConciliacion:
+      type: object
+      properties:
+        total:
+          type: integer
+          description: Total de registros de conciliacion
+        exacto:
+          type: integer
+          description: Matches exactos por monto y RFC
+        parcial:
+          type: integer
+          description: Matches parciales (diferencia tolerable)
+        sin_cfdi:
+          type: integer
+          description: Movimientos bancarios sin CFDI correspondiente
+        sin_movimiento:
+          type: integer
+          description: CFDIs sin movimiento bancario correspondiente
+        pct_conciliado:
+          type: number
+          format: float
+          description: Porcentaje de conciliacion (exacto + parcial / total)
+
+    ConciliacionesAccionablesResponse:
+      type: object
+      properties:
+        total:
+          type: integer
+        pares:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+                format: uuid
+              tipo_match:
+                type: string
+                enum: [sin_cfdi, parcial]
+              monto_movimiento:
+                type: number
+                format: float
+                nullable: true
+              monto_cfdi:
+                type: number
+                format: float
+                nullable: true
+              diferencia:
+                type: number
+                format: float
+              porcentaje_match:
+                type: number
+                format: float
+              periodo:
+                type: string
+              movimiento_id:
+                type: string
+                format: uuid
+                nullable: true
+              mov_fecha:
+                type: string
+                format: date
+                nullable: true
+              concepto:
+                type: string
+                nullable: true
+              mov_monto:
+                type: number
+                format: float
+                nullable: true
+              mov_tipo:
+                type: string
+                enum: [deposito, cargo]
+                nullable: true
+              rfc_detectado:
+                type: string
+                nullable: true
+
+    VistaCierre:
+      type: object
+      properties:
+        periodo:
+          type: string
+        puede_cerrar:
+          type: boolean
+          description: True si el periodo cumple criterios para cierre
+        razon_bloqueo:
+          type: string
+          nullable: true
+          description: Descripcion de lo que impide el cierre
+        score:
+          type: number
+          format: float
+          nullable: true
+        bloqueadores:
+          type: array
+          description: Detecciones de riesgo critico/alto que bloquean el cierre
+          items:
+            type: object
+        acciones:
+          type: array
+          description: Todas las acciones pendientes del periodo
+          items:
+            type: object
+        conciliacion:
+          type: object
+          properties:
+            sin_cfdi:
+              type: integer
+            sin_movimiento:
+              type: integer
+            matches_debiles:
+              type: integer
+            pct_conciliado:
+              type: number
+              format: float
+            total:
+              type: integer
+
+    CFDIItem:
+      type: object
+      properties:
+        uuid:
+          type: string
+          format: uuid
+        serie_folio:
+          type: string
+          nullable: true
+        fecha:
+          type: string
+          format: date
+        rfc_receptor:
+          type: string
+          nullable: true
+        nombre_receptor:
+          type: string
+          nullable: true
+        subtotal:
+          type: number
+          format: float
+        descuento:
+          type: number
+          format: float
+        total:
+          type: number
+          format: float
+        iva:
+          type: number
+          format: float
+        metodo_pago:
+          type: string
+          nullable: true
+          description: "PUE = Pago en una sola exhibicion, PPD = Pago en parcialidades"
+        forma_pago:
+          type: string
+          nullable: true
+        uso_cfdi:
+          type: string
+          nullable: true
+        moneda:
+          type: string
+          nullable: true
+        estado:
+          type: string
+          nullable: true
+        estado_pago:
+          type: string
+          nullable: true
+          enum: [pendiente, pagado_parcial, pagado_total]
+        cfdi_relacionados:
+          type: array
+          items:
+            type: object
+        es_anticipo:
+          type: boolean
+        es_factura_con_anticipo:
+          type: boolean
+
+    EmitidosResponse:
+      type: object
+      properties:
+        periodo:
+          type: string
+        empresa_rfc:
+          type: string
+        resumen:
+          type: object
+          properties:
+            subtotal:
+              type: number
+              format: float
+            iva_trasladado:
+              type: number
+              format: float
+            total_facturado:
+              type: number
+              format: float
+            vigentes:
+              type: integer
+            canceladas:
+              type: integer
+            num_tipo_i:
+              type: integer
+            num_tipo_e:
+              type: integer
+            num_tipo_p:
+              type: integer
+            total_cfdi_periodo:
+              type: integer
+            total_ingresos:
+              type: number
+              format: float
+            total_facturas_con_anticipo:
+              type: number
+              format: float
+            total_anticipos_acumulados:
+              type: number
+              format: float
+            total_aplicaciones_anticipo:
+              type: number
+              format: float
+            ingreso_neto_periodo:
+              type: number
+              format: float
+            num_ingresos:
+              type: integer
+            num_anticipos:
+              type: integer
+            num_facturas_con_anticipo:
+              type: integer
+            num_egresos:
+              type: integer
+            advertencias:
+              type: array
+              items:
+                type: object
+                properties:
+                  tipo:
+                    type: string
+                  uuid_factura:
+                    type: string
+                  mensaje:
+                    type: string
+        ingresos:
+          type: object
+          properties:
+            ventas_servicios:
+              type: array
+              items:
+                $ref: '#/components/schemas/CFDIItem'
+            anticipos:
+              type: array
+              items:
+                $ref: '#/components/schemas/CFDIItem'
+            facturas_con_anticipo:
+              type: array
+              items:
+                $ref: '#/components/schemas/CFDIItem'
+        egresos:
+          type: object
+          properties:
+            notas_credito:
+              type: array
+              items:
+                $ref: '#/components/schemas/CFDIItem'
+            aplicaciones_anticipo:
+              type: array
+              items:
+                $ref: '#/components/schemas/CFDIItem'
+
+    RecibidosResponse:
+      type: object
+      properties:
+        periodo:
+          type: string
+        resumen:
+          type: object
+          properties:
+            subtotal:
+              type: number
+              format: float
+            iva_acreditable:
+              type: number
+              format: float
+            total:
+              type: number
+              format: float
+            num_compras:
+              type: integer
+            num_egresos:
+              type: integer
+            vigentes:
+              type: integer
+            canceladas:
+              type: integer
+        compras:
+          type: array
+          items:
+            type: object
+            properties:
+              uuid:
+                type: string
+              serie_folio:
+                type: string
+                nullable: true
+              fecha:
+                type: string
+                format: date
+              rfc_emisor:
+                type: string
+              nombre_emisor:
+                type: string
+                nullable: true
+              subtotal:
+                type: number
+                format: float
+              total:
+                type: number
+                format: float
+              iva:
+                type: number
+                format: float
+              estado:
+                type: string
+        egresos:
+          type: array
+          items:
+            type: object
+
+    DashboardResponse:
+      type: object
+      properties:
+        empresa:
+          $ref: '#/components/schemas/Empresa'
+        score_actual:
+          $ref: '#/components/schemas/ScoringFiscal'
+          nullable: true
+        riesgos_abiertos:
+          type: array
+          items:
+            $ref: '#/components/schemas/Riesgo'
+        resumen_riesgos:
+          type: object
+          properties:
+            critico:
+              type: integer
+            alto:
+              type: integer
+            medio:
+              type: integer
+            bajo:
+              type: integer
+            monto_total_en_riesgo:
+              type: number
+              format: float
+        tendencia_score:
+          type: array
+          items:
+            type: object
+            properties:
+              periodo:
+                type: string
+              score:
+                type: number
+                format: float
+        indicadores:
+          type: object
+          properties:
+            ingresos_cfdi:
+              type: number
+              format: float
+            egresos_cfdi:
+              type: number
+              format: float
+            depositos_banco:
+              type: number
+              format: float
+            cargos_banco:
+              type: number
+              format: float
+            brecha_ingresos:
+              type: number
+              format: float
+              description: depositos_banco - ingresos_cfdi
+            brecha_egresos:
+              type: number
+              format: float
+              description: cargos_banco - egresos_cfdi
+            pct_conciliacion:
+              type: number
+              format: float
+
+    SolicitudSAT:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        empresa_id:
+          type: string
+          format: uuid
+        usuario_id:
+          type: string
+          format: uuid
+        tipo:
+          type: string
+          enum: [emitidos, recibidos]
+        periodo_inicio:
+          type: string
+          description: Periodo de inicio YYYY-MM
+        periodo_fin:
+          type: string
+          description: Periodo de fin YYYY-MM
+        estado:
+          type: string
+          enum: [pendiente, solicitado, en_proceso, terminado, descargado, fallo]
+        id_solicitud_sat:
+          type: string
+          nullable: true
+          description: ID asignado por el SAT a la solicitud
+        num_cfdi:
+          type: integer
+          nullable: true
+          description: Numero de CFDIs en la solicitud (segun SAT)
+        num_paquetes:
+          type: integer
+          nullable: true
+        paquetes_descargados:
+          type: integer
+        cfdi_importados:
+          type: integer
+          nullable: true
+        error_msg:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    SolicitudSATResponse:
+      type: object
+      properties:
+        solicitud_id:
+          type: string
+          format: uuid
+        id_solicitud_sat:
+          type: string
+        estado:
+          type: string
+        mensaje:
+          type: string
+
+    VerificacionSATResponse:
+      type: object
+      properties:
+        solicitud_id:
+          type: string
+          format: uuid
+        estado:
+          type: string
+          enum: [en_proceso, terminado, fallo]
+        num_cfdi:
+          type: integer
+        num_paquetes:
+          type: integer
+        id_paquetes:
+          type: array
+          items:
+            type: string
+        mensaje:
+          type: string
+
+    FIELGuardadaResponse:
+      type: object
+      properties:
+        tiene_fiel:
+          type: boolean
+        rfc:
+          type: string
+          nullable: true
+        numero_certificado:
+          type: string
+          nullable: true
+        vigencia_inicio:
+          type: string
+          format: date
+          nullable: true
+        vigencia_fin:
+          type: string
+          format: date
+          nullable: true
+        vencida:
+          type: boolean
+          nullable: true
+
+    FIELEstadoResponse:
+      type: object
+      properties:
+        tiene_fiel:
+          type: boolean
+        rfc:
+          type: string
+          nullable: true
+        numero_certificado:
+          type: string
+          nullable: true
+        vigencia_inicio:
+          type: string
+          format: date
+          nullable: true
+        vigencia_fin:
+          type: string
+          format: date
+          nullable: true
+        vencida:
+          type: boolean
+          nullable: true
+
+    SyncIniciadoResponse:
+      type: object
+      properties:
+        mensaje:
+          type: string
+        solicitudes:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+                format: uuid
+              tipo:
+                type: string
+        periodo:
+          type: string
+        tipos:
+          type: array
+          items:
+            type: string

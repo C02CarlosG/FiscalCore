@@ -1,12 +1,3 @@
-import { getToken } from "../auth.js";
-
-export const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
-
-export const authHeaders = () => {
-  const token = getToken();
-  return token ? { "Authorization": `Bearer ${token}` } : {};
-};
-
 export const FORMA_PAGO = {
   "01":"Efectivo","02":"Cheque nominativo","03":"Transferencia",
   "04":"Tarjeta de crédito","05":"Monedero electrónico","06":"Dinero electrónico",
@@ -16,16 +7,16 @@ export const FORMA_PAGO = {
 export const TIPO_LABEL = { I:"Ingreso", E:"Egreso", T:"Traslado", N:"Nómina", P:"Pago" };
 
 export const TIPO_CLS = {
-  I:"text-emerald-400 bg-emerald-400/10 border-emerald-400/20",
-  E:"text-amber-400  bg-amber-400/10  border-amber-400/20",
-  T:"text-sky-400    bg-sky-400/10    border-sky-400/20",
-  N:"text-slate-400  bg-slate-400/10  border-slate-400/20",
-  P:"text-yellow-400 bg-yellow-400/10 border-yellow-400/20",
+  I:"text-emerald-700 bg-emerald-50 border-emerald-200",
+  E:"text-amber-700  bg-amber-50  border-amber-200",
+  T:"text-sky-700    bg-sky-50    border-sky-200",
+  N:"text-slate-600  bg-slate-50  border-slate-200",
+  P:"text-yellow-700 bg-yellow-50 border-yellow-200",
 };
 
 export const MET_CLS = {
-  PUE:"text-emerald-400 bg-emerald-400/10 border-emerald-400/20",
-  PPD:"text-amber-400  bg-amber-400/10  border-amber-400/20",
+  PUE:"text-emerald-700 bg-emerald-50 border-emerald-200",
+  PPD:"text-amber-700  bg-amber-50  border-amber-200",
 };
 
 export const NS4   = "http://www.sat.gob.mx/cfd/4";
@@ -33,17 +24,17 @@ export const NSTFD = "http://www.sat.gob.mx/TimbreFiscalDigital";
 
 export const SEV_VARIANT = { critico:"critical", alto:"high", medio:"medium", bajo:"low" };
 export const SEV_LABEL   = { critico:"CRÍTICO", alto:"ALTO", medio:"MEDIO", bajo:"BAJO" };
-export const SEV_COLOR   = { critico:"#F87171", alto:"#FB923C", medio:"#FBBF24", bajo:"#34D399" };
+export const SEV_COLOR   = { critico:"#DC2626", alto:"#EA580C", medio:"#D97706", bajo:"#16A34A" };
 
 export const ESTADO_LABEL = {
-  abierto:        { label:"Abierto",       cls:"text-red-400    bg-red-400/10    border-red-400/20"    },
-  pendiente:      { label:"Pendiente",     cls:"text-slate-400  bg-slate-400/10  border-slate-400/20"  },
-  en_revision:    { label:"En revisión",   cls:"text-sky-400    bg-sky-400/10    border-sky-400/20"    },
-  en_espera_cfdi: { label:"Esp. CFDI",     cls:"text-amber-400  bg-amber-400/10  border-amber-400/20"  },
-  confirmado:     { label:"Confirmado",    cls:"text-emerald-400 bg-emerald-400/10 border-emerald-400/20"},
-  resuelto:       { label:"Resuelto",      cls:"text-emerald-400 bg-emerald-400/10 border-emerald-400/20"},
-  descartado:     { label:"Descartado",    cls:"text-slate-400  bg-slate-400/10  border-slate-400/20"  },
-  falso_positivo: { label:"Falso +",       cls:"text-slate-400  bg-slate-400/10  border-slate-400/20"  },
+  abierto:        { label:"Abierto",       cls:"text-red-700     bg-red-50     border-red-200"     },
+  pendiente:      { label:"Pendiente",     cls:"text-slate-600   bg-slate-50   border-slate-200"   },
+  en_revision:    { label:"En revisión",   cls:"text-sky-700     bg-sky-50     border-sky-200"     },
+  en_espera_cfdi: { label:"Esp. CFDI",     cls:"text-amber-700   bg-amber-50   border-amber-200"   },
+  confirmado:     { label:"Confirmado",    cls:"text-emerald-700 bg-emerald-50 border-emerald-200" },
+  resuelto:       { label:"Resuelto",      cls:"text-emerald-700 bg-emerald-50 border-emerald-200" },
+  descartado:     { label:"Descartado",    cls:"text-slate-500   bg-slate-50   border-slate-200"   },
+  falso_positivo: { label:"Falso +",       cls:"text-slate-500   bg-slate-50   border-slate-200"   },
 };
 
 export const MESES = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
@@ -58,5 +49,5 @@ export const periodoLabel = (yyyymm) => {
   return `${MESES[parseInt(m,10)-1]} ${y}`;
 };
 
-export const scoreColor  = (s) => s >= 85 ? "#34D399" : s >= 70 ? "#06B6D4" : s >= 50 ? "#FB923C" : "#F87171";
+export const scoreColor  = (s) => s >= 85 ? "#16A34A" : s >= 70 ? "#2563EB" : s >= 50 ? "#EA580C" : "#DC2626";
 export const scoreClasif = (s) => s >= 85 ? "SALUDABLE" : s >= 70 ? "ACEPTABLE" : s >= 50 ? "EN RIESGO" : "CRÍTICO";

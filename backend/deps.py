@@ -59,6 +59,12 @@ def get_current_user(creds: HTTPAuthorizationCredentials = Depends(_bearer)) -> 
     return verificar_token(creds.credentials)
 
 
+def require_admin(current_user: dict = Depends(get_current_user)) -> dict:
+    if current_user.get("rol") != "admin":
+        raise HTTPException(status_code=403, detail="Acceso exclusivo para administradores")
+    return current_user
+
+
 def hash_password(plain: str) -> str:
     if not BCRYPT_OK:
         raise HTTPException(status_code=500, detail="bcrypt no instalado")
@@ -79,6 +85,8 @@ def empresa_or_404(empresa_id: str) -> dict:
 
 
 def validar_acceso_empresa(empresa_id: str, current_user: dict) -> None:
+    if current_user.get("rol") == "admin":
+        return
     row = db.query_one(
         "SELECT 1 FROM usuario_empresas WHERE usuario_id = %s AND empresa_id = %s",
         (current_user["user_id"], empresa_id),

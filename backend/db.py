@@ -165,6 +165,9 @@ def init_db() -> None:
         # 018 es idempotente — tabla empresas_fiel para credenciales FIEL cifradas
         _run_sql_file("018_empresas_fiel.sql")
 
+        # 020 es idempotente — columna rol en usuarios (admin | contador)
+        _run_sql_file("020_admin_rol.sql")
+
     except Exception as e:
         log.error("DB: init_db falló: %s", e)
         raise

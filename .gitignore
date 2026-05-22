@@ -1,30 +1,19 @@
-# Python
+# Dependencias
+node_modules/
+.venv/
+venv/
 __pycache__/
-*.py[cod]
+*.pyc
 *.pyo
 *.pyd
 .Python
+
+# Build
+dist/
+build/
 *.egg-info/
-dist/
-build/
-.venv/
-venv/
-env/
-*.log
 
-# Node.js
-node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-.pnpm-debug.log*
-
-# Build outputs
-dist/
-build/
-.next/
-
-# Entorno local
+# Variables de entorno
 .env
 .env.local
 .env.*.local
@@ -32,50 +21,20 @@ build/
 # Logs
 logs/
 *.log
+npm-debug.log*
 
-# Archivos ZIP/binarios de prueba
-*.zip
-*.tar.gz
-
-# Uploads de usuarios (PDFs de constancias)
-uploads/
-
-# IDEs y editores
-.vscode/settings.json
-.idea/
-
-# AI tools config (directorios de agentes locales)
-.agents/
-.codebuddy/
-.commandcode/
-.continue/
-.crush/
-.factory/
-.goose/
-.junie/
-.kilocode/
-.kiro/
-.kode/
-.mcpjam/
-.mux/
-.neovate/
-.openhands/
-.pi/
-.pochi/
-.qoder/
-.qwen/
-.roo/
-.trae/
-.windsurf/
-.zencoder/
-skills/
-skills-lock.json
-
-# Claude Code (mantener CLAUDE.md pero ignorar caché interna)
-.claude/
-
-# OS
+# Sistema
 .DS_Store
 Thumbs.db
 
-.vercel
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Uploads (archivos subidos por usuarios)
+uploads/
+
+# Archivos comprimidos generados
+*.zip

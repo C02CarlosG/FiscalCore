@@ -18,8 +18,15 @@ cleanup() {
 }
 trap cleanup INT TERM
 
+PYTHON="${ROOT}/.venv/bin/python"
+if [ ! -f "$PYTHON" ]; then
+  echo " Creando virtualenv (Python 3.11)..."
+  python3.11 -m venv "${ROOT}/.venv"
+  "${ROOT}/.venv/bin/pip" install -r "${ROOT}/requirements.txt" -q
+fi
+
 echo "[1/2] Iniciando backend (FastAPI puerto 8000)..."
-python -m uvicorn backend.main_api:app --reload --port 8000 &
+"$PYTHON" -m uvicorn backend.main_api:app --reload --port 8000 &
 BACKEND_PID=$!
 
 sleep 2

@@ -1,453 +1,175 @@
-# CLAUDE.md
+# Ruflo — Claude Code Configuration
 
-Este archivo guía a Claude Code al trabajar en este repositorio.
+## Rules
 
-## Proyecto
+- Do what has been asked; nothing more, nothing less
+- NEVER create files unless absolutely necessary — prefer editing existing files
+- NEVER create documentation files unless explicitly requested
+- NEVER save working files or tests to root — use `/src`, `/tests`, `/docs`, `/config`, `/scripts`
+- ALWAYS read a file before editing it
+- NEVER commit secrets, credentials, or .env files
+- Keep files under 500 lines
+- Validate input at system boundaries
 
-**FiscalCore** es una plataforma de auditoría fiscal mexicana para conciliación de CFDIs con estados de cuenta bancarios y detección automática de riesgos. El dominio es 100% SAT/México: RFC, CFDI 3.3/4.0, régimen fiscal, IVA/ISR/IEPS.
-No es un sistema de visualización de datos fiscales.
+## Agent Comms (SendMessage-First Coordination)
 
-Es un sistema de decisión para contadores de despacho.
+Named agents coordinate via `SendMessage`, not polling or shared state.
 
-El sistema debe ayudar a:
-
-- Preparar el cierre fiscal mensual
-- Reducir carga operativa
-- Prevenir inconsistencias ante el SAT
-- Mejorar flujo de efectivo del cliente
-
-Antes de proponer cualquier solución, Claude debe evaluar:
-
-1. ¿Reduce tiempo del contador?
-2. ¿Reduce riesgo fiscal?
-3. ¿Mejora flujo de efectivo?
-
-Si la respuesta es NO, la solución es inválida.
-
-Claude NO debe:
-
-- Diseñar dashboards genéricos
-- Usar tabs como eje principal de navegación — **decisión de producto, no preferencia de estilo**
-- Agregar features sin impacto operativo
-- Priorizar arquitectura sobre usabilidad
-
-## Estructura de pantalla principal (decisión de producto)
-
-La pantalla principal NO se organiza en tabs. Es una vista única que responde tres preguntas en orden:
-
-1. **¿Puedo cerrar el mes?** — bloqueadores críticos arriba, visibles sin scroll
-2. **¿Qué me falta?** — acciones pendientes priorizadas por impacto
-3. **¿Qué hago hoy?** — tareas concretas con monto y plazo
-
-La información se presenta en bloques verticales priorizados:
-- **Bloqueadores** — riesgos críticos/altos que impiden el cierre
-- **Acciones** — lista de tareas con impacto cuantificado en MXN
-- **Conciliación** — estado del período actual (barra + brechas)
-- **Score** — indicador de salud fiscal (secundario, no protagonista)
-
-Las tabs **solo existen como navegación de drill-down**: ver todos los riesgos, ver detalle de conciliación, cargar archivos, diagnóstico CFDI. El usuario las usa para profundizar, nunca para orientarse.
-
-**Criterio de validación del diseño:** Si el usuario necesita cambiar de tab para saber qué hacer, el diseño está mal.
-
-## Vista principal — reglas de interacción (decisión de producto)
-
-La vista principal es para **trabajar, no para navegar**. Es autocontenida.
-
-Cada ítem de acción en la vista principal debe exponer:
-- **Contexto mínimo** — qué pasó (ej. "Depósito $45,000 sin CFDI el 12/mar")
-- **Impacto** — monto afectado en MXN
-- **Acción clara** — qué debe hacer el contador (ej. "Emitir CFDI" / "Confirmar match" / "Marcar revisado")
-- **Interacción directa** — el contador puede ejecutar o avanzar sin salir de pantalla (marcar como revisado, clasificar, confirmar match, resolver)
-
-El drill-down solo se activa cuando:
-- Se necesita detalle adicional para tomar la decisión
-- El caso es ambiguo y requiere exploración
-- El usuario elige profundizar voluntariamente
-
-**Criterio de validación de interacción:** El 60–70% del trabajo del cierre mensual debe poder avanzarse desde la vista principal. Si el contador tiene que entrar a otra vista para resolver la mayoría de los casos, el diseño está mal.
-
-## Rediseño funcional — vertical slice (alcance acordado)
-
-Este no es un rediseño visual. Es un rediseño funcional mínimo que habilita interacción real desde la vista principal.
-
-### 1. Backend — riesgos
-
-Agregar campo `accion_sugerida` estructurado en riesgos (no strings en el frontend):
-```json
-{
-  "tipo": "solicitar_cfdi",
-  "label": "Solicitar CFDI",
-  "puede_resolverse_inline": true
-}
+```
+Lead (you) ←→ architect ←→ developer ←→ tester ←→ reviewer
+              (named agents message each other directly)
 ```
 
-Introducir estados intermedios en `detecciones` (reemplaza el binario abierto/resuelto):
-- `pendiente`
-- `abierto`
-- `en_revision`
-- `en_espera_cfdi`
-- `confirmado`
-- `resuelto`
-- `descartado`
-- `falso_positivo`
+### Spawning a Coordinated Team
 
-Mantener `PATCH /api/v1/riesgos/{id}/resolver` y complementar con:
+```javascript
+// ALL agents in ONE message, each knows WHO to message next
+Agent({ prompt: "Research the codebase. SendMessage findings to 'architect'.",
+  subagent_type: "researcher", name: "researcher", run_in_background: true })
+Agent({ prompt: "Wait for 'researcher'. Design solution. SendMessage to 'coder'.",
+  subagent_type: "system-architect", name: "architect", run_in_background: true })
+Agent({ prompt: "Wait for 'architect'. Implement it. SendMessage to 'tester'.",
+  subagent_type: "coder", name: "coder", run_in_background: true })
+Agent({ prompt: "Wait for 'coder'. Write tests. SendMessage results to 'reviewer'.",
+  subagent_type: "tester", name: "tester", run_in_background: true })
+Agent({ prompt: "Wait for 'tester'. Review code quality and security.",
+  subagent_type: "reviewer", name: "reviewer", run_in_background: true })
+
+// Kick off the pipeline
+SendMessage({ to: "researcher", summary: "Start", message: "[task context]" })
 ```
-POST /api/v1/acciones/{id}/ejecutar
-body: { "tipo": "confirmar_match" | "marcar_revisado" | "descartar" | ... }
-```
 
-### 2. Backend — conciliación (mínimo necesario)
+### Patterns
 
-No se rehace el motor. Solo se exponen casos accionables:
-- Movimientos sin CFDI
-- Matches débiles (score bajo)
+| Pattern | Flow | Use When |
+|---------|------|----------|
+| **Pipeline** | A → B → C → D | Sequential dependencies (feature dev) |
+| **Fan-out** | Lead → A, B, C → Lead | Independent parallel work (research) |
+| **Supervisor** | Lead ↔ workers | Ongoing coordination (complex refactor) |
 
-Estructura de respuesta:
-```json
-{
-  "movimiento_bancario": { ... },
-  "cfdi_sugeridos": [ ... ],
-  "score": 85
-}
-```
-Con endpoint para confirmar/vincular desde la vista principal.
+### Rules
 
-### 3. Frontend — vista principal
+- ALWAYS name agents — `name: "role"` makes them addressable
+- ALWAYS include comms instructions in prompts — who to message, what to send
+- Spawn ALL agents in ONE message with `run_in_background: true`
+- After spawning: STOP, tell user what's running, wait for results
+- NEVER poll status — agents message back or complete automatically
 
-El bloque "Acciones del día" expone por cada ítem:
-- Contexto: qué pasó (movimiento, fecha, contrapartes)
-- Impacto: monto en MXN
-- Acción directa: botón inline (no navega)
-- Cambio de estado: visible e inmediato
+## Swarm & Routing
 
-El drill-down es una opción secundaria para casos complejos, no el flujo principal.
+### Config
+- **Topology**: hierarchical-mesh (anti-drift)
+- **Max Agents**: 15
+- **Memory**: hybrid
+- **HNSW**: Enabled
+- **Neural**: Enabled
 
-### Alcance intencional
-
-**No buscamos:**
-- Cobertura completa de todos los riesgos
-- Sistema perfecto de conciliación
-- Resolver todos los edge cases
-
-**Sí buscamos:**
-- Que el contador avance el 60–70% del cierre mensual desde la vista principal
-- Esa es la métrica que define si el rediseño fue exitoso
-
-Claude DEBE:
-
-- Proponer acciones concretas, no solo datos
-- Cuantificar el impacto en dinero
-- Priorizar las tareas del contador
-- Pensar en el flujo mensual del contador (cierre del 17, DIOT, declaraciones)
-
-Toda propuesta funcional debe incluir:
-
-- Impacto en carga operativa
-- Impacto en flujo de efectivo
-- Impacto en riesgo fiscal
-- Prioridad de implementación
-
-## Comandos
-
-### Levantar con Docker (recomendado)
 ```bash
-docker-compose up -d        # levanta PostgreSQL 16 + inicializa schema automáticamente (001 → 018)
-.venv/bin/python -m uvicorn backend.main_api:app --reload --port 8000
+npx @claude-flow/cli@latest swarm init --topology hierarchical --max-agents 8 --strategy specialized
 ```
 
-### Backend manual — Arch Linux / Python 3.14 (entorno de desarrollo actual)
+### Agent Routing
+
+| Task | Agents | Topology |
+|------|--------|----------|
+| Bug Fix | researcher, coder, tester | hierarchical |
+| Feature | architect, coder, tester, reviewer | hierarchical |
+| Refactor | architect, coder, reviewer | hierarchical |
+| Performance | perf-engineer, coder | hierarchical |
+| Security | security-architect, auditor | hierarchical |
+
+### When to Swarm
+- **YES**: 3+ files, new features, cross-module refactoring, API changes, security, performance
+- **NO**: single file edits, 1-2 line fixes, docs updates, config changes, questions
+
+### 3-Tier Model Routing
+
+| Tier | Handler | Use Cases |
+|------|---------|-----------|
+| 1 | Agent Booster (WASM) | Simple transforms — skip LLM, use Edit directly |
+| 2 | Haiku | Simple tasks, low complexity |
+| 3 | Sonnet/Opus | Architecture, security, complex reasoning |
+
+## Memory & Learning
+
+### Before Any Task
 ```bash
-# Primera vez: instalar dependencias del sistema via pacman
-sudo pacman -S --needed python-fastapi uvicorn python-pydantic python-psycopg2 \
-  python-openpyxl python-bcrypt python-dotenv python-python-multipart python-jose
-
-# Crear virtualenv con acceso a paquetes del sistema
-python3 -m venv .venv --system-site-packages
-
-# Instalar paquetes que no están en pacman
-.venv/bin/pip install pdfplumber satcfdi python-multipart
-
-# Arrancar (SIEMPRE con el Python del venv, no con el uvicorn del sistema)
-.venv/bin/python -m uvicorn backend.main_api:app --reload --port 8000
-# Docs interactivos: http://localhost:8000/docs
+npx @claude-flow/cli@latest memory search --query "[task keywords]" --namespace patterns
+npx @claude-flow/cli@latest hooks route --task "[task description]"
 ```
 
-### Backend manual (otros sistemas)
+### After Success
 ```bash
-pip install fastapi uvicorn python-multipart psycopg2-binary openpyxl pydantic python-jose bcrypt pdfplumber python-dotenv
-
-# La DB se inicializa sola con docker-compose (scripts SQL 001 → 018).
-# init_db() en backend/db.py aplica todas las migraciones al startup (Railway-ready).
-python -m uvicorn backend.main_api:app --reload --port 8000
-# Docs interactivos: http://localhost:8000/docs
+npx @claude-flow/cli@latest memory store --namespace patterns --key "[name]" --value "[what worked]"
+npx @claude-flow/cli@latest hooks post-task --task-id "[id]" --success true --store-results true
 ```
 
-### Deploy en Railway
+### MCP Tools (use `ToolSearch("keyword")` to discover)
+
+| Category | Key Tools |
+|----------|-----------|
+| **Memory** | `memory_store`, `memory_search`, `memory_search_unified` |
+| **Bridge** | `memory_import_claude`, `memory_bridge_status` |
+| **Swarm** | `swarm_init`, `swarm_status`, `swarm_health` |
+| **Agents** | `agent_spawn`, `agent_list`, `agent_status` |
+| **Hooks** | `hooks_route`, `hooks_post-task`, `hooks_worker-dispatch` |
+| **Security** | `aidefence_scan`, `aidefence_is_safe`, `aidefence_has_pii` |
+| **Hive-Mind** | `hive-mind_init`, `hive-mind_consensus`, `hive-mind_spawn` |
+
+### Background Workers
+
+| Worker | When |
+|--------|------|
+| `audit` | After security changes |
+| `optimize` | After performance work |
+| `testgaps` | After adding features |
+| `map` | Every 5+ file changes |
+| `document` | After API changes |
+
 ```bash
-# Railway detecta Procfile automáticamente:
-# web: uvicorn backend.main_api:app --host 0.0.0.0 --port $PORT
-# Variable de entorno requerida: DATABASE_URL (Railway la inyecta al vincular PostgreSQL)
-# init_db() aplica todas las migraciones SQL al startup
+npx @claude-flow/cli@latest hooks worker dispatch --trigger audit
 ```
 
-### Frontend (React + Vite)
+## Agents
+
+**Core**: `coder`, `reviewer`, `tester`, `planner`, `researcher`
+**Architecture**: `system-architect`, `backend-dev`, `mobile-dev`
+**Security**: `security-architect`, `security-auditor`
+**Performance**: `performance-engineer`, `perf-analyzer`
+**Coordination**: `hierarchical-coordinator`, `mesh-coordinator`, `adaptive-coordinator`
+**GitHub**: `pr-manager`, `code-review-swarm`, `issue-tracker`, `release-manager`
+
+Any string works as a custom agent type.
+
+## Build & Test
+
+- ALWAYS run tests after code changes
+- ALWAYS verify build succeeds before committing
+
 ```bash
-npm install
-npm run dev   # → http://localhost:3001 (proxy /api → http://localhost:8000)
-# Requiere .env.local con VITE_API_URL= (vacío) para usar URLs relativas vía proxy
+npm run build && npm test
 ```
 
-## Arquitectura
+## CLI Quick Reference
 
-```
-Archivos usuario (XML/CSV/XLSX / Constancia PDF)
-    → Parser Layer        backend/cfdi_parser.py / banco_parser.py / constancia_parser.py
-    → Motor Fiscal        backend/motor_fiscal.py
-    → API REST            backend/main_api.py  (FastAPI, puerto 8000)
-    → DB Layer            backend/db.py  (connection pool + init_db con auto-migración)
-    → Base de datos       PostgreSQL 16 (Docker / Railway) — database/migrations/ 001→015
-    → Frontend            React 18 + Vite 5 (src/)
-```
-
-### Estructura de directorios
-
-```
-backend/                  # Paquete Python (tiene __init__.py)
-  main_api.py             # FastAPI app
-  db.py                   # Connection pool + init_db
-  motor_fiscal.py         # Motores: conciliación, riesgos, scoring
-  cfdi_parser.py          # Parser CFDI XML 3.3 / 4.0
-  banco_parser.py         # Parser CSV/XLSX bancario
-  constancia_parser.py    # Parser Constancia PDF
-database/
-  migrations/             # Scripts SQL idempotentes (001 → 017)
-src/                      # Frontend React + Vite
-  AuditoriaFiscalDashboard.jsx
-  InicioPage.jsx          # Selector de empresa / onboarding post-login
-  PerfilPage.jsx          # Perfil del contador (teléfono, RFC, despacho, cédula)
-  AgregarEmpresaModal.jsx # Modal para agregar empresa por Constancia PDF
-  LoginPage.jsx
-  RegisterPage.jsx
-  main.jsx
-  auth.js
-  components/ui/          # shadcn/ui
-  lib/utils.js
-  index.css
+```bash
+npx @claude-flow/cli@latest init --wizard           # Setup
+npx @claude-flow/cli@latest swarm init --v3-mode     # Start swarm
+npx @claude-flow/cli@latest memory search --query "" # Vector search
+npx @claude-flow/cli@latest hooks route --task ""    # Route to agent
+npx @claude-flow/cli@latest doctor --fix             # Diagnostics
+npx @claude-flow/cli@latest security scan            # Security scan
+npx @claude-flow/cli@latest performance benchmark    # Benchmarks
 ```
 
-### Módulos backend (`backend/`)
+26 commands, 140+ subcommands. Use `--help` on any command for details.
 
-| Módulo | Responsabilidad |
-|--------|-----------------|
-| `cfdi_parser.py` | Parsea CFDI XML 3.3 y 4.0. Valida RFC, cuadre matemático, detecta namespace. Extrae `cfdi_relacionados` (TipoRelacion + UUIDs) y calcula `es_anticipo_sat` (ClaveProdServ 84111506 + PUE + sin CfdiRel) |
-| `banco_parser.py` | Parsea CSV/XLSX bancarios. Auto-detecta encoding y columnas (6+ alias) |
-| `motor_fiscal.py` | Tres motores: Conciliación (banco↔CFDI), Riesgos (8 tipos), Scoring (0–100) |
-| `constancia_parser.py` | Extrae RFC, razón social, régimen, obligaciones, CP, CURP de la Constancia de Situación Fiscal PDF (pdfplumber) |
-| `main_api.py` | FastAPI: auth JWT, contador→N empresas, ingesta CFDI/banco, dashboard, riesgos, scoring, parseo constancia, acciones inline, cierre mensual, módulo Emitidos |
-| `db.py` | Connection pool psycopg2 + helpers (`query_all`, `query_one`, `execute`) + `init_db()` con auto-migración al startup |
+## Setup
 
-### Migraciones (`database/migrations/`)
-
-| Migración | Contenido |
-|-----------|-----------|
-| `001_schema_inicial.sql` | DDL PostgreSQL: 8 tablas + extensiones `uuid-ossp`, `pg_trgm` |
-| `002_usuarios.sql` | Tabla `usuarios` + columnas extra en `empresas` (constancia_path, obligaciones JSONB, cp_fiscal, curp) |
-| `003_acciones.sql` | `accion_sugerida` JSONB en catálogo `riesgos` + estados intermedios en `detecciones` (idempotente) |
-| `004_pagos_cfdi.sql` | Tablas `pagos_cfdi` y `pagos_relaciones`; agrega `complemento_pago` a `conciliaciones.tipo_match`; agrega `estado_pago` en `cfdi` (idempotente) |
-| `005_cfdi40_campos.sql` | Campos CFDI 4.0: `exportacion`, `lugar_expedicion`, `domicilio_fiscal_receptor`, `regimen_fiscal_receptor` en tabla `cfdi` |
-| `006_match_multiple.sql` | Extiende `tipo_match` con `agrupado` y `parcial_multiple` para matching 1:N y N:1 |
-| `007_match_heuristico.sql` | Agrega `heuristico` a `tipo_match` (matches por similitud/heurística) |
-| `008_confianza_conciliacion.sql` | Columna `confianza` (`alta`/`media`/`baja`) en `conciliaciones` |
-| `009_ppd_estados.sql` | Extiende `tipo_match` con `pendiente_rep`/`pagado_parcial`; extiende `cfdi.estado_pago` con `pendiente_rep` (idempotente) |
-| `010_complemento_tipos.sql` | Agrega `complemento_pago_total`/`complemento_pago_parcial` a `tipo_match`; columnas `pago_id` y `saldo_insoluto` en `conciliaciones` (idempotente) |
-| `011_usuario_empresas.sql` | Tabla `usuario_empresas` (M:N): 1 contador → N empresas; migra relaciones existentes |
-| `012_empresa_representante.sql` | Columnas `representante_legal` y `rfc_representante` en `empresas` (idempotente) |
-| `013_perfil_contador.sql` | Perfil extendido del contador: `telefono`, `rfc`, `nombre_despacho`, `cedula` en `usuarios` (idempotente) |
-| `014_cfdi_relacionados.sql` | Columna `cfdi_relacionados JSONB` + índice GIN en `cfdi` — almacena TipoRelacion + UUIDs del nodo CfdiRelacionados del XML (idempotente) |
-| `015_anticipo_sat.sql` | Columna `es_anticipo_sat BOOLEAN DEFAULT FALSE` en `cfdi` — calculada en el parser según reglas SAT (ClaveProdServ 84111506 + MetodoPago PUE + sin CfdiRelacionados) (idempotente) |
-| `016_sat_solicitudes.sql` | Tabla `sat_solicitudes` para tracking de solicitudes de Descarga Masiva SAT: estados `pendiente→solicitado→en_proceso→terminado→fallo→descargado`; columnas `id_solicitud_sat`, `num_cfdi`, `num_paquetes`, `paquetes_descargados`, `cfdi_importados`, `error_msg` (idempotente) |
-| `017_impuestos_empresa.sql` | Columna `impuestos_declarar JSONB DEFAULT '[]'` en `empresas` — array de claves de impuestos que el contador seleccionó declarar mensualmente (`iva`, `isr`, `ieps`, `ret_iva`, `ret_isr`, `diot`) (idempotente) |
-
-### Módulos frontend (`src/`)
-
-| Archivo | Responsabilidad |
-|---------|-----------------|
-| `main.jsx` | Raíz: enrutamiento login / register / inicio / dashboard basado en estado |
-| `auth.js` | JWT + período fiscal en localStorage: `saveAuth`, `getToken`, `getEmpresaData`, `isLoggedIn` (verifica exp), `clearAuth`. Período: `getPeriodoSugerido()` (regla día 17 MX), `getPeriodoEmpresa(id)`, `setPeriodoEmpresa(id, periodo)` |
-| `LoginPage.jsx` | Split-screen: branding izquierdo + formulario shadcn derecho. Llama `POST /api/v1/auth/login` |
-| `RegisterPage.jsx` | Wizard 3 pasos: credenciales → constancia PDF → confirmación. Llama `POST /api/v1/auth/register` + `POST /api/v1/constancia/parsear` |
-| `InicioPage.jsx` | Selección de empresa post-login. Lista empresas del contador, permite agregar nueva |
-| `PerfilPage.jsx` | Perfil del contador: teléfono, RFC, despacho, cédula. Llama `PATCH /api/v1/perfil` |
-| `AgregarEmpresaModal.jsx` | Modal para agregar empresa cargando Constancia PDF. Llama `POST /api/v1/mis-empresas` |
-| `AuditoriaFiscalDashboard.jsx` | Dashboard principal (~500 líneas). Orquesta tabs y vista principal accionable. Importa de `src/lib/`, `src/components/`, `src/tabs/` |
-| `components/ScoreGauge.jsx` | Gauge SVG semicircular para score fiscal |
-| `components/TrendLine.jsx` | Gráfica SVG de tendencia para historial de scoring |
-| `components/ConciliacionBar.jsx` | Barra horizontal de progreso de conciliación con leyenda |
-| `components/AccionItem.jsx` | Tarjeta de acción inline con badge de severidad |
-| `tabs/TabEmitidos.jsx` | Tab de CFDIs emitidos/recibidos con lógica SAT de anticipos |
-| `tabs/TabRiesgos.jsx` | Tab de riesgos detectados con acciones inline |
-| `tabs/TabConciliacion.jsx` | Tab de conciliación banco↔CFDI |
-| `tabs/TabIngesta.jsx` | Tab de carga de archivos XML/CSV/XLSX |
-| `tabs/TabDiagnostico.jsx` | Tab de diagnóstico CFDI client-side con DOMParser |
-| `tabs/TabSAT.jsx` | Tab de descarga masiva SAT con FIEL: upload .cer/.key, rango fechas, historial de solicitudes |
-| `lib/constants.js` | Exports: `API_URL`, `authHeaders`, catálogos SAT (`FORMA_PAGO`, `TIPO_LABEL`), mapas de severidad/estado, helpers (`fmt`, `fmtK`, `periodoLabel`, `scoreColor`, `scoreClasif`) |
-| `lib/cfdiParser.js` | `parseCFDI(xmlText, filename)` — parseo client-side de XMLs CFDI |
-| `components/ui/` | Componentes shadcn/ui: button, input, card, badge, label, alert, avatar, dialog, tabs, separator |
-| `lib/utils.js` | Helper `cn()` (clsx + tailwind-merge) |
-| `index.css` | Variables CSS dark theme (navy + cyan) + directivas Tailwind |
-
-### Autenticación
-- **JWT** con `python-jose`. Tokens con 8h de expiración.
-- **Bcrypt** directo (`import bcrypt as _bcrypt`) — **NO usar passlib** (incompatibilidad con bcrypt moderno).
-- **Modelo usuario-céntrico**: 1 contador puede gestionar N empresas. El token contiene `user_id`, `email`. La empresa activa se selecciona en el frontend.
-- La tabla `usuario_empresas` (M:N) vincula usuarios a empresas con un rol (`contador` por defecto).
-- Endpoints: `POST /api/v1/auth/register`, `POST /api/v1/auth/login`, `GET /api/v1/auth/me`.
-
-### Endpoints principales (`backend/main_api.py`)
-
-| Método | Ruta | Tag |
-|--------|------|-----|
-| POST | `/api/v1/auth/register` | Auth |
-| POST | `/api/v1/auth/login` | Auth |
-| GET | `/api/v1/auth/me` | Auth |
-| POST | `/api/v1/constancia/parsear` | Constancia |
-| GET | `/api/v1/empresas` | Empresas |
-| POST | `/api/v1/mis-empresas` | Empresas |
-| GET | `/api/v1/empresas/{id}` | Empresas |
-| GET | `/api/v1/dashboard/{empresa_id}` | Dashboard |
-| POST | `/api/v1/empresas/{id}/cfdi/upload` | Ingesta |
-| POST | `/api/v1/empresas/{id}/banco/upload` | Ingesta |
-| GET | `/api/v1/empresas/{id}/riesgos` | Riesgos |
-| PATCH | `/api/v1/riesgos/{id}/resolver` | Riesgos |
-| GET | `/api/v1/empresas/{id}/scoring` | Scoring |
-| GET | `/api/v1/empresas/{id}/scoring/historial` | Scoring |
-| GET | `/api/v1/empresas/{id}/conciliaciones` | Conciliación |
-| GET | `/api/v1/empresas/{id}/conciliaciones/accionables` | Conciliación |
-| POST | `/api/v1/acciones/{deteccion_id}/ejecutar` | Acciones |
-| GET | `/api/v1/empresas/{id}/cierre/{periodo}` | Cierre |
-| GET | `/api/v1/empresas/{id}/emitidos?periodo=YYYY-MM` | Emitidos |
-| GET | `/api/v1/empresas/{id}/periodos` | Cierre |
-| POST | `/api/v1/sat/solicitar` | SAT FIEL |
-| GET | `/api/v1/sat/solicitudes` | SAT FIEL |
-| POST | `/api/v1/sat/solicitudes/{id}/verificar` | SAT FIEL |
-| POST | `/api/v1/sat/solicitudes/{id}/descargar` | SAT FIEL |
-
-### Frontend — stack y tema
-- **React 18 + Vite 5 + Tailwind CSS v3 + shadcn/ui** (componentes instalados manualmente en `src/components/ui/`).
-- **Paleta dark navy + cyan**: `--background: #0A0F1E`, `--primary: #06B6D4`, `--card: #0D1526`.
-- **Fuentes**: Bricolage Grotesque (`font-display`), Outfit (`font-sans`), JetBrains Mono (`font-mono`) — cargadas en `index.html`.
-- Variantes de `Badge` por severidad: `critical` (rojo), `high` (naranja), `medium` (amarillo), `low` (verde).
-
-### Lógica de conciliación (`MotorConciliacion`)
-- Prioridad: RFC + monto exacto → monto exacto → tolerancia ±2%
-- Tolerancia exacta: ±$0.05 MXN
-- Resultados completos: `exacto`, `parcial`, `sin_cfdi`, `sin_movimiento`, `complemento_pago`, `complemento_pago_total`, `complemento_pago_parcial`, `agrupado`, `parcial_multiple`, `heuristico`, `pendiente_rep`, `pagado_parcial`
-- Columna `confianza` en cada resultado: `alta` / `media` / `baja`
-
-### Riesgos detectados (`MotorRiesgos`) — 8 tipos
-| Clave | Severidad |
-|-------|-----------|
-| `INGRESO_NO_FACTURADO` | Crítico |
-| `CFDI_CANCELADO_COBRADO` | Crítico |
-| `GASTO_SIN_CFDI` | Alto |
-| `DIFERENCIA_IVA` | Alto |
-| `RFC_INVALIDO` | Alto |
-| `CFDI_NO_COBRADO` | Medio |
-| `CFDI_NO_PAGADO` | Medio |
-| `DIFERENCIA_TIPO_CAMBIO` | Bajo |
-
-### Fórmula de scoring (`MotorScoring`)
-```
-score = 100
-score -= Σ penalizaciones  (Crítico=-15, Alto=-8, Medio=-4, Bajo=-1)
-score -= int((1 - %_conciliado) * 20)   # hasta -20 por baja conciliación
-score ∈ [0, 100]
+```bash
+claude mcp add claude-flow -- npx -y @claude-flow/cli@latest
+npx @claude-flow/cli@latest daemon start
+npx @claude-flow/cli@latest doctor --fix
 ```
 
-## Estado actual del proyecto
-
-- ✅ Schema DB, parsers, motor fiscal y API — diseñados y funcionales
-- ✅ Auth JWT — registro con Constancia PDF, login, token
-- ✅ **Modelo usuario-céntrico** — 1 contador → N empresas via `usuario_empresas` (M:N); `POST /api/v1/mis-empresas` crea/reutiliza empresa por RFC y la vincula al contador
-- ✅ Docker Compose — PostgreSQL 16 con auto-init de scripts SQL (001 → 017)
-- ✅ Frontend migrado a Tailwind CSS v3 + shadcn/ui (tema dark navy + cyan)
-- ✅ **API conectada a PostgreSQL real** — pipeline ingesta → conciliación → riesgos → scoring persiste
-- ✅ **Dashboard conectado a la API** — llama a endpoints reales, sin datos hardcoded
-- ✅ **Vertical slice implementado** — vista principal accionable sin tabs como eje de navegación
-  - `003_acciones.sql` — `accion_sugerida` JSONB en catálogo + estados intermedios en `detecciones`
-  - `POST /api/v1/acciones/{id}/ejecutar` — actualiza estado con update optimista en frontend
-  - `GET /api/v1/empresas/{id}/cierre/{periodo}` — vista consolidada: bloqueadores + acciones + conciliación
-  - `GET /api/v1/empresas/{id}/conciliaciones/accionables` — pares sin_cfdi y parciales con contexto
-- ✅ **`backend/db.py` modularizado** — connection pool psycopg2 + `init_db()` con auto-migración al startup (Railway-ready)
-- ✅ **`Procfile` actualizado** — `uvicorn backend.main_api:app` (módulo con prefijo de paquete)
-- ✅ **Reestructuración de directorios** — código Python en `backend/` (paquete Python), migraciones en `database/migrations/`
-- ✅ **Campos CFDI 4.0** — `exportacion`, `lugar_expedicion`, `domicilio_fiscal_receptor`, `regimen_fiscal_receptor` (`005`)
-- ✅ **Matching avanzado** — tipos `agrupado`, `parcial_multiple` (006), `heuristico` (007), columna `confianza` (008)
-- ✅ **Complemento de Pago 2.0 (CFDI tipo P)** — parser, persistencia y conciliación con prioridad sobre heurística
-- ✅ **Conciliación PPD completa con REP** — `enriquecer_estados_ppd()` clasifica cada CFDI PPD antes de conciliar; elimina falsos positivos en `CFDI_NO_COBRADO`/`CFDI_NO_PAGADO`; nuevos `tipo_match`: `pendiente_rep`, `pagado_parcial`; umbral PPD sin REP elevado a 60 días
-- ✅ **Paso 1 score-based banco→REP** — `_conciliar_con_rep()` reemplaza el loop con `break`; scoring monto (exacto=10, ±2%=5) + fecha (exacta=+4, ≤2d=+2, ≤5d=+1); dedup de REPs por `pago.id`; emite `complemento_pago_total`/`complemento_pago_parcial` según `saldo_insoluto`; `TOLERANCIA_FECHA_REP=5d`; trazabilidad `pago_id` + `saldo_insoluto` en `ResultadoConciliacion`
-  - `backend/cfdi_parser.py` — `PagoCFDI`, `DoctoRelacionado`, `_extraer_pagos()`, `es_pago` property; validación de cuadre omitida para tipo P
-  - `database/migrations/004_pagos_cfdi.sql` — tablas `pagos_cfdi` + `pagos_relaciones`; `estado_pago` en `cfdi`; `complemento_pago` en tipo_match
-  - `backend/motor_fiscal.py` — `PagoResumen`; `MotorConciliacion.conciliar()` acepta `pagos=`; regla: si existe complemento → NO usar heurística; output `{tipo_match:"complemento_pago", cfdis_relacionados:[], confianza:"alta"}`
-- ✅ **Selector de período fiscal** — badge "PERÍODO" en header con popover clickeable; default inteligente (regla día 17 MX: antes del 17 → mes anterior); persistencia por empresa (`fc_periodo_{empresaId}` en localStorage); recarga automática de datos al cambiar período
-  - `src/auth.js` — `getPeriodoSugerido()`, `getPeriodoEmpresa()`, `setPeriodoEmpresa()`
-  - `vite.config.js` — proxy `/api → http://localhost:8000` + puerto fijo 3001
-  - `GET /api/v1/empresas/{id}/periodos` — lista los 24 meses con datos (CFDI + banco + scoring)
-- ✅ **Módulo Emitidos** — vista completa de CFDIs emitidos (tipo I y E) organizados por lógica fiscal SAT
-  - `database/migrations/014_cfdi_relacionados.sql` — columna `cfdi_relacionados JSONB` + índice GIN
-  - `database/migrations/015_anticipo_sat.sql` — columna `es_anticipo_sat BOOLEAN` calculada en el parser
-  - `GET /api/v1/empresas/{id}/emitidos?periodo=YYYY-MM` — retorna ingresos y egresos clasificados con lógica SAT de 3 pasos; resumen + advertencias
-- ✅ **Refactor frontend** — `AuditoriaFiscalDashboard.jsx` descompuesto: lógica en `src/lib/constants.js` + `src/lib/cfdiParser.js`, componentes en `src/components/` (ScoreGauge, TrendLine, ConciliacionBar, AccionItem), tabs en `src/tabs/` (TabEmitidos, TabRiesgos, TabConciliacion, TabIngesta, TabDiagnostico, TabSAT). Dashboard ~500 líneas.
-- ✅ **Refactor backend** — `main_api.py` 1,494 → 69 líneas. Routers: `backend/routers/{auth,empresas,ingesta,riesgos,scoring,conciliacion,emitidos,dashboard,sat}.py`. Deps compartidas en `backend/deps.py`. Schemas en `backend/schemas.py`.
-- ✅ **Descarga masiva SAT con FIEL** — integración completa con portal SAT vía `satcfdi`
-  - `database/migrations/016_sat_solicitudes.sql` — tabla `sat_solicitudes` para tracking async
-  - `backend/sat_fiel.py` — `cargar_fiel()`, `solicitar_descarga()`, `verificar_solicitud()`, `descargar_paquete()` usando `satcfdi` (graceful degradation si no instalado)
-  - `backend/routers/sat.py` — 4 endpoints: `POST /sat/solicitar`, `GET /sat/solicitudes`, `POST /sat/solicitudes/{id}/verificar`, `POST /sat/solicitudes/{id}/descargar` (con BackgroundTasks)
-  - `src/tabs/TabSAT.jsx` — UI: toggle emitidos/recibidos, rango fechas, upload .cer/.key, contraseña, historial con 6 estados (pendiente→descargado)
-  - `requirements.txt` — `satcfdi` agregado para Railway
-
-### Lógica fiscal de anticipos (SAT oficial) — 3 pasos
-
-El módulo Emitidos implementa la lógica SAT oficial. **No mezclar con TipoRelacion=07 en egresos** (era la implementación anterior incorrecta).
-
-```
-Paso 1 — ANTICIPO (Ingreso A):
-  tipo_comprobante = "I"
-  ClaveProdServ   = "84111506"   ← código SAT para anticipos
-  MetodoPago      = "PUE"        ← pago en una sola exhibición
-  Sin CfdiRelacionados
-  → es_anticipo_sat = TRUE (calculado en el parser, persistido en DB)
-  → acumula ingreso en el período de emisión
-
-Paso 2 — FACTURA TOTAL (Ingreso B):
-  tipo_comprobante = "I"
-  CfdiRelacionados TipoRelacion = "07" → UUID del Ingreso A
-  → es_factura_con_anticipo = TRUE (detectado en el endpoint)
-  → ingresa el monto total de la venta
-
-Paso 3 — EGRESO DE APLICACIÓN (Egreso C):
-  tipo_comprobante = "E"
-  FormaPago       = "30"         ← "Aplicación de anticipos"
-  CfdiRelacionados → UUID del Ingreso B
-  → aplicaciones_anticipo (detectado en el endpoint)
-  → REDUCE el ingreso del período de B
-
-Ingreso neto período = total(B) - total(C)
-
-Advertencia activa: existe B sin C correspondiente en el período
-→ tipo: "sin_egreso_anticipo" en la respuesta del endpoint
-```
-
-**Columnas clave en tabla `cfdi`:**
-- `cfdi_relacionados JSONB` — array de `{tipo_relacion, uuids[]}`, extraído del XML
-- `es_anticipo_sat BOOLEAN` — calculado en `cfdi_parser.py` al momento de la carga
-
-## Convenciones importantes
-
-- **Precisión financiera**: Usar siempre `Decimal` (no `float`) para montos
-- **RFC mexicano**: `AAAA######XXX` — regex de validación en `cfdi_parser.py` y `main_api.py`; reutilizar siempre
-- **CFDI**: Versión 3.3 o 4.0; namespaces XML distintos — ver `CFDIParser._detect_namespace()`
-- **Severidades**: Los 4 niveles tienen pesos fijos en `MotorScoring`; cambiarlos afecta scores históricos
-- **bcrypt**: Usar siempre `import bcrypt as _bcrypt` directamente, nunca a través de passlib
-- **Tailwind**: Clases utilitarias en JSX; nunca `style={{}}` salvo para valores dinámicos (colores de severidad, SVG)
+**Agent tool** handles execution (agents, files, code, git). **MCP tools** handle coordination (swarm, memory, hooks). **CLI** is the same via Bash.

@@ -28,7 +28,8 @@ async def registrar(data: RegisterRequest):
         returning=True,
     )
 
-    token = crear_token({"user_id": str(usuario["id"]), "email": data.email})
+    rol = usuario.get("rol", "contador")
+    token = crear_token({"user_id": str(usuario["id"]), "email": data.email, "rol": rol})
 
     return {
         "access_token": token,
@@ -36,6 +37,7 @@ async def registrar(data: RegisterRequest):
         "user_id":      str(usuario["id"]),
         "email":        data.email,
         "nombre":       data.nombre,
+        "rol":          rol,
         "empresas":     [],
     }
 
@@ -61,13 +63,15 @@ async def login(data: LoginRequest):
         (str(usuario["id"]),),
     )
 
-    token = crear_token({"user_id": str(usuario["id"]), "email": data.email})
+    rol = usuario.get("rol", "contador")
+    token = crear_token({"user_id": str(usuario["id"]), "email": data.email, "rol": rol})
 
     return {
         "access_token": token,
         "token_type":   "bearer",
         "user_id":      str(usuario["id"]),
         "nombre":       usuario.get("nombre"),
+        "rol":          rol,
         "empresas":     [serializar(e) for e in empresas],
     }
 
@@ -77,7 +81,7 @@ async def me(current_user: dict = Depends(get_current_user)):
     """Retorna info del usuario autenticado y sus empresas."""
     usuario = db.query_one(
         """
-        SELECT id, email, nombre, telefono, rfc, nombre_despacho, cedula_profesional
+        SELECT id, email, nombre, telefono, rfc, nombre_despacho, cedula_profesional, rol
         FROM usuarios WHERE id = %s
         """,
         (current_user["user_id"],),

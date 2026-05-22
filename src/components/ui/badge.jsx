@@ -1,28 +1,43 @@
-import * as React from "react";
 import { cva } from "class-variance-authority";
-import { cn } from "../../lib/utils";
+import { cn } from "../../lib/utils.js";
 
 const badgeVariants = cva(
-  "inline-flex items-center rounded-sm px-2 py-0.5 text-[10px] font-bold font-mono tracking-widest uppercase transition-colors",
+  "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium border whitespace-nowrap",
   {
     variants: {
       variant: {
-        default:     "bg-primary/15 text-primary border border-primary/30",
-        secondary:   "bg-secondary text-secondary-foreground border border-border",
-        destructive: "bg-risk-critical/15 text-risk-critical border border-risk-critical/30",
-        outline:     "border border-border text-foreground",
-        critical:    "bg-risk-critical/15 text-risk-critical border border-risk-critical/30",
-        high:        "bg-risk-high/15 text-risk-high border border-risk-high/30",
-        medium:      "bg-risk-medium/15 text-risk-medium border border-risk-medium/30",
-        low:         "bg-risk-low/15 text-risk-low border border-risk-low/30",
+        default:     "bg-muted text-muted-foreground border-border",
+        success:     "bg-[var(--accent-bg)] text-primary border-[var(--accent-border)]",
+        danger:      "bg-[var(--danger-bg)] text-destructive border-[var(--danger-border)]",
+        warn:        "bg-[var(--warn-bg)] text-[var(--warn)] border-transparent",
+        info:        "bg-[var(--info-bg)] text-[var(--info)] border-transparent",
+        outline:     "border-border bg-transparent text-foreground",
+        dot:         "bg-muted text-muted-foreground border-border",
+        secondary:   "bg-secondary text-secondary-foreground border-border",
+        destructive: "bg-destructive/20 text-destructive border border-destructive/30",
+        critical:    "bg-[var(--danger-bg)] text-destructive border-[var(--danger-border)]",
+        high:        "bg-[var(--warn-bg)] text-[var(--warn)] border-transparent",
+        medium:      "bg-[var(--info-bg)] text-[var(--info)] border-transparent",
+        low:         "bg-muted text-muted-foreground border-border",
       },
     },
     defaultVariants: { variant: "default" },
   }
 );
 
-function Badge({ className, variant, ...props }) {
-  return <span className={cn(badgeVariants({ variant }), className)} {...props} />;
+export function Badge({ className, variant, dot, children, ...props }) {
+  return (
+    <span
+      className={cn(
+        badgeVariants({ variant }),
+        dot && "before:content-[''] before:w-1.5 before:h-1.5 before:rounded-full before:bg-current",
+        className
+      )}
+      {...props}
+    >
+      {children}
+    </span>
+  );
 }
 
-export { Badge, badgeVariants };
+export { badgeVariants };
