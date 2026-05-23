@@ -85,7 +85,7 @@ export default function LoginPage() {
           <div className="flex flex-col gap-1.5">
             <div className="flex items-center justify-between">
               <label className="text-[11px] text-muted-foreground font-medium uppercase tracking-wider">Contraseña</label>
-              <a className="text-[11px] text-primary hover:underline cursor-pointer">¿Olvidaste tu contraseña?</a>
+              <a href="mailto:soporte@fiscalcore.mx?subject=Recuperación de contraseña" className="text-[11px] text-primary hover:underline cursor-pointer">¿Olvidaste tu contraseña?</a>
             </div>
             <Input type="password" value={password} onChange={e => setPassword(e.target.value)} autoComplete="current-password" />
           </div>
@@ -99,10 +99,6 @@ export default function LoginPage() {
           <Button type="submit" variant="primary" size="lg" disabled={loading} style={{ width: "100%", justifyContent: "center" }}>
             {loading ? "Verificando…" : "Entrar"}
           </Button>
-
-          <div style={{ textAlign: "center", fontSize: 13, color: "var(--muted-foreground)" }}>
-            ¿Sin cuenta? <a className="text-primary hover:underline cursor-pointer">Solicita acceso</a>
-          </div>
         </form>
       </div>
     </div>

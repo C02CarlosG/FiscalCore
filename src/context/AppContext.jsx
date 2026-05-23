@@ -4,6 +4,14 @@ const AppContext = createContext(null);
 
 const MONTH_NAMES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
 
+export const VALID_VIEWS = [
+  "dash", "descarga", "xml", "bancos", "concil", "riesgos", "reportes", "empresas", "perfil",
+];
+
+export function resolveActiveView(stored) {
+  return VALID_VIEWS.includes(stored) ? stored : "dash";
+}
+
 export function periodLabel(month) {
   const [y, m] = month.split("-");
   return `${MONTH_NAMES[parseInt(m, 10) - 1]} ${y}`;
@@ -36,7 +44,7 @@ export function AppProvider({ children }) {
     catch { return suggestedPeriod(); }
   });
   const [active, setActive] = useState(
-    () => localStorage.getItem("fc_active") || "dash"
+    () => resolveActiveView(localStorage.getItem("fc_active"))
   );
 
   const enterWorkspace = useCallback((co, per) => {

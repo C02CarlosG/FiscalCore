@@ -53,7 +53,7 @@ export const api = {
   constancia: {
     parsear: (file) => {
       const form = new FormData();
-      form.append("file", file);
+      form.append("archivo", file);
       return req("POST", "/api/v1/constancia/parsear", form, { form: true });
     },
   },
