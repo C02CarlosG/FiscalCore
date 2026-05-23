@@ -42,7 +42,10 @@ function initials(razon = "", rfc = "") {
 }
 
 function emptyForm() {
-  return { rfc: "", razon_social: "", regimen_fiscal: "", cp_fiscal: "" };
+  return {
+    rfc: "", razon_social: "", regimen_fiscal: "", cp_fiscal: "",
+    fecha_inicio_periodo: "", fecha_cierre_periodo: "",
+  };
 }
 
 export default function CompaniesPage() {
@@ -124,13 +127,20 @@ export default function CompaniesPage() {
     setAddOk("");
     if (!form.rfc.trim()) { setAddError("El RFC es requerido."); return; }
     if (!form.razon_social.trim()) { setAddError("La razón social es requerida."); return; }
+    if (form.fecha_inicio_periodo && form.fecha_cierre_periodo &&
+        form.fecha_cierre_periodo < form.fecha_inicio_periodo) {
+      setAddError("La fecha de cierre no puede ser anterior a la de inicio.");
+      return;
+    }
     setSaving(true);
     try {
       const nueva = await api.empresas.add({
-        rfc:            form.rfc.toUpperCase().trim(),
-        razon_social:   form.razon_social.trim(),
-        regimen_fiscal: form.regimen_fiscal,
-        cp_fiscal:      form.cp_fiscal.trim(),
+        rfc:                  form.rfc.toUpperCase().trim(),
+        razon_social:         form.razon_social.trim(),
+        regimen_fiscal:       form.regimen_fiscal,
+        cp_fiscal:            form.cp_fiscal.trim(),
+        fecha_inicio_periodo: form.fecha_inicio_periodo || null,
+        fecha_cierre_periodo: form.fecha_cierre_periodo || null,
       });
       const lista = await api.empresas.list();
       setCompanies(lista);
@@ -394,6 +404,26 @@ export default function CompaniesPage() {
                     <option key={r.value} value={r.value}>{r.label}</option>
                   ))}
                 </select>
+              </div>
+              <div style={{ ...labelStyle, gridColumn: "1 / -1", marginBottom: 0, marginTop: 2 }}>
+                Periodo de trabajo
+              </div>
+              <div style={fieldGroup}>
+                <label style={labelStyle}>Fecha de inicio</label>
+                <Input
+                  type="date"
+                  value={form.fecha_inicio_periodo}
+                  onChange={e => handleFormChange("fecha_inicio_periodo", e.target.value)}
+                />
+              </div>
+              <div style={fieldGroup}>
+                <label style={labelStyle}>Fecha de cierre</label>
+                <Input
+                  type="date"
+                  value={form.fecha_cierre_periodo}
+                  min={form.fecha_inicio_periodo || undefined}
+                  onChange={e => handleFormChange("fecha_cierre_periodo", e.target.value)}
+                />
               </div>
             </div>
 

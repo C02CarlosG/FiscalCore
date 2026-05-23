@@ -168,6 +168,9 @@ def init_db() -> None:
         # 020 es idempotente — columna rol en usuarios (admin | contador)
         _run_sql_file("020_admin_rol.sql")
 
+        # 021 es idempotente — columnas fecha_inicio_periodo / fecha_cierre_periodo en empresas
+        _run_sql_file("021_empresa_periodo.sql")
+
     except Exception as e:
         log.error("DB: init_db falló: %s", e)
         raise

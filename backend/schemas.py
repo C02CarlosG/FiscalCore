@@ -1,5 +1,6 @@
 # backend/schemas.py
 from __future__ import annotations
+from datetime import date
 from typing import Optional
 from pydantic import BaseModel, field_validator
 
@@ -38,6 +39,8 @@ class AgregarEmpresaRequest(BaseModel):
     obligaciones: Optional[list] = None
     representante_legal: Optional[str] = None
     rfc_representante: Optional[str] = None
+    fecha_inicio_periodo: Optional[date] = None
+    fecha_cierre_periodo: Optional[date] = None
 
     @field_validator("rfc")
     @classmethod
@@ -48,6 +51,11 @@ class AgregarEmpresaRequest(BaseModel):
     @classmethod
     def rfc_rep_upper(cls, v):
         return v.strip().upper() if v else v
+
+    @field_validator("fecha_inicio_periodo", "fecha_cierre_periodo", mode="before")
+    @classmethod
+    def vacio_a_none(cls, v):
+        return None if v in ("", None) else v
 
 
 class LoginRequest(BaseModel):
