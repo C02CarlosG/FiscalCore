@@ -3,6 +3,7 @@ import { api } from "../lib/api.js";
 import { useApp } from "../context/AppContext.jsx";
 import { Button } from "../components/ui/button.jsx";
 import { Badge } from "../components/ui/badge.jsx";
+import Icon from "../icons.jsx";
 
 const ESTADO_BADGE  = { pendiente: "default", solicitado: "info", en_proceso: "info", terminado: "warn", fallo: "danger", descargado: "success" };
 const ESTADO_LABEL  = { pendiente: "Pendiente", solicitado: "Solicitado", en_proceso: "En proceso", terminado: "Terminado", fallo: "Error", descargado: "Descargado" };
@@ -40,6 +41,7 @@ export default function DownloadPage() {
   const [cerFile, setCerFile]   = useState(null);
   const [keyFile, setKeyFile]   = useState(null);
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [saving, setSaving]     = useState(false);
   const [saveErr, setSaveErr]   = useState(null);
   const [saveOk, setSaveOk]     = useState(false);
@@ -157,7 +159,30 @@ export default function DownloadPage() {
               </div>
               <div>
                 <div style={labelStyle}>Contraseña de la clave privada</div>
-                <input type="text" value={password} required style={{ ...inputStyle, maxWidth: 320 }} onChange={e => setPassword(e.target.value)} />
+                <div style={{ position: "relative", maxWidth: 320 }}>
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    value={password}
+                    required
+                    autoComplete="off"
+                    style={{ ...inputStyle, paddingRight: 38 }}
+                    onChange={e => setPassword(e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(v => !v)}
+                    title={showPassword ? "Ocultar contraseña" : "Mostrar contraseña"}
+                    aria-label={showPassword ? "Ocultar contraseña" : "Mostrar contraseña"}
+                    style={{
+                      position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)",
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      background: "none", border: "none", padding: 4, cursor: "pointer",
+                      color: "var(--muted-foreground)",
+                    }}
+                  >
+                    <Icon name={showPassword ? "eyeOff" : "eye"} size={16} />
+                  </button>
+                </div>
               </div>
               <Err msg={saveErr} />
               <Ok msg={saveOk ? "e.firma guardada correctamente." : null} />
