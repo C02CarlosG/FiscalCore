@@ -19,7 +19,7 @@ log = logging.getLogger(__name__)
 # ─── DATABASE_URL ─────────────────────────────────────────────
 # Railway inyecta DATABASE_URL automáticamente al vincular PostgreSQL.
 # El default solo aplica para desarrollo local con Docker Compose.
-_LOCAL_DEFAULT = "postgresql://postgres:postgres@127.0.0.1:5433/fiscalcore"
+_LOCAL_DEFAULT = "postgresql://postgres:postgres@127.0.0.1:5432/fiscalcore"
 DATABASE_URL = os.getenv("DATABASE_URL", _LOCAL_DEFAULT)
 
 # ─── Seed admin inicial ───────────────────────────────────────
