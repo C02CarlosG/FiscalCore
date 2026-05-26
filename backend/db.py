@@ -22,6 +22,13 @@ log = logging.getLogger(__name__)
 _LOCAL_DEFAULT = "postgresql://postgres:postgres@127.0.0.1:5433/fiscalcore"
 DATABASE_URL = os.getenv("DATABASE_URL", _LOCAL_DEFAULT)
 
+# ─── Seed admin inicial ───────────────────────────────────────
+# Credenciales del admin que se siembra cuando la base no tiene usuarios.
+# Configurables por entorno; el default solo es apto para desarrollo.
+_SEED_ADMIN_EMAIL = os.getenv("SEED_ADMIN_EMAIL", "admin@fiscalcore.mx")
+_SEED_ADMIN_DEFAULT_PASSWORD = "Admin2024!"
+_SEED_ADMIN_PASSWORD = os.getenv("SEED_ADMIN_PASSWORD", _SEED_ADMIN_DEFAULT_PASSWORD)
+
 if DATABASE_URL == _LOCAL_DEFAULT and os.getenv("RAILWAY_ENVIRONMENT"):
     log.warning("DB: usando credenciales locales en Railway — configura DATABASE_URL")
 
@@ -171,6 +178,44 @@ def init_db() -> None:
         # 021 es idempotente — columnas fecha_inicio_periodo / fecha_cierre_periodo en empresas
         _run_sql_file("021_empresa_periodo.sql")
 
+        # Seed inicial: usuario admin si la base aún no tiene usuarios
+        _seed_admin()
+
     except Exception as e:
         log.error("DB: init_db falló: %s", e)
         raise
+
+
+def _seed_admin() -> None:
+    """
+    Siembra un usuario admin inicial SOLO si la tabla 'usuarios' está vacía.
+
+    Idempotente y seguro: si ya existe cualquier usuario no hace nada, por lo
+    que nunca pisa datos existentes (p. ej. en producción). Las credenciales
+    se controlan con SEED_ADMIN_EMAIL / SEED_ADMIN_PASSWORD.
+    """
+    try:
+        import bcrypt
+    except ImportError:
+        log.warning("DB: bcrypt no instalado — se omite el seed del admin")
+        return
+
+    row = query_one("SELECT COUNT(*) AS n FROM usuarios")
+    if row and row.get("n", 0) > 0:
+        return  # ya hay usuarios → no sembrar
+
+    password_hash = bcrypt.hashpw(_SEED_ADMIN_PASSWORD.encode(), bcrypt.gensalt()).decode()
+    execute(
+        "INSERT INTO usuarios (email, password_hash, nombre, rol) "
+        "VALUES (%s, %s, %s, 'admin')",
+        (_SEED_ADMIN_EMAIL, password_hash, "Administrador"),
+    )
+
+    if _SEED_ADMIN_PASSWORD == _SEED_ADMIN_DEFAULT_PASSWORD:
+        log.warning(
+            "DB: admin '%s' sembrado con contraseña por defecto — "
+            "cámbiala (SEED_ADMIN_PASSWORD o desde la app) antes de producción",
+            _SEED_ADMIN_EMAIL,
+        )
+    else:
+        log.info("DB: usuario admin '%s' sembrado", _SEED_ADMIN_EMAIL)
