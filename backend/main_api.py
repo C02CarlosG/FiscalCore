@@ -20,7 +20,7 @@ from fastapi.responses import FileResponse
 
 from . import db
 from .deps import JWT_SECRET, _JWT_INSECURE_DEFAULT
-from .routers import auth, empresas, ingesta, riesgos, scoring, conciliacion, emitidos, dashboard, sat, reportes, admin
+from .routers import auth, empresas, ingesta, riesgos, scoring, conciliacion, emitidos, dashboard, sat
 
 logging.basicConfig(
     level=logging.INFO,
@@ -57,8 +57,6 @@ app.include_router(conciliacion.router)
 app.include_router(emitidos.router)
 app.include_router(dashboard.router)
 app.include_router(sat.router)
-app.include_router(reportes.router)
-app.include_router(admin.router)
 
 
 @app.on_event("startup")
@@ -67,12 +65,8 @@ async def _startup() -> None:
         _log.warning("JWT_SECRET no configurado — usando clave de desarrollo (inseguro en producción)")
     _log.info("CORS permitido para: %s", _ALLOWED_ORIGINS)
     _log.info("Inicializando schema de base de datos...")
-    try:
-        db.init_db()
-        _log.info("FiscalCore API lista")
-    except Exception as e:
-        _log.warning("DB no disponible al startup — el servidor arranca sin base de datos: %s", e)
-        _log.warning("Inicia PostgreSQL (docker compose up -d db) para habilitar endpoints de datos")
+    db.init_db()
+    _log.info("FiscalCore API lista")
 
 
 @app.get("/api/health", tags=["Sistema"])

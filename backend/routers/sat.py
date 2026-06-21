@@ -2,10 +2,8 @@
 """
 Router SAT FIEL — Descarga Masiva de CFDIs.
 
-Expone endpoints para gestionar el ciclo completo de solicitud, verificación
+Expone 4 endpoints para gestionar el ciclo completo de solicitud, verificación
 y descarga de CFDIs directamente del SAT usando la e.firma (FIEL) del contribuyente.
-
-Las funciones de background se encuentran en sat_tasks.py.
 """
 from __future__ import annotations
 
@@ -17,8 +15,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPExcepti
 
 from .. import db
 from ..deps import get_current_user, validar_acceso_empresa, serializar
-from ..sat_fiel import FIELError, cargar_fiel, solicitar_descarga, verificar_solicitud
-from .sat_tasks import importar_paquetes_bg, sync_completo_bg
+from ..sat_fiel import FIELError, cargar_fiel, descargar_paquete, solicitar_descarga, verificar_solicitud
 
 _log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/sat", tags=["SAT FIEL"])
@@ -64,6 +61,7 @@ async def solicitar_descarga_cfdi(
     except FIELError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
+    # Crear registro de solicitud en estado 'pendiente'
     registro = db.execute(
         """INSERT INTO sat_solicitudes
            (empresa_id, usuario_id, tipo, periodo_inicio, periodo_fin, estado)
@@ -72,7 +70,7 @@ async def solicitar_descarga_cfdi(
             empresa_id,
             current_user["user_id"],
             tipo,
-            fecha_inicio[:7],
+            fecha_inicio[:7],  # YYYY-MM
             fecha_fin[:7],
         ),
         returning=True,
@@ -151,6 +149,7 @@ async def verificar_solicitud_endpoint(
         raise HTTPException(status_code=502, detail=str(e))
 
     # satcfdi puede devolver EstadoSolicitud como enum Python o como string.
+    # Normalizamos a minúsculas para hacer el match robusto.
     estado_raw = resultado.get("estado")
     estado_str = (
         str(estado_raw.value).lower().strip()
@@ -226,7 +225,7 @@ async def descargar_cfdi_endpoint(
         raise HTTPException(status_code=400, detail="id_paquetes debe ser un JSON array, ej: '[\"pkg1\",\"pkg2\"]'")
 
     background_tasks.add_task(
-        importar_paquetes_bg,
+        _importar_paquetes_bg,
         creds=creds,
         solicitud_id=solicitud_id,
         empresa_id=str(solicitud["empresa_id"]),
@@ -239,6 +238,124 @@ async def descargar_cfdi_endpoint(
         "paquetes": len(paquetes),
         "solicitud_id": solicitud_id,
     }
+
+
+# ---------------------------------------------------------------------------
+# Background task: descarga paquetes + importa XMLs
+# ---------------------------------------------------------------------------
+
+def _importar_paquetes_bg(
+    creds,
+    solicitud_id: str,
+    empresa_id: str,
+    periodo: str,
+    paquetes: list[str],
+) -> None:
+    """Descarga paquetes ZIP del SAT, parsea XMLs e importa a la DB.
+
+    Se ejecuta en background — no bloquea la respuesta HTTP.
+    Al finalizar, corre el pipeline de conciliación/riesgos/scoring.
+    """
+    from ..cfdi_parser import CFDIParser
+
+    parser = CFDIParser()
+    total_importados = 0
+
+    for id_paq in paquetes:
+        try:
+            xmls = descargar_paquete(creds, id_paq)
+            for xml_bytes in xmls:
+                try:
+                    resultado = parser.parse_xml(xml_bytes)
+                    # Solo importar si no hay errores bloqueantes
+                    errores_bloqueantes = [e for e in resultado.errores if not e.startswith("AVISO:")]
+                    if errores_bloqueantes:
+                        _log.warning(
+                            "CFDI %s ignorado — errores: %s",
+                            resultado.uuid, errores_bloqueantes,
+                        )
+                        continue
+                    _insertar_cfdi(empresa_id, resultado, periodo, xml_bytes)
+                    total_importados += 1
+                except Exception as e:
+                    _log.warning("Error parseando XML del paquete %s: %s", id_paq, e)
+
+            db.execute(
+                "UPDATE sat_solicitudes SET paquetes_descargados = paquetes_descargados + 1, updated_at=NOW() WHERE id=%s",
+                (solicitud_id,),
+            )
+        except FIELError as e:
+            _log.error("Error descargando paquete %s: %s", id_paq, e)
+
+    estado_final = "descargado" if total_importados > 0 else "fallo"
+    error_final = None if total_importados > 0 else "Ningún CFDI pudo importarse correctamente"
+    db.execute(
+        "UPDATE sat_solicitudes SET cfdi_importados=%s, estado=%s, error_msg=%s, updated_at=NOW() WHERE id=%s",
+        (total_importados, estado_final, error_final, solicitud_id),
+    )
+
+    # Correr pipeline conciliación/riesgos/scoring si se importaron CFDIs
+    if total_importados > 0:
+        empresa = db.query_one("SELECT rfc FROM empresas WHERE id=%s", (empresa_id,))
+        if empresa:
+            try:
+                from ..routers.ingesta import _correr_pipeline
+                _correr_pipeline(empresa_id, periodo, empresa["rfc"])
+            except Exception as e:
+                _log.error("Error en pipeline post-descarga FIEL: %s", e)
+
+    _log.info("Solicitud %s: %d CFDIs importados de %d paquetes", solicitud_id, total_importados, len(paquetes))
+
+
+def _insertar_cfdi(empresa_id: str, resultado, periodo: str, xml_raw_bytes: bytes) -> None:
+    """Inserta un CFDIParsed en la DB. ON CONFLICT (uuid) DO NOTHING para idempotencia."""
+    import json
+
+    xml_raw_str = xml_raw_bytes.decode("utf-8", errors="replace")
+
+    db.execute(
+        """
+        INSERT INTO cfdi (
+            empresa_id, uuid, tipo_comprobante, serie, folio, version,
+            rfc_emisor, nombre_emisor, rfc_receptor, nombre_receptor,
+            fecha_emision, fecha_timbrado,
+            subtotal, descuento, iva_trasladado, iva_retenido, isr_retenido, total,
+            metodo_pago, forma_pago, uso_cfdi, moneda, tipo_cambio, xml_raw,
+            exportacion, lugar_expedicion,
+            domicilio_fiscal_receptor, regimen_fiscal_receptor,
+            cfdi_relacionados, es_anticipo_sat
+        ) VALUES (
+            %s,%s,%s,%s,%s,%s,
+            %s,%s,%s,%s,
+            %s,%s,
+            %s,%s,%s,%s,%s,%s,
+            %s,%s,%s,%s,%s,%s,
+            %s,%s,%s,%s,
+            %s,%s
+        )
+        ON CONFLICT (uuid) DO NOTHING
+        """,
+        (
+            empresa_id, resultado.uuid, resultado.tipo_comprobante,
+            resultado.serie, resultado.folio, resultado.version,
+            resultado.rfc_emisor, resultado.nombre_emisor,
+            resultado.rfc_receptor, resultado.nombre_receptor,
+            resultado.fecha_emision, resultado.fecha_timbrado,
+            str(resultado.subtotal), str(resultado.descuento),
+            str(resultado.iva_trasladado), str(resultado.iva_retenido),
+            str(resultado.isr_retenido), str(resultado.total),
+            resultado.metodo_pago, resultado.forma_pago,
+            resultado.uso_cfdi, resultado.moneda,
+            str(resultado.tipo_cambio),
+            xml_raw_str,
+            resultado.exportacion,
+            resultado.lugar_expedicion,
+            resultado.domicilio_fiscal_receptor,
+            resultado.regimen_fiscal_receptor,
+            json.dumps(resultado.cfdi_relacionados),
+            resultado.es_anticipo_sat,
+        ),
+    )
 
 
 # ===========================================================================
@@ -305,8 +422,8 @@ async def eliminar_fiel_empresa(
 async def sync_completo_fiel(
     empresa_id: str,
     background_tasks: BackgroundTasks,
-    tipo: str = Form(...),     # "emitidos" | "recibidos" | "ambos"
-    periodo: str = Form(...),  # YYYY-MM
+    tipo: str = Form(...),          # "emitidos" | "recibidos" | "ambos"
+    periodo: str = Form(...),       # YYYY-MM
     current_user: dict = Depends(get_current_user),
 ):
     """
@@ -315,6 +432,8 @@ async def sync_completo_fiel(
     2. Verificar en loop hasta que esté lista (máx 30 min)
     3. Descargar paquetes e importar CFDIs
     4. Correr pipeline (conciliación + riesgos + scoring)
+
+    Requiere que la empresa tenga una FIEL guardada previamente.
     """
     validar_acceso_empresa(empresa_id, current_user)
 
@@ -329,16 +448,19 @@ async def sync_completo_fiel(
     if info.get("vencida"):
         raise HTTPException(status_code=422, detail="La FIEL guardada está vencida. Actualízala.")
 
+    # Determinar tipos a solicitar
     tipos = ["emitidos", "recibidos"] if tipo == "ambos" else [tipo]
     if not all(t in ("emitidos", "recibidos") for t in tipos):
         raise HTTPException(status_code=400, detail="tipo debe ser 'emitidos', 'recibidos' o 'ambos'")
 
+    # Calcular fechas del período
     import calendar
     año, mes = periodo.split("-")
     fecha_inicio = date(int(año), int(mes), 1)
     ultimo_dia = calendar.monthrange(int(año), int(mes))[1]
     fecha_fin = date(int(año), int(mes), ultimo_dia)
 
+    # Crear registros de solicitud
     solicitud_ids = []
     try:
         creds = obtener_signer(db, empresa_id)
@@ -369,8 +491,9 @@ async def sync_completo_fiel(
             )
             raise HTTPException(status_code=502, detail=f"Error SAT al solicitar {t}: {exc}")
 
+    # Lanzar background task que verifica y descarga automáticamente
     background_tasks.add_task(
-        sync_completo_bg,
+        _sync_completo_bg,
         empresa_id=empresa_id,
         periodo=periodo,
         solicitudes=solicitud_ids,
@@ -382,3 +505,94 @@ async def sync_completo_fiel(
         "periodo": periodo,
         "tipos": tipos,
     }
+
+
+def _sync_completo_bg(empresa_id: str, periodo: str, solicitudes: list[dict]) -> None:
+    """
+    Background task: verifica en loop y descarga automáticamente.
+    Reintenta cada 30 segundos por hasta 30 minutos.
+    """
+    import time
+    from ..fiel_store import obtener_signer
+
+    MAX_INTENTOS = 60       # 60 × 30s = 30 minutos
+    ESPERA_SEG   = 30
+
+    try:
+        creds = obtener_signer(db, empresa_id)
+    except Exception as exc:
+        _log.error("sync_completo_bg: no se pudo obtener FIEL: %s", exc)
+        for s in solicitudes:
+            db.execute(
+                "UPDATE sat_solicitudes SET estado='fallo', error_msg=%s, updated_at=NOW() WHERE id=%s",
+                (f"Error FIEL: {exc}", s["id"]),
+            )
+        return
+
+    empresa = db.query_one("SELECT rfc FROM empresas WHERE id = %s", (empresa_id,))
+    if not empresa:
+        return
+
+    pendientes = {s["id"]: s for s in solicitudes}
+
+    for intento in range(MAX_INTENTOS):
+        if not pendientes:
+            break
+
+        time.sleep(ESPERA_SEG)
+        _log.info("sync_completo_bg intento %d/%d, %d solicitudes pendientes", intento+1, MAX_INTENTOS, len(pendientes))
+
+        for sol_id in list(pendientes.keys()):
+            row = db.query_one("SELECT id_solicitud_sat, estado FROM sat_solicitudes WHERE id = %s", (sol_id,))
+            if not row or not row.get("id_solicitud_sat"):
+                continue
+
+            try:
+                resultado = verificar_solicitud(creds, row["id_solicitud_sat"])
+            except FIELError as exc:
+                _log.warning("Error verificando %s: %s", sol_id, exc)
+                continue
+
+            estado_raw = resultado.get("estado")
+            estado_str = (
+                str(estado_raw.value).lower().strip()
+                if hasattr(estado_raw, "value")
+                else str(estado_raw or "").lower().strip()
+            )
+            id_paquetes = resultado.get("id_paquetes", [])
+            num_cfdi    = resultado.get("num_cfdi", 0)
+
+            if estado_str in ("terminada", "terminado"):
+                db.execute(
+                    "UPDATE sat_solicitudes SET estado='terminado', num_cfdi=%s, num_paquetes=%s, updated_at=NOW() WHERE id=%s",
+                    (num_cfdi, len(id_paquetes), sol_id),
+                )
+                if id_paquetes:
+                    _importar_paquetes_bg(
+                        creds=creds,
+                        solicitud_id=sol_id,
+                        empresa_id=empresa_id,
+                        periodo=periodo,
+                        paquetes=id_paquetes,
+                    )
+                del pendientes[sol_id]
+
+            elif estado_str in ("error", "rechazada", "fallo", "falla", "vencida"):
+                db.execute(
+                    "UPDATE sat_solicitudes SET estado='fallo', error_msg=%s, updated_at=NOW() WHERE id=%s",
+                    (f"SAT reportó estado: {estado_str}", sol_id),
+                )
+                del pendientes[sol_id]
+            else:
+                # En proceso — actualizar contadores y seguir esperando
+                db.execute(
+                    "UPDATE sat_solicitudes SET estado='en_proceso', num_cfdi=%s, updated_at=NOW() WHERE id=%s",
+                    (num_cfdi, sol_id),
+                )
+
+    # Marcar como fallo las que no terminaron a tiempo
+    for sol_id in pendientes:
+        db.execute(
+            "UPDATE sat_solicitudes SET estado='fallo', error_msg='Timeout: el SAT tardó más de 30 minutos', updated_at=NOW() WHERE id=%s",
+            (sol_id,),
+        )

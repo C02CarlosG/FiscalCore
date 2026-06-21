@@ -44,7 +44,9 @@
       "Bash(git add *)",
       "Bash(git rebase *)",
       "Bash(git stash *)",
-      "Bash(git reset *)"
+      "Bash(git reset *)",
+      "Bash(git checkout *)",
+      "Bash(git rm *)"
     ]
   }
 }

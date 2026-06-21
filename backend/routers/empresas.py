@@ -49,21 +49,16 @@ async def parsear_constancia_pdf(archivo: UploadFile = File(...)):
 
 @router.get("/api/v1/empresas")
 async def listar_empresas(current_user: dict = Depends(get_current_user)):
-    """Retorna empresas del contador. Admin ve todas."""
-    if current_user.get("rol") == "admin":
-        rows = db.query_all(
-            "SELECT * FROM empresas WHERE activo = TRUE ORDER BY created_at ASC"
-        )
-    else:
-        rows = db.query_all(
-            """
-            SELECT e.* FROM empresas e
-            JOIN usuario_empresas ue ON ue.empresa_id = e.id
-            WHERE ue.usuario_id = %s AND e.activo = TRUE
-            ORDER BY ue.created_at ASC
-            """,
-            (current_user["user_id"],),
-        )
+    """Retorna las empresas que administra el contador autenticado."""
+    rows = db.query_all(
+        """
+        SELECT e.* FROM empresas e
+        JOIN usuario_empresas ue ON ue.empresa_id = e.id
+        WHERE ue.usuario_id = %s AND e.activo = TRUE
+        ORDER BY ue.created_at ASC
+        """,
+        (current_user["user_id"],),
+    )
     return [serializar(r) for r in rows]
 
 
@@ -82,10 +77,9 @@ async def agregar_empresa(
                 """
                 INSERT INTO empresas (
                     rfc, razon_social, regimen_fiscal, cp_fiscal, curp, obligaciones,
-                    representante_legal, rfc_representante,
-                    fecha_inicio_periodo, fecha_cierre_periodo
+                    representante_legal, rfc_representante
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING *
                 """,
                 (
@@ -94,8 +88,6 @@ async def agregar_empresa(
                     json.dumps(data.obligaciones) if data.obligaciones else None,
                     data.representante_legal,
                     data.rfc_representante,
-                    data.fecha_inicio_periodo,
-                    data.fecha_cierre_periodo,
                 ),
                 returning=True,
             )

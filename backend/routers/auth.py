@@ -28,8 +28,7 @@ async def registrar(data: RegisterRequest):
         returning=True,
     )
 
-    rol = usuario.get("rol", "contador")
-    token = crear_token({"user_id": str(usuario["id"]), "email": data.email, "rol": rol})
+    token = crear_token({"user_id": str(usuario["id"]), "email": data.email})
 
     return {
         "access_token": token,
@@ -37,7 +36,6 @@ async def registrar(data: RegisterRequest):
         "user_id":      str(usuario["id"]),
         "email":        data.email,
         "nombre":       data.nombre,
-        "rol":          rol,
         "empresas":     [],
     }
 
@@ -45,35 +43,40 @@ async def registrar(data: RegisterRequest):
 @router.post("/api/v1/auth/login")
 async def login(data: LoginRequest):
     """Autentica un contador y retorna JWT + lista de empresas que administra."""
-    usuario = db.query_one(
-        "SELECT * FROM usuarios WHERE email = %s AND activo = TRUE",
-        (data.email,),
-    )
-    if not usuario or not verify_password(data.password, usuario["password_hash"]):
-        raise HTTPException(status_code=401, detail="Credenciales incorrectas")
+    try:
+        _log.info(f"Login attempt for {data.email}")
+        usuario = db.query_one(
+            "SELECT * FROM usuarios WHERE email = %s AND activo = TRUE",
+            (data.email,),
+        )
+        if not usuario or not verify_password(data.password, usuario["password_hash"]):
+            raise HTTPException(status_code=401, detail="Credenciales incorrectas")
 
-    empresas = db.query_all(
-        """
-        SELECT e.id AS empresa_id, e.rfc, e.razon_social, e.regimen_fiscal
-        FROM empresas e
-        JOIN usuario_empresas ue ON ue.empresa_id = e.id
-        WHERE ue.usuario_id = %s AND e.activo = TRUE
-        ORDER BY ue.created_at ASC
-        """,
-        (str(usuario["id"]),),
-    )
+        empresas = db.query_all(
+            """
+            SELECT e.id AS empresa_id, e.rfc, e.razon_social, e.regimen_fiscal
+            FROM empresas e
+            JOIN usuario_empresas ue ON ue.empresa_id = e.id
+            WHERE ue.usuario_id = %s AND e.activo = TRUE
+            ORDER BY ue.created_at ASC
+            """,
+            (str(usuario["id"]),),
+        )
 
-    rol = usuario.get("rol", "contador")
-    token = crear_token({"user_id": str(usuario["id"]), "email": data.email, "rol": rol})
+        token = crear_token({"user_id": str(usuario["id"]), "email": data.email})
 
-    return {
-        "access_token": token,
-        "token_type":   "bearer",
-        "user_id":      str(usuario["id"]),
-        "nombre":       usuario.get("nombre"),
-        "rol":          rol,
-        "empresas":     [serializar(e) for e in empresas],
-    }
+        return {
+            "access_token": token,
+            "token_type":   "bearer",
+            "user_id":      str(usuario["id"]),
+            "nombre":       usuario.get("nombre"),
+            "empresas":     [serializar(e) for e in empresas],
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        _log.error(f"Login error: {type(e).__name__}: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
 
 @router.get("/api/v1/auth/me")
@@ -81,7 +84,7 @@ async def me(current_user: dict = Depends(get_current_user)):
     """Retorna info del usuario autenticado y sus empresas."""
     usuario = db.query_one(
         """
-        SELECT id, email, nombre, telefono, rfc, nombre_despacho, cedula_profesional, rol
+        SELECT id, email, nombre, telefono, rfc, nombre_despacho, cedula_profesional
         FROM usuarios WHERE id = %s
         """,
         (current_user["user_id"],),

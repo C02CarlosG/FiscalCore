@@ -3,18 +3,11 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
 from .. import db
 from ..deps import get_current_user, validar_acceso_empresa, empresa_or_404, serializar
 from ..schemas import AccionRequest
-from ..risk_patterns_service import (
-    busqueda_hibrida,
-    aplicar_mmr,
-    sintetizar_contexto,
-    guardar_patron,
-    registrar_uso,
-)
 
 _log = logging.getLogger(__name__)
 
@@ -114,101 +107,3 @@ async def ejecutar_accion(deteccion_id: str, body: AccionRequest):
         "estado_anterior": det["estado"],
         "estado_nuevo": nuevo_estado,
     }
-
-
-# ---------------------------------------------------------------------------
-# Patrones de riesgo — búsqueda híbrida + síntesis de contexto
-# ---------------------------------------------------------------------------
-
-@router.get("/api/v1/riesgos/patrones/buscar")
-async def buscar_patrones_similares(
-    q: str,
-    tipo_riesgo: Optional[str] = None,
-    severidad: Optional[str] = None,
-    categoria: Optional[str] = None,
-    empresa_id: Optional[str] = None,
-    mmr: bool = True,
-    lambda_mmr: float = 0.5,
-    k: int = 10,
-    current_user: dict = Depends(get_current_user),
-):
-    """
-    Búsqueda híbrida de patrones de riesgo similares.
-
-    Combina similitud textual (pg_trgm) con filtros de metadata.
-    Opcionalmente aplica MMR para maximizar diversidad de resultados.
-    """
-    if empresa_id:
-        validar_acceso_empresa(empresa_id, current_user)
-
-    patrones = busqueda_hibrida(
-        q,
-        tipo_riesgo=tipo_riesgo,
-        severidad=severidad,
-        categoria=categoria,
-        empresa_id=empresa_id,
-        k=k * 2 if mmr else k,
-    )
-
-    if mmr and patrones:
-        patrones = aplicar_mmr(patrones, lambda_=lambda_mmr, k=k)
-
-    contexto = sintetizar_contexto(patrones)
-
-    for p in patrones:
-        registrar_uso(p.id)
-
-    return {
-        "total": len(patrones),
-        "patrones": [
-            {
-                "id": p.id,
-                "tipo_riesgo": p.tipo_riesgo,
-                "severidad": p.severidad,
-                "categoria": p.categoria,
-                "descripcion": p.descripcion,
-                "resolucion": p.resolucion,
-                "confianza": p.confianza,
-                "uso_count": p.uso_count,
-                "similitud": round(p.similitud, 4),
-            }
-            for p in patrones
-        ],
-        "contexto": {
-            "total_patrones": contexto.total_patrones,
-            "tasa_exito": round(contexto.tasa_exito, 2),
-            "severidad_predominante": contexto.severidad_predominante,
-            "resoluciones_frecuentes": contexto.resoluciones_frecuentes,
-            "resumen": contexto.resumen,
-        },
-    }
-
-
-@router.post("/api/v1/riesgos/{riesgo_id}/guardar-patron")
-async def guardar_patron_endpoint(
-    riesgo_id: str,
-    resolucion: str = Body(..., embed=True),
-    fue_falso_positivo: bool = Body(False, embed=True),
-    confianza: float = Body(1.0, embed=True),
-    current_user: dict = Depends(get_current_user),
-):
-    """
-    Guarda una detección resuelta como patrón reutilizable.
-    Alimenta la base de conocimiento para búsquedas futuras.
-    """
-    det = db.query_one("SELECT empresa_id FROM detecciones WHERE id = %s", (riesgo_id,))
-    if not det:
-        raise HTTPException(status_code=404, detail="Detección no encontrada")
-    validar_acceso_empresa(str(det["empresa_id"]), current_user)
-
-    try:
-        patron_id = guardar_patron(
-            deteccion_id=riesgo_id,
-            resolucion=resolucion,
-            fue_falso_positivo=fue_falso_positivo,
-            confianza=max(0.0, min(1.0, confianza)),
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc))
-
-    return {"patron_id": patron_id, "mensaje": "Patrón guardado correctamente"}
