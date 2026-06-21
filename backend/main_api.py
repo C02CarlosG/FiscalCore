@@ -20,7 +20,7 @@ from fastapi.responses import FileResponse
 
 from . import db
 from .deps import JWT_SECRET, _JWT_INSECURE_DEFAULT
-from .routers import auth, empresas, ingesta, riesgos, scoring, conciliacion, emitidos, dashboard, sat
+from .routers import auth, empresas, ingesta, riesgos, scoring, conciliacion, emitidos, dashboard, sat, admin
 
 logging.basicConfig(
     level=logging.INFO,
@@ -57,6 +57,7 @@ app.include_router(conciliacion.router)
 app.include_router(emitidos.router)
 app.include_router(dashboard.router)
 app.include_router(sat.router)
+app.include_router(admin.router)
 
 
 @app.on_event("startup")

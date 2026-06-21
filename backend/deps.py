@@ -59,6 +59,14 @@ def get_current_user(creds: HTTPAuthorizationCredentials = Depends(_bearer)) -> 
     return verificar_token(creds.credentials)
 
 
+def require_admin(current_user: dict = Depends(get_current_user)) -> dict:
+    """Verifica que el usuario actual tenga rol 'admin'."""
+    usuario = db.query_one("SELECT rol FROM usuarios WHERE id = %s", (current_user["user_id"],))
+    if not usuario or usuario.get("rol") != "admin":
+        raise HTTPException(status_code=403, detail="Se requiere rol de administrador")
+    return current_user
+
+
 def hash_password(plain: str) -> str:
     if not BCRYPT_OK:
         raise HTTPException(status_code=500, detail="bcrypt no instalado")
