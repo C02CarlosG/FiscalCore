@@ -13,6 +13,7 @@ import ReconciliationPage from "./pages/ReconciliationPage.jsx";
 import ReportsPage from "./pages/ReportsPage.jsx";
 import ProfilePage from "./pages/ProfilePage.jsx";
 import RisksPage from "./pages/RisksPage.jsx";
+import AdminPage from "./pages/AdminPage.jsx";
 
 const NAV_MAIN = [
   { id: "dash",     label: "Resumen",           icon: "dash"     },
@@ -49,6 +50,7 @@ export default function Shell() {
     reportes: <ReportsPage />,
     empresas: <CompaniesPage />,
     perfil:   <ProfilePage />,
+    admin:    <AdminPage />,
   }[active] || <DashboardPage />;
 
   return (
@@ -110,6 +112,16 @@ function Sidebar({ active, navigate, company, companies, setCompany, user, logou
         {NAV_CONFIG.map(item => (
           <NavItem key={item.id} item={item} isActive={active === item.id} onClick={() => navigate(item.id)} />
         ))}
+        {user?.rol === "admin" && (
+          <>
+            <div style={{ height: 1, background: "var(--border-shadcn)", margin: "6px 8px" }} />
+            <NavItem
+              item={{ id: "admin", label: "Administración", icon: "lock" }}
+              isActive={active === "admin"}
+              onClick={() => navigate("admin")}
+            />
+          </>
+        )}
       </nav>
 
       <div style={{ padding: "10px 12px", borderTop: "1px solid var(--border-shadcn)" }}>

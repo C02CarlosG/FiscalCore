@@ -83,3 +83,22 @@ async def estadisticas(admin: dict = Depends(require_admin)):
         """
     )
     return serializar(totales) if totales else {}
+
+
+@router.get("/metricas")
+async def metricas_globales(admin: dict = Depends(require_admin)):
+    """Métricas globales del sistema. Solo para administradores."""
+    totales = db.query_one(
+        """
+        SELECT
+            (SELECT COUNT(*) FROM usuarios)                      AS total_usuarios,
+            (SELECT COUNT(*) FROM usuarios WHERE activo = TRUE)  AS usuarios_activos,
+            (SELECT COUNT(*) FROM empresas WHERE activo = TRUE)  AS total_empresas,
+            (SELECT COUNT(*) FROM cfdi)                          AS total_cfdi,
+            (SELECT COUNT(*) FROM detecciones)                  AS total_riesgos,
+            (SELECT COUNT(*) FROM detecciones d
+                JOIN riesgos r ON r.id = d.riesgo_id
+                WHERE r.severidad = 'critico')                  AS riesgos_criticos
+        """
+    )
+    return serializar(totales) if totales else {}

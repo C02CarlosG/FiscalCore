@@ -43,6 +43,10 @@ export const api = {
     update: (data) => patch("/api/v1/usuarios/perfil", data),
   },
 
+  admin: {
+    metricas: () => get("/api/v1/admin/metricas"),
+  },
+
   empresas: {
     list:             ()          => get("/api/v1/empresas"),
     get:              (id)        => get(`/api/v1/empresas/${id}`),
