@@ -1,5 +1,15 @@
 {
   "permissions": {
+    "allow": [
+      "Bash(node -e \"JSON.parse\\(require\\('fs'\\).readFileSync\\('package.json', 'utf8'\\)\\)\")",
+      "Bash(PGPASSWORD=fiscalpassword psql -h localhost -p 5433 -U fiscaluser -d fiscalcore -c \"SELECT email, is_active, is_admin FROM usuarios LIMIT 5;\")",
+      "Bash(PGPASSWORD=fiscalpassword psql -h 127.0.0.1 -p 5433 -U fiscaluser -d fiscalcore -c \"SELECT email, is_active FROM usuarios LIMIT 5;\")",
+      "Bash(PGPASSWORD=postgres psql -h 127.0.0.1 -p 5433 -U postgres -d fiscalcore -c \"SELECT email, is_active FROM usuarios LIMIT 5;\")",
+      "Bash(PGPASSWORD=postgres psql -h localhost -p 5433 -U postgres -d fiscalcore -c \"SELECT 'PG OK' AS status;\")",
+      "Bash(PGPASSWORD=postgres psql -h 127.0.0.1 -p 5433 -U postgres -d fiscalcore -c \"\\\\d usuarios;\")",
+      "Bash(PGPASSWORD=postgres psql -h 127.0.0.1 -p 5433 -U postgres -d fiscalcore -c \"SELECT email, activo, rol FROM usuarios;\")",
+      "Bash(PGPASSWORD=postgres psql -h 127.0.0.1 -p 5433 -U postgres -d fiscalcore -c \"SELECT email, password_hash FROM usuarios;\")"
+    ],
     "deny": [
       "Read(./.env)",
       "Read(./.env.*)"

@@ -46,7 +46,25 @@
       "Bash(git stash *)",
       "Bash(git reset *)",
       "Bash(git checkout *)",
-      "Bash(git rm *)"
+      "Bash(git rm *)",
+      "Bash(git commit -m ' *)",
+      "Bash(pkill -f \"uvicorn.*8000\")",
+      "Bash(.venv/bin/python -m uvicorn backend.main_api:app --reload --port 8000)",
+      "Bash(pkill -f \"uvicorn\")",
+      "Bash(awk 'NR>1 {print $2}')",
+      "Bash(xargs -r kill -9)",
+      "Bash(jobs)",
+      "Bash(.venv/bin/python -m uvicorn backend.main_api:app --reload --port 8000 > /tmp/uvicorn.log 2>&1 & *)",
+      "Bash(PGPASSWORD=postgres psql -h localhost -p 5433 -U postgres -d fiscalcore -c \"UPDATE usuarios SET rol = 'admin' WHERE email = 'contador@test.mx';\")",
+      "Bash(PGPASSWORD=postgres psql -h localhost -p 5433 -U postgres -d fiscalcore -c \"SELECT email, rol FROM usuarios WHERE email = 'contador@test.mx';\")",
+      "Bash(git commit -m 'fix: registrar router admin en main_api y agregar require_admin en deps *)",
+      "Bash(pkill -f \"vite\")",
+      "Bash(PGPASSWORD=postgres psql *)",
+      "Bash(DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5433/fiscalcore python3 *)",
+      "Bash(node -e \"const s=require\\('./.claude/settings.local.json'\\); console.log\\('hooks:', JSON.stringify\\(s.hooks||'none'\\)\\); console.log\\('keys:', Object.keys\\(s\\)\\)\")"
+    ],
+    "additionalDirectories": [
+      "/tmp"
     ]
   }
 }
