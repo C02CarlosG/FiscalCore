@@ -1095,7 +1095,7 @@ class MotorRiesgos:
 
     # ── Riesgo 7: RFC inválido ───────────────────────────────
     def rfc_invalidos(self, cfdis: list[CFDIResumen]) -> list[Riesgo]:
-        from cfdi_parser import validar_rfc
+        from .cfdi_parser import validar_rfc
         riesgos = []
         vistos = set()
 
