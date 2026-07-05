@@ -38,3 +38,15 @@ uploads/
 
 # Archivos comprimidos generados
 *.zip
+
+# Metadata de Windows (Mark-of-the-Web al extraer zips)
+*:Zone.Identifier
+
+# Configuración local de otras herramientas de IA (no parte de la app)
+.vercel/
+.agents/
+.continue/
+.codebuddy/
+.kilocode/
+.claude/worktrees/
+.claude/settings.json.bak-*
