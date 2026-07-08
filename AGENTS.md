@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-This repository contains the FastAPI backend for FiscalCore. The previous React/Vite frontend was removed as legacy cleanup; it is being rewritten from scratch on the unmerged branch `refactor/modularizar-frontend-backend`.
+This repository contains the FastAPI backend for FiscalCore. The previous React/Vite frontend was removed as legacy cleanup; its future rewrite does not yet have an associated branch.
 
 - `backend/` contains the Python API. `backend/main_api.py` wires the FastAPI app, while endpoint modules live in `backend/routers/`.
 - `database/migrations/` contains ordered SQL migrations. Keep new migrations numeric and descriptive, for example `022_nueva_tabla.sql`.
