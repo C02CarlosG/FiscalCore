@@ -184,6 +184,9 @@ def init_db() -> None:
         # 022 es idempotente — dropea risk_patterns (backend/risk_patterns_service.py era código muerto)
         _run_sql_file("022_eliminar_risk_patterns.sql")
 
+        # 023 es idempotente — categorías de movimientos + reglas de categorización
+        _run_sql_file("023_categorias_movimiento.sql")
+
         # Seed inicial: usuario admin si la base aún no tiene usuarios
         _seed_admin()
 
