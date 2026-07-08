@@ -3,10 +3,10 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from .. import db
-from ..deps import get_current_user, crear_token, hash_password, verify_password, serializar
+from ..deps import get_current_user, crear_token, hash_password, verify_password, serializar, limiter
 from ..schemas import RegisterRequest, LoginRequest, ActualizarPerfilRequest
 
 _log = logging.getLogger(__name__)
@@ -41,7 +41,8 @@ async def registrar(data: RegisterRequest):
 
 
 @router.post("/api/v1/auth/login")
-async def login(data: LoginRequest):
+@limiter.limit("5/minute")  # límite conservador contra fuerza bruta de contraseñas
+async def login(request: Request, data: LoginRequest):
     """Autentica un contador y retorna JWT + lista de empresas que administra."""
     try:
         _log.info(f"Login attempt for {data.email}")

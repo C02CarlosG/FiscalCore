@@ -11,8 +11,20 @@ import psycopg2.extras
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 
 from .. import db
-from ..deps import get_current_user, empresa_or_404, validar_acceso_empresa, serializar
+from ..deps import get_current_user, empresa_or_404, validar_acceso_empresa, serializar, validar_upload
 from ..schemas import IngestaResponse
+
+_CFDI_EXTENSIONES = (".xml",)
+_CFDI_CONTENT_TYPES = ("text/xml", "application/xml", "application/octet-stream")
+
+_BANCO_EXTENSIONES = (".xlsx", ".csv")
+_BANCO_CONTENT_TYPES = (
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",  # .xlsx
+    "text/csv",
+    "application/vnd.ms-excel",
+    "text/plain",
+    "application/octet-stream",
+)
 
 _log = logging.getLogger(__name__)
 
@@ -327,6 +339,7 @@ async def subir_cfdi(
     for archivo in archivos:
         try:
             contenido = await archivo.read()
+            validar_upload(archivo, contenido, _CFDI_EXTENSIONES, _CFDI_CONTENT_TYPES)
             resultado = parser.parse_xml(contenido)
             # Separar errores bloqueantes de advertencias (prefijo "AVISO:")
             errores_bloqueantes = [e for e in resultado.errores if not e.startswith("AVISO:")]
@@ -387,6 +400,9 @@ async def subir_cfdi(
                 _persistir_complemento_pago(empresa_id, resultado)
 
             procesados += 1
+        except HTTPException:
+            # Validación de archivo (extensión/content-type/tamaño): rechazo duro, no error suave
+            raise
         except Exception as e:
             errores.append(f"{archivo.filename}: {str(e)}")
 
@@ -414,6 +430,7 @@ async def subir_estado_cuenta(
     from ..banco_parser import BancoParser
     parser = BancoParser()
     contenido = await archivo.read()
+    validar_upload(archivo, contenido, _BANCO_EXTENSIONES, _BANCO_CONTENT_TYPES)
 
     try:
         if archivo.filename.endswith(".xlsx"):

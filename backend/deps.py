@@ -26,10 +26,27 @@ except ImportError:
     BCRYPT_OK = False
     _log.warning("bcrypt no instalado")
 
+try:
+    from slowapi import Limiter
+    from slowapi.util import get_remote_address
+    limiter = Limiter(key_func=get_remote_address)
+except ImportError:
+    limiter = None
+    _log.warning("slowapi no instalado — rate limiting deshabilitado")
+
 from . import db
 
-_JWT_INSECURE_DEFAULT = "fiscalcore-dev-secret-change-in-prod"
-JWT_SECRET    = os.environ.get("JWT_SECRET", _JWT_INSECURE_DEFAULT)
+# Mismo criterio que FIEL_ENCRYPTION_KEY en fiel_store.py: no hay default
+# inseguro. Si la variable de entorno no está configurada, el proceso falla
+# explícito al arrancar en lugar de levantar en modo inseguro silencioso.
+# En desarrollo local, .env (cargado por main_api.py) debe proveer el valor.
+_JWT_SECRET_ENV = os.environ.get("JWT_SECRET", "").strip()
+if not _JWT_SECRET_ENV:
+    raise RuntimeError(
+        "Variable de entorno JWT_SECRET no configurada. "
+        "Genera una con: python -c \"import secrets; print(secrets.token_urlsafe(64))\""
+    )
+JWT_SECRET    = _JWT_SECRET_ENV
 JWT_ALGORITHM = "HS256"
 JWT_EXP_HOURS = 8
 
@@ -93,6 +110,46 @@ def validar_acceso_empresa(empresa_id: str, current_user: dict) -> None:
     )
     if not row:
         raise HTTPException(status_code=403, detail="Sin acceso a esta empresa")
+
+
+# ---------------------------------------------------------------------------
+# Validación de archivos subidos (CFDI, estados de cuenta, constancia SAT)
+# ---------------------------------------------------------------------------
+
+MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024  # 10MB por archivo — CFDI/XLSX/PDF individuales no superan esto en la práctica
+
+
+def validar_upload(
+    archivo,
+    contenido: bytes,
+    extensiones_validas: tuple[str, ...],
+    content_types_validos: tuple[str, ...],
+    max_bytes: int = MAX_UPLOAD_SIZE_BYTES,
+) -> None:
+    """Valida extensión, content-type y tamaño de un archivo subido.
+
+    - 400 si la extensión o el content-type declarado no coinciden con lo esperado.
+    - 413 si el archivo excede max_bytes.
+
+    El content-type solo se valida si el cliente lo envió (algunos clientes no
+    lo setean); la extensión siempre se exige.
+    """
+    nombre = (archivo.filename or "").lower()
+    if not nombre.endswith(extensiones_validas):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Extensión no permitida para '{archivo.filename}'. Se espera: {', '.join(extensiones_validas)}",
+        )
+    if archivo.content_type and archivo.content_type not in content_types_validos:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Tipo de contenido no permitido para '{archivo.filename}': {archivo.content_type}",
+        )
+    if len(contenido) > max_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail=f"'{archivo.filename}' excede el tamaño máximo permitido ({max_bytes // (1024 * 1024)}MB)",
+        )
 
 
 def serializar(obj: dict) -> dict:

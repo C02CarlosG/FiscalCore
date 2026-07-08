@@ -11,8 +11,11 @@ import psycopg2.extras
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 
 from .. import db
-from ..deps import get_current_user, empresa_or_404, validar_acceso_empresa, serializar
+from ..deps import get_current_user, empresa_or_404, validar_acceso_empresa, serializar, validar_upload
 from ..schemas import AgregarEmpresaRequest, ImpuestosRequest
+
+_CONSTANCIA_EXTENSIONES = (".pdf",)
+_CONSTANCIA_CONTENT_TYPES = ("application/pdf", "application/octet-stream")
 
 _log = logging.getLogger(__name__)
 
@@ -25,10 +28,8 @@ UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 @router.post("/api/v1/constancia/parsear", tags=["Constancia"])
 async def parsear_constancia_pdf(archivo: UploadFile = File(...)):
     """Extrae datos fiscales de la Constancia de Situación Fiscal (PDF SAT)."""
-    if not archivo.filename.lower().endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="El archivo debe ser PDF")
-
     contenido = await archivo.read()
+    validar_upload(archivo, contenido, _CONSTANCIA_EXTENSIONES, _CONSTANCIA_CONTENT_TYPES)
 
     try:
         from ..constancia_parser import parsear_constancia

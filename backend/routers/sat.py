@@ -11,10 +11,10 @@ import json as _json
 import logging
 from datetime import date
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Request, UploadFile
 
 from .. import db
-from ..deps import get_current_user, validar_acceso_empresa, serializar
+from ..deps import get_current_user, validar_acceso_empresa, serializar, limiter
 from ..sat_fiel import FIELError, cargar_fiel, descargar_paquete, solicitar_descarga, verificar_solicitud
 
 _log = logging.getLogger(__name__)
@@ -26,7 +26,9 @@ router = APIRouter(prefix="/api/v1/sat", tags=["SAT FIEL"])
 # ---------------------------------------------------------------------------
 
 @router.post("/solicitar")
+@limiter.limit("10/minute")  # límite conservador: operación costosa contra el SAT usando la FIEL
 async def solicitar_descarga_cfdi(
+    request: Request,
     empresa_id: str = Form(...),
     tipo: str = Form(...),
     fecha_inicio: str = Form(...),  # YYYY-MM-DD
@@ -122,7 +124,9 @@ async def listar_solicitudes(
 # ---------------------------------------------------------------------------
 
 @router.post("/solicitudes/{solicitud_id}/verificar")
+@limiter.limit("10/minute")  # límite conservador: operación costosa contra el SAT usando la FIEL
 async def verificar_solicitud_endpoint(
+    request: Request,
     solicitud_id: str,
     cer_file: UploadFile = File(...),
     key_file: UploadFile = File(...),
@@ -193,7 +197,9 @@ async def verificar_solicitud_endpoint(
 # ---------------------------------------------------------------------------
 
 @router.post("/solicitudes/{solicitud_id}/descargar")
+@limiter.limit("10/minute")  # límite conservador: operación costosa contra el SAT usando la FIEL
 async def descargar_cfdi_endpoint(
+    request: Request,
     solicitud_id: str,
     background_tasks: BackgroundTasks,
     cer_file: UploadFile = File(...),
@@ -363,7 +369,9 @@ def _insertar_cfdi(empresa_id: str, resultado, periodo: str, xml_raw_bytes: byte
 # ===========================================================================
 
 @router.post("/empresas/{empresa_id}/fiel/guardar")
+@limiter.limit("10/minute")  # límite conservador: valida FIEL contra credenciales SAT
 async def guardar_fiel_empresa(
+    request: Request,
     empresa_id: str,
     cer_file: UploadFile = File(...),
     key_file: UploadFile = File(...),
@@ -419,7 +427,9 @@ async def eliminar_fiel_empresa(
 
 
 @router.post("/empresas/{empresa_id}/fiel/sync")
+@limiter.limit("10/minute")  # límite conservador: operación costosa contra el SAT usando la FIEL
 async def sync_completo_fiel(
+    request: Request,
     empresa_id: str,
     background_tasks: BackgroundTasks,
     tipo: str = Form(...),          # "emitidos" | "recibidos" | "ambos"
