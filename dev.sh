@@ -13,7 +13,7 @@ echo ""
 cleanup() {
   echo ""
   echo " Deteniendo procesos..."
-  kill "$BACKEND_PID" "$FRONTEND_PID" 2>/dev/null
+  kill "$BACKEND_PID" 2>/dev/null
   exit 0
 }
 trap cleanup INT TERM
@@ -25,22 +25,15 @@ if [ ! -f "$PYTHON" ]; then
   "${ROOT}/.venv/bin/pip" install -r "${ROOT}/requirements.txt" -q
 fi
 
-echo "[1/2] Iniciando backend (FastAPI puerto 8000)..."
+echo "[1/1] Iniciando backend (FastAPI puerto 8000)..."
 "$PYTHON" -m uvicorn backend.main_api:app --reload --port 8000 &
 BACKEND_PID=$!
-
-sleep 2
-
-echo "[2/2] Iniciando frontend (Vite puerto 3001)..."
-npm run dev &
-FRONTEND_PID=$!
 
 echo ""
 echo " Listo:"
 echo "   Backend:  http://localhost:8000/docs"
-echo "   Frontend: http://localhost:3001"
 echo ""
-echo " Ctrl+C para detener ambos procesos."
+echo " Ctrl+C para detener el proceso."
 echo ""
 
 wait
