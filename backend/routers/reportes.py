@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from decimal import Decimal
 from io import BytesIO
 from typing import Optional
@@ -203,6 +204,9 @@ async def generar_diot(
 # Cédula de IVA (Módulo 3) — cálculo por flujo de efectivo (Art. 1-B LIVA)
 # ---------------------------------------------------------------------------
 
+_PERIODO_RE = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
+
+
 def _floats(obj):
     """Convierte recursivamente Decimal -> float en dicts/listas anidados."""
     if isinstance(obj, Decimal):
@@ -277,6 +281,8 @@ async def cedula_iva(
 ):
     """Cédula mensual de IVA por flujo de efectivo: trasladado, acreditable,
     prorrateo, resultado del periodo y comparativo contra el IVA devengado (DIOT)."""
+    if not _PERIODO_RE.match(periodo):
+        raise HTTPException(status_code=422, detail="periodo inválido; formato esperado YYYY-MM")
     validar_acceso_empresa(empresa_id, current_user)
 
     rfc, cfdis, pagos, diot_iva = _cargar_datos_cedula_iva(empresa_id, periodo)

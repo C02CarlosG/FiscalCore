@@ -166,6 +166,17 @@ def test_gasto_cancelado_excluido():
     assert res["bruto"] == Decimal("0.00")
 
 
+def test_nota_de_credito_recibida_resta_acreditable():
+    # Un proveedor emite factura (IVA $100) y luego una nota de crédito tipo E ($30)
+    cfdis = [
+        _gasto(uuid="G1", forma_pago="03", iva_trasladado=Decimal("100")),
+        _gasto(uuid="E1", tipo_comprobante="E", forma_pago="03", iva_trasladado=Decimal("30")),
+    ]
+    res = iva_acreditable(cfdis, [], "2026-01", RFC)
+    assert res["notas_credito"]["iva"] == Decimal("30.00")
+    assert res["bruto"] == Decimal("70.00")
+
+
 # ── Prorrateo (Art. 5-V LIVA) ─────────────────────────────────────────────
 
 

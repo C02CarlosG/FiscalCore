@@ -100,6 +100,17 @@ def test_cedula_iva_coplasur(monkeypatch):
     assert body["resultado"]["saldo_a_favor"] == 0.0
 
 
+def test_cedula_iva_periodo_invalido(monkeypatch):
+    _override(monkeypatch)
+    try:
+        r_mes = client.get("/api/v1/empresas/emp-1/cedula-iva/2026-13")   # mes fuera de rango
+        r_fmt = client.get("/api/v1/empresas/emp-1/cedula-iva/2026-1")    # sin cero a la izquierda
+    finally:
+        main.app.dependency_overrides.clear()
+    assert r_mes.status_code == 422
+    assert r_fmt.status_code == 422
+
+
 def test_cedula_iva_saldo_a_favor(monkeypatch):
     _override(monkeypatch, _fixture_saldo_a_favor)
     try:

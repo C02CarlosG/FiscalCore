@@ -122,6 +122,7 @@ def iva_acreditable(
     """
     pue_base = pue_iva = Decimal("0")
     ppd_pagado = ppd_iva = Decimal("0")
+    nc_base = nc_iva = Decimal("0")
     exc_iva = Decimal("0")
 
     pagos_por_uuid: dict[str, list[dict]] = {}
@@ -133,7 +134,14 @@ def iva_acreditable(
             continue  # la empresa no es receptora -> no es gasto
         if c.get("estado") != "vigente":
             continue
-        if c.get("tipo_comprobante") != "I":
+
+        tipo = c.get("tipo_comprobante")
+        if tipo == "E":  # nota de crédito recibida -> reduce el IVA acreditable
+            if _en_periodo(c.get("fecha_emision"), periodo):
+                nc_base += _dec(c.get("subtotal"))
+                nc_iva += _dec(c.get("iva_trasladado"))
+            continue
+        if tipo != "I":
             continue
 
         total = _dec(c.get("total"))
@@ -159,11 +167,12 @@ def iva_acreditable(
                     ppd_pagado += importe
                     ppd_iva += iva_parcial
 
-    bruto = pue_iva + ppd_iva
+    bruto = pue_iva + ppd_iva - nc_iva
     q = lambda d: d.quantize(CENTAVOS)
     return {
         "pue": {"base": q(pue_base), "iva": q(pue_iva)},
         "ppd": {"pagado": q(ppd_pagado), "iva": q(ppd_iva)},
+        "notas_credito": {"base": q(nc_base), "iva": q(nc_iva)},
         "excluido_efectivo": {"iva": q(exc_iva)},
         "bruto": q(bruto),
     }
