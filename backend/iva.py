@@ -12,6 +12,8 @@ from decimal import Decimal
 from typing import Any
 
 CENTAVOS = Decimal("0.01")
+SEIS_DECIMALES = Decimal("0.000001")
+UMBRAL_EFECTIVO = Decimal("2000")  # Art. 27-III LISR / 5 LIVA: efectivo > $2,000 no deducible
 
 
 def _dec(valor: Any) -> Decimal:
@@ -102,3 +104,85 @@ def iva_trasladado(
         "notas_credito": {"base": q(nc_base), "iva": q(nc_iva)},
         "total": q(total),
     }
+
+
+def iva_acreditable(
+    cfdis: list[dict],
+    pagos: list[dict],
+    periodo: str,
+    rfc_empresa: str,
+) -> dict:
+    """IVA acreditable (gastos/compras) pagado en el periodo, por flujo de efectivo.
+
+    Simétrico a :func:`iva_trasladado` pero sobre CFDIs donde la empresa es la
+    RECEPTORA. Regla de bancarización de v1: pagos en efectivo
+    (``forma_pago == '01'``) por más de $2,000 no son acreditables (van a un
+    balde ``excluido_efectivo``). El resultado es el IVA **bruto**; el ajuste por
+    prorrateo se aplica aparte con :func:`aplicar_prorrateo`.
+    """
+    pue_base = pue_iva = Decimal("0")
+    ppd_pagado = ppd_iva = Decimal("0")
+    exc_iva = Decimal("0")
+
+    pagos_por_uuid: dict[str, list[dict]] = {}
+    for p in pagos:
+        pagos_por_uuid.setdefault(p["cfdi_uuid"], []).append(p)
+
+    for c in cfdis:
+        if c.get("rfc_receptor") != rfc_empresa:
+            continue  # la empresa no es receptora -> no es gasto
+        if c.get("estado") != "vigente":
+            continue
+        if c.get("tipo_comprobante") != "I":
+            continue
+
+        total = _dec(c.get("total"))
+        iva_cfdi = _dec(c.get("iva_trasladado"))
+        es_efectivo_no_deducible = c.get("forma_pago") == "01" and total > UMBRAL_EFECTIVO
+
+        if c.get("metodo_pago") == "PUE":
+            if _en_periodo(c.get("fecha_emision"), periodo):
+                if es_efectivo_no_deducible:
+                    exc_iva += iva_cfdi
+                else:
+                    pue_base += _dec(c.get("subtotal"))
+                    pue_iva += iva_cfdi
+        elif c.get("metodo_pago") == "PPD":
+            for p in pagos_por_uuid.get(c.get("uuid"), []):
+                if not _en_periodo(p.get("fecha_pago"), periodo):
+                    continue
+                importe = _dec(p.get("importe_pagado"))
+                iva_parcial = iva_cfdi * (importe / total) if total > 0 else Decimal("0")
+                if es_efectivo_no_deducible:
+                    exc_iva += iva_parcial
+                else:
+                    ppd_pagado += importe
+                    ppd_iva += iva_parcial
+
+    bruto = pue_iva + ppd_iva
+    q = lambda d: d.quantize(CENTAVOS)
+    return {
+        "pue": {"base": q(pue_base), "iva": q(pue_iva)},
+        "ppd": {"pagado": q(ppd_pagado), "iva": q(ppd_iva)},
+        "excluido_efectivo": {"iva": q(exc_iva)},
+        "bruto": q(bruto),
+    }
+
+
+def factor_prorrateo(gravados: Any, exentos: Any) -> Decimal:
+    """Factor de acreditamiento para actividades mixtas (Art. 5-V LIVA).
+
+    ``gravados / (gravados + exentos)``. Sin actividad (total 0) devuelve 1.0
+    (100% acreditable, caso de una empresa 100% gravada).
+    """
+    g = _dec(gravados)
+    e = _dec(exentos)
+    total = g + e
+    if total == 0:
+        return Decimal("1").quantize(SEIS_DECIMALES)
+    return (g / total).quantize(SEIS_DECIMALES)
+
+
+def aplicar_prorrateo(bruto: Any, factor: Any) -> Decimal:
+    """Aplica el factor de prorrateo al IVA acreditable bruto."""
+    return (_dec(bruto) * _dec(factor)).quantize(CENTAVOS)

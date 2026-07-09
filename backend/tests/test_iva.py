@@ -1,8 +1,14 @@
 from decimal import Decimal
 
-from backend.iva import iva_trasladado
+from backend.iva import (
+    aplicar_prorrateo,
+    factor_prorrateo,
+    iva_acreditable,
+    iva_trasladado,
+)
 
 RFC = "COP010101AAA"
+PROV = "PROV010101AAA"
 
 
 def _cfdi(**kw):
@@ -94,3 +100,86 @@ def test_pue_fuera_de_periodo_no_cuenta():
     cfdis = [_cfdi(fecha_emision="2026-02-15", iva_trasladado=Decimal("1600"))]
     res = iva_trasladado(cfdis, [], "2026-01", RFC)
     assert res["total"] == Decimal("0.00")
+
+
+# ── IVA acreditable (gastos recibidos y pagados) ──────────────────────────
+
+
+def _gasto(**kw):
+    """CFDI donde la empresa es la RECEPTORA (gasto)."""
+    kw.setdefault("rfc_emisor", PROV)
+    kw.setdefault("rfc_receptor", RFC)
+    kw.setdefault("uuid", "G1")
+    return _cfdi(**kw)
+
+
+def test_pue_recibido_suma_acreditable():
+    # Caso B (consultora): 6 gastos PUE, IVA total $736
+    ivas = ["320", "80", "80", "96", "80", "80"]
+    cfdis = [_gasto(uuid=f"G{i}", forma_pago="03", total=Decimal("1000"),
+                    iva_trasladado=Decimal(v)) for i, v in enumerate(ivas)]
+    res = iva_acreditable(cfdis, [], "2026-01", RFC)
+    assert res["bruto"] == Decimal("736.00")
+
+
+def test_caso_coplasur_acreditable():
+    # Caso A: IVA acreditable $3,056,596
+    cfdis = [_gasto(forma_pago="03", total=Decimal("22160324"),
+                    iva_trasladado=Decimal("3056596"))]
+    res = iva_acreditable(cfdis, [], "2026-01", RFC)
+    assert res["bruto"] == Decimal("3056596.00")
+
+
+def test_ppd_recibido_prorratea_iva():
+    cfdis = [_gasto(uuid="GP1", metodo_pago="PPD", forma_pago="03",
+                    total=Decimal("11600"), iva_trasladado=Decimal("1600"))]
+    pagos = [_pago("GP1", "5800", "2026-01-20")]
+    res = iva_acreditable(cfdis, pagos, "2026-01", RFC)
+    assert res["ppd"]["iva"] == Decimal("800.00")
+    assert res["bruto"] == Decimal("800.00")
+
+
+def test_efectivo_mayor_2000_no_es_acreditable():
+    # forma_pago '01' = efectivo, total > $2,000 -> no acreditable
+    cfdis = [_gasto(forma_pago="01", total=Decimal("3000"), iva_trasladado=Decimal("400"))]
+    res = iva_acreditable(cfdis, [], "2026-01", RFC)
+    assert res["bruto"] == Decimal("0.00")
+    assert res["excluido_efectivo"]["iva"] == Decimal("400.00")
+
+
+def test_efectivo_menor_o_igual_2000_si_es_acreditable():
+    cfdis = [_gasto(forma_pago="01", total=Decimal("1500"), iva_trasladado=Decimal("200"))]
+    res = iva_acreditable(cfdis, [], "2026-01", RFC)
+    assert res["bruto"] == Decimal("200.00")
+
+
+def test_cfdi_emitido_no_es_acreditable():
+    # La empresa es emisora -> es venta, no gasto
+    cfdis = [_cfdi(forma_pago="03", iva_trasladado=Decimal("1600"))]
+    res = iva_acreditable(cfdis, [], "2026-01", RFC)
+    assert res["bruto"] == Decimal("0.00")
+
+
+def test_gasto_cancelado_excluido():
+    cfdis = [_gasto(estado="cancelado", forma_pago="03", iva_trasladado=Decimal("400"))]
+    res = iva_acreditable(cfdis, [], "2026-01", RFC)
+    assert res["bruto"] == Decimal("0.00")
+
+
+# ── Prorrateo (Art. 5-V LIVA) ─────────────────────────────────────────────
+
+
+def test_factor_prorrateo_gravados_exentos():
+    assert factor_prorrateo(Decimal("800000"), Decimal("200000")) == Decimal("0.800000")
+
+
+def test_factor_prorrateo_sin_actividad_devuelve_uno():
+    assert factor_prorrateo(Decimal("0"), Decimal("0")) == Decimal("1.000000")
+
+
+def test_aplicar_prorrateo_reduce_por_factor():
+    assert aplicar_prorrateo(Decimal("1000"), Decimal("0.8")) == Decimal("800.00")
+
+
+def test_aplicar_prorrateo_factor_uno_no_cambia():
+    assert aplicar_prorrateo(Decimal("3056596"), Decimal("1")) == Decimal("3056596.00")
