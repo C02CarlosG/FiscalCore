@@ -33,11 +33,28 @@ def _fixture_consultora():
     return RFC, [ingreso, *gastos], [], Decimal("736")
 
 
-def _override(monkeypatch):
+def _fixture_coplasur():
+    """Caso A (Copla Sur, ene-2026): trasladado $4,088,513, acreditable $3,056,596."""
+    ingreso = _cfdi(uuid="I1", subtotal=Decimal("25553202"), total=Decimal("29641715"),
+                    iva_trasladado=Decimal("4088513"))
+    gasto = _cfdi(uuid="G1", rfc_emisor="PROV010101AAA", rfc_receptor=RFC,
+                  total=Decimal("22160324"), iva_trasladado=Decimal("3056596"))
+    return RFC, [ingreso, gasto], [], Decimal("3056596")
+
+
+def _fixture_saldo_a_favor():
+    """Acreditable ($300) > trasladado ($100) -> saldo a favor $200."""
+    ingreso = _cfdi(uuid="I1", total=Decimal("725"), iva_trasladado=Decimal("100"))
+    gasto = _cfdi(uuid="G1", rfc_emisor="PROV010101AAA", rfc_receptor=RFC,
+                  total=Decimal("2175"), iva_trasladado=Decimal("300"))
+    return RFC, [ingreso, gasto], [], Decimal("300")
+
+
+def _override(monkeypatch, fixture=_fixture_consultora):
     main.app.dependency_overrides[get_current_user] = lambda: {"id": "u1"}
     monkeypatch.setattr(reportes, "validar_acceso_empresa", lambda *a, **k: None)
     monkeypatch.setattr(reportes, "_cargar_datos_cedula_iva",
-                        lambda emp, per: _fixture_consultora())
+                        lambda emp, per: fixture())
 
 
 def test_cedula_iva_consultora(monkeypatch):
@@ -66,3 +83,31 @@ def test_cedula_iva_con_factor_prorrateo(monkeypatch):
     body = resp.json()
     assert body["acreditable"]["ajustado"] == 368.0        # 736 * 0.5
     assert body["resultado"]["iva_por_pagar"] == 1232.0     # 1600 - 368
+
+
+def test_cedula_iva_coplasur(monkeypatch):
+    _override(monkeypatch, _fixture_coplasur)
+    try:
+        resp = client.get("/api/v1/empresas/emp-1/cedula-iva/2026-01")
+    finally:
+        main.app.dependency_overrides.clear()
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["trasladado"]["total"] == 4088513.0
+    assert body["acreditable"]["ajustado"] == 3056596.0
+    assert body["resultado"]["iva_por_pagar"] == 1031917.0
+    assert body["resultado"]["saldo_a_cargo"] == 1031917.0
+    assert body["resultado"]["saldo_a_favor"] == 0.0
+
+
+def test_cedula_iva_saldo_a_favor(monkeypatch):
+    _override(monkeypatch, _fixture_saldo_a_favor)
+    try:
+        resp = client.get("/api/v1/empresas/emp-1/cedula-iva/2026-01")
+    finally:
+        main.app.dependency_overrides.clear()
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["resultado"]["iva_por_pagar"] == -200.0
+    assert body["resultado"]["saldo_a_favor"] == 200.0
+    assert body["resultado"]["saldo_a_cargo"] == 0.0
