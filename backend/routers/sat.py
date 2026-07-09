@@ -4,9 +4,12 @@ Router SAT FIEL — Descarga Masiva de CFDIs.
 
 Expone 4 endpoints para gestionar el ciclo completo de solicitud, verificación
 y descarga de CFDIs directamente del SAT usando la e.firma (FIEL) del contribuyente.
-"""
-from __future__ import annotations
 
+NOTA: NO usar `from __future__ import annotations` aquí. Los endpoints están
+envueltos por @limiter.limit (slowapi); con anotaciones diferidas, FastAPI
+resuelve los forward-refs (UploadFile, Request, …) contra los __globals__ del
+wrapper de slowapi y truena al importar.
+"""
 import json as _json
 import logging
 from datetime import date
