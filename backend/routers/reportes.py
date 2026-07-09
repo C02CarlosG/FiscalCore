@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from decimal import Decimal
 from io import BytesIO
 from typing import Optional
 
@@ -8,7 +9,7 @@ from openpyxl.styles import Font
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
-from .. import db
+from .. import db, iva
 from ..deps import get_current_user, validar_acceso_empresa, serializar
 
 router = APIRouter(tags=["Reportes"])
@@ -196,3 +197,113 @@ async def generar_diot(
             for r in rows
         ],
     }
+
+
+# ---------------------------------------------------------------------------
+# Cédula de IVA (Módulo 3) — cálculo por flujo de efectivo (Art. 1-B LIVA)
+# ---------------------------------------------------------------------------
+
+def _floats(obj):
+    """Convierte recursivamente Decimal -> float en dicts/listas anidados."""
+    if isinstance(obj, Decimal):
+        return float(obj)
+    if isinstance(obj, dict):
+        return {k: _floats(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_floats(v) for v in obj]
+    return obj
+
+
+def _cargar_datos_cedula_iva(empresa_id: str, periodo: str):
+    """Carga de DB los insumos de la cédula: RFC, CFDIs candidatos, pagos del
+    periodo y el IVA acreditable devengado (base DIOT) para el comparativo."""
+    emp = db.query_one("SELECT rfc FROM empresas WHERE id = %s", (empresa_id,))
+    if not emp:
+        raise HTTPException(status_code=404, detail="Empresa no encontrada")
+    rfc = emp["rfc"]
+
+    cfdis = db.query_all(
+        """
+        SELECT uuid, tipo_comprobante, metodo_pago, estado, es_anticipo_sat,
+               rfc_emisor, rfc_receptor, forma_pago, fecha_emision,
+               subtotal, total, iva_trasladado
+        FROM cfdi
+        WHERE empresa_id = %s
+          AND estado = 'vigente'
+          AND (
+                metodo_pago = 'PPD'
+                OR (fecha_emision >= (%s || '-01')::date
+                    AND fecha_emision  < ((%s || '-01')::date + INTERVAL '1 month'))
+              )
+        """,
+        (empresa_id, periodo, periodo),
+    )
+
+    pagos = db.query_all(
+        """
+        SELECT pr.cfdi_uuid, pr.importe_pagado, p.fecha_pago
+        FROM pagos_cfdi p
+        JOIN pagos_relaciones pr ON pr.pago_id = p.id
+        WHERE p.empresa_id = %s
+          AND p.fecha_pago >= (%s || '-01')::date
+          AND p.fecha_pago  < ((%s || '-01')::date + INTERVAL '1 month')
+        """,
+        (empresa_id, periodo, periodo),
+    )
+
+    diot = db.query_one(
+        """
+        SELECT COALESCE(SUM(c.iva_trasladado), 0) AS iva
+        FROM cfdi c
+        JOIN empresas e ON e.id = c.empresa_id
+        WHERE c.empresa_id = %s
+          AND c.rfc_receptor = e.rfc
+          AND c.estado = 'vigente'
+          AND c.fecha_emision >= (%s || '-01')::date
+          AND c.fecha_emision  < ((%s || '-01')::date + INTERVAL '1 month')
+        """,
+        (empresa_id, periodo, periodo),
+    )
+    diot_iva = (diot["iva"] if diot and diot["iva"] is not None else Decimal("0"))
+    return rfc, cfdis, pagos, Decimal(str(diot_iva))
+
+
+@router.get("/api/v1/empresas/{empresa_id}/cedula-iva/{periodo}")
+async def cedula_iva(
+    empresa_id: str,
+    periodo: str,
+    factor: float = 1.0,   # factor de prorrateo (Art. 5-V); 1.0 = 100% gravado
+    current_user: dict = Depends(get_current_user),
+):
+    """Cédula mensual de IVA por flujo de efectivo: trasladado, acreditable,
+    prorrateo, resultado del periodo y comparativo contra el IVA devengado (DIOT)."""
+    validar_acceso_empresa(empresa_id, current_user)
+
+    rfc, cfdis, pagos, diot_iva = _cargar_datos_cedula_iva(empresa_id, periodo)
+
+    trasladado = iva.iva_trasladado(cfdis, pagos, periodo, rfc)
+    acred = iva.iva_acreditable(cfdis, pagos, periodo, rfc)
+    factor_dec = Decimal(str(factor))
+    ajustado = iva.aplicar_prorrateo(acred["bruto"], factor_dec)
+
+    iva_retenido = Decimal("0.00")  # v1: retenciones no computadas todavía
+    por_pagar = (trasladado["total"] - ajustado - iva_retenido).quantize(Decimal("0.01"))
+
+    resultado = {
+        "iva_por_pagar": por_pagar,
+        "saldo_a_cargo": por_pagar if por_pagar > 0 else Decimal("0.00"),
+        "saldo_a_favor": -por_pagar if por_pagar < 0 else Decimal("0.00"),
+    }
+
+    return _floats({
+        "empresa_id": empresa_id,
+        "periodo": periodo,
+        "trasladado": trasladado,
+        "acreditable": {**acred, "factor_prorrateo": factor_dec, "ajustado": ajustado},
+        "iva_retenido": iva_retenido,
+        "resultado": resultado,
+        "comparativo_sat": {
+            "diot_iva_pagado": diot_iva,
+            "diferencia": (ajustado - diot_iva).quantize(Decimal("0.01")),
+        },
+    })
