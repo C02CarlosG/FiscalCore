@@ -45,12 +45,14 @@ Ver spec completa en `docs/superpowers/specs/2026-07-10-reescritura-frontend-des
 Desde la raíz del repo:
 
 ```bash
-npx --yes create-next-app@latest frontend \
+npx --yes create-next-app@14.2.5 frontend \
   --typescript --eslint --tailwind --app --no-src-dir \
   --import-alias "@/*" --use-npm
 ```
 
-Responde "Yes" a cualquier prompt residual sobre Turbopack o convenciones adicionales si el CLI lo pregunta (no debería, con los flags de arriba).
+Se pinea `create-next-app@14.2.5` a propósito (Next 14 + Tailwind v3): versiones más nuevas de `create-next-app` instalan Tailwind CSS v4, que ya no usa `tailwind.config.ts` (config vía CSS con `@theme`) y rompería los Steps 3-6 de esta task, escritos para la sintaxis clásica de Tailwind v3 + shadcn/ui. Si el `package.json` generado no trae `"tailwindcss": "^3...."`, DETENTE y reporta BLOCKED — no continúes con un Tailwind v4.
+
+Responde "Yes" a cualquier prompt residual sobre convenciones adicionales si el CLI lo pregunta (no debería, con los flags de arriba).
 
 Run: `test -d frontend/app && echo OK`
 Expected: `OK`
