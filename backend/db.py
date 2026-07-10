@@ -187,6 +187,9 @@ def init_db() -> None:
         # 023 es idempotente — categorías de movimientos + reglas de categorización
         _run_sql_file("023_categorias_movimiento.sql")
 
+        # 024 es idempotente — config anual de ISR provisional (coeficiente de utilidad, PTU, pérdidas, tasa)
+        _run_sql_file("024_coeficiente_utilidad.sql")
+
         # Seed inicial: usuario admin si la base aún no tiene usuarios
         _seed_admin()
 
