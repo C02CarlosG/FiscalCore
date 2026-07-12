@@ -10,7 +10,7 @@ from openpyxl.styles import Font
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
-from .. import db, iva
+from .. import db, isr, iva
 from ..deps import get_current_user, validar_acceso_empresa, serializar
 
 router = APIRouter(tags=["Reportes"])
@@ -312,4 +312,120 @@ async def cedula_iva(
             "diot_iva_pagado": diot_iva,
             "diferencia": (ajustado - diot_iva).quantize(Decimal("0.01")),
         },
+    })
+
+
+# ---------------------------------------------------------------------------
+# ISR provisional (Módulo 5) — pago provisional mensual, base devengado (Art. 14 LISR)
+# ---------------------------------------------------------------------------
+
+
+def _cargar_datos_isr(empresa_id: str, periodo: str):
+    """Carga de DB los insumos del pago provisional: config anual (CU/PTU/pérdidas/
+    tasa) y el ingreso nominal acumulado del ejercicio a cada corte mensual (ene..mes),
+    más la retención de ISR del mes declarado. Devuelve ``(None, {}, 0)`` si no hay
+    ``config_isr_empresa`` para el ejercicio (falta el CU)."""
+    emp = db.query_one("SELECT rfc FROM empresas WHERE id = %s", (empresa_id,))
+    if not emp:
+        raise HTTPException(status_code=404, detail="Empresa no encontrada")
+
+    ejercicio = periodo[:4]
+    mes = int(periodo[5:7])
+
+    config = db.query_one(
+        """
+        SELECT coeficiente_utilidad, tasa_isr, ptu_pagada, perdidas_pendientes
+        FROM config_isr_empresa
+        WHERE empresa_id = %s AND ejercicio = %s
+        """,
+        (empresa_id, ejercicio),
+    )
+    if not config:
+        return None, {}, Decimal("0")
+
+    filas = db.query_all(
+        """
+        SELECT EXTRACT(MONTH FROM c.fecha_emision)::int AS mes,
+               COALESCE(SUM(
+                 CASE WHEN c.tipo_comprobante = 'E' THEN -c.subtotal ELSE c.subtotal END
+               ), 0) AS ingreso
+        FROM cfdi c
+        JOIN empresas e ON e.id = c.empresa_id
+        WHERE c.empresa_id = %s
+          AND c.rfc_emisor = e.rfc
+          AND c.tipo_comprobante IN ('I','E')
+          AND c.estado = 'vigente'
+          AND c.es_anticipo_sat = FALSE
+          AND c.fecha_emision >= (%s || '-01-01')::date
+          AND c.fecha_emision  < ((%s || '-01')::date + INTERVAL '1 month')
+        GROUP BY EXTRACT(MONTH FROM c.fecha_emision)
+        """,
+        (empresa_id, ejercicio, periodo),
+    )
+    ingreso_del_mes = {int(f["mes"]): Decimal(str(f["ingreso"])) for f in filas}
+    ingresos_por_mes: dict[int, Decimal] = {}
+    acumulado = Decimal("0")
+    for m in range(1, mes + 1):
+        acumulado += ingreso_del_mes.get(m, Decimal("0"))
+        ingresos_por_mes[m] = acumulado
+
+    retencion = db.query_one(
+        """
+        SELECT COALESCE(SUM(c.isr_retenido), 0) AS isr_retenido
+        FROM cfdi c
+        JOIN empresas e ON e.id = c.empresa_id
+        WHERE c.empresa_id = %s
+          AND c.rfc_emisor = e.rfc
+          AND c.estado = 'vigente'
+          AND c.fecha_emision >= (%s || '-01')::date
+          AND c.fecha_emision  < ((%s || '-01')::date + INTERVAL '1 month')
+        """,
+        (empresa_id, periodo, periodo),
+    )
+    retencion_mes = Decimal(str(retencion["isr_retenido"])) if retencion else Decimal("0")
+
+    return config, ingresos_por_mes, retencion_mes
+
+
+@router.get("/api/v1/empresas/{empresa_id}/isr-provisional/{periodo}")
+async def isr_provisional_endpoint(
+    empresa_id: str,
+    periodo: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Pago provisional mensual de ISR (persona moral, régimen general, Art. 14 LISR):
+    acumulado del ejercicio a la fecha de corte, base devengado."""
+    if not _PERIODO_RE.match(periodo):
+        raise HTTPException(status_code=422, detail="periodo inválido; formato esperado YYYY-MM")
+    validar_acceso_empresa(empresa_id, current_user)
+
+    config, ingresos_por_mes, retencion_mes = _cargar_datos_isr(empresa_id, periodo)
+    if not config:
+        raise HTTPException(
+            status_code=404,
+            detail="Sin coeficiente de utilidad configurado para este ejercicio",
+        )
+
+    mes = int(periodo[5:7])
+    cu = Decimal(str(config["coeficiente_utilidad"]))
+    tasa = Decimal(str(config["tasa_isr"]))
+    ptu = Decimal(str(config["ptu_pagada"]))
+    perdidas = Decimal(str(config["perdidas_pendientes"]))
+
+    calculo = isr.isr_provisional(ingresos_por_mes, mes, cu, tasa, ptu, perdidas, retencion_mes)
+
+    return _floats({
+        "empresa_id": empresa_id,
+        "periodo": periodo,
+        "ejercicio": int(periodo[:4]),
+        "coeficiente_utilidad": cu,
+        "ingreso_nominal_acumulado": calculo["ingreso_nominal_acum"],
+        "utilidad_estimada": calculo["utilidad_estimada"],
+        "deducciones_base": {"ptu_pagada": ptu, "perdidas_pendientes": perdidas},
+        "base_gravable": calculo["base_gravable"],
+        "tasa_isr": tasa,
+        "isr_acumulado": calculo["isr_acumulado"],
+        "pagos_provisionales_anteriores": calculo["pagos_previos"],
+        "isr_retenido": calculo["isr_retenido"],
+        "resultado": {"pago_del_mes": calculo["pago_del_mes"]},
     })
