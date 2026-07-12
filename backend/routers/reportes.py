@@ -150,7 +150,18 @@ async def reporte_scoring(
     )
     if not row:
         raise HTTPException(status_code=404, detail="Sin scoring para este período")
-    return serializar(row)
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Scoring Fiscal"
+    _header_row(ws, ["Métrica", "Valor"])
+
+    data = serializar(row)
+    for key, value in data.items():
+        if key not in ("id", "empresa_id", "created_at", "calculado_en"):
+            ws.append([key, value])
+
+    return _excel_response(wb, f"scoring_{periodo}.xlsx")
 
 
 @router.get("/api/v1/empresas/{empresa_id}/diot/{periodo}")
