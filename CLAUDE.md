@@ -1,6 +1,6 @@
 # CFDI Intelligence — Guía de proyecto
 
-Backend FastAPI (FiscalCore). El frontend fue removido; su reescritura futura todavía no tiene una rama asociada. Detalles completos en `AGENTS.md`.
+Backend FastAPI (FiscalCore). El frontend original fue removido; su reescritura vive en la rama `feat/frontend-nextjs` (Next.js + TS + Tailwind + shadcn/ui + TanStack Query), en paralelo a este trabajo de backend — ver spec en `docs/superpowers/specs/2026-07-10-reescritura-frontend-design.md` en esa rama. Detalles completos en `AGENTS.md`.
 
 ## Estructura
 
