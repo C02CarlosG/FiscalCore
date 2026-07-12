@@ -1,6 +1,8 @@
 # Módulo 4 — COGS / Deducciones · Spec ejecutable (Día 11)
 
-> Estado: **DISEÑO** — blueprint para implementar en los Días 12-15 del plan.
+> Estado: **✅ COMPLETO** (Días 11-15, 2026-07-11). Motor puro, endpoint, casos
+> borde SQL contra Postgres real y E2E — todos implementados y verificados
+> contra el caso Ferretería El Tornillo.
 > Objetivo del módulo (MVP): calcular las **deducciones autorizadas** de una persona
 > moral sobre CFDIs recibidos y efectivamente pagados (Art. 27 LISR), clasificadas en
 > gasto / inversión / costo por `uso_cfdi`.
