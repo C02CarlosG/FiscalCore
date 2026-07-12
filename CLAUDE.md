@@ -13,6 +13,9 @@ Backend FastAPI (FiscalCore). El frontend fue removido; su reescritura futura to
 - `./dev.sh` (o `dev.bat` en Windows) — levanta el backend local en `:8000`.
 - `python -m uvicorn backend.main_api:app --reload --port 8000` — arranca solo el backend.
 - `docker compose up -d db` — PostgreSQL para endpoints con datos.
+- `python -m pytest` — suite completa (`backend/tests/`, config en `pytest.ini`).
+- `python -m pytest -m "not db"` — solo unitarios/mockeados, rápido, sin Postgres.
+- `python -m pytest -m db` — solo integración/E2E contra Postgres real (requiere `docker compose up -d db`).
 
 ## Estilo
 

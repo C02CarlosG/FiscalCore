@@ -13,6 +13,7 @@ This repository contains the FastAPI backend for FiscalCore. The previous React/
 - `./dev.sh` (or `dev.bat` on Windows) starts the backend locally on `http://localhost:8000`.
 - `python -m uvicorn backend.main_api:app --reload --port 8000` starts the backend directly.
 - `docker compose up -d db` starts PostgreSQL for data-backed endpoints.
+- `python -m pytest` runs the test suite (see Testing Guidelines below).
 
 Install backend dependencies inside a virtualenv with `pip install -r requirements.txt`.
 
@@ -22,7 +23,13 @@ Use 4-space indentation for Python. Python modules use snake_case and should kee
 
 ## Testing Guidelines
 
-There is currently no project test command or dedicated `tests/` directory. For backend changes, manually start Uvicorn and verify relevant routes through `/docs` or targeted HTTP requests. When adding tests, place Python tests under `tests/` using `test_*.py`; add the matching test runner command to this guide and project config.
+Tests live under `backend/tests/` (`test_*.py`), configured via `pytest.ini` at the repo root (`testpaths = backend/tests`). Run them with the project's `.venv` (Python 3.11):
+
+- `python -m pytest` — full suite (unit + router-mocked + real-Postgres integration/E2E tests).
+- `python -m pytest -m "not db"` — fast unit-only run (a few seconds), no Postgres required; skips tests marked `db`.
+- `python -m pytest -m db` — only the tests that hit a real Postgres (`docker compose up -d db` first).
+
+Tests that need a real database use `pytestmark = [pytest.mark.db, pytest.mark.skipif(not db_disponible(), reason=...)]`, importing `db_disponible` from `backend/tests/conftest.py` — do not duplicate the connection-probe helper in new test files. For backend changes beyond what tests cover, also start Uvicorn and verify relevant routes through `/docs` or targeted HTTP requests.
 
 ## Commit & Pull Request Guidelines
 
