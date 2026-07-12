@@ -1,20 +1,23 @@
-"""Tests de MotorConciliacion — conciliación banco ↔ CFDI en 3 niveles (Día 17).
+"""Tests de MotorConciliacion — conciliación banco ↔ CFDI (Días 17-18).
 
-Cubre los 3 niveles del pipeline en `backend/motor_fiscal.py::MotorConciliacion`:
+Día 17 cubre los 3 niveles del pipeline de matching directo banco↔CFDI:
 nivel 1 (`_buscar_match`, 1:1 exacto/parcial), nivel 2 (`match_multiple`,
 combinaciones N CFDIs) y nivel 3 (`match_heuristico`, scoring multidimensional),
 más los bordes de tolerancia (`TOLERANCIA_EXACTO` = $0.05, `TOLERANCIA_PARCIAL`
 = 2%) y el orquestador `conciliar()`.
 
-Fuera de alcance de este archivo (Día 18): `_conciliar_con_rep` /
-`enriquecer_estados_ppd` (flujo PPD/REP), `MotorRiesgos` (7 detectores) y
-anticipos SAT — todos son lógica adicional que corre en pasos separados del
-pipeline, no el matching banco↔CFDI en sí.
+Día 18 agrega el flujo PPD/REP: `_conciliar_con_rep()` (banco ↔ complemento de
+pago, score-based) y `enriquecer_estados_ppd()` (clasifica CFDIs PPD por
+estado de cobro). Los 7 detectores de `MotorRiesgos` viven en
+`test_motor_riesgos.py` — anticipos SAT no se prueban aquí: `CFDIResumen` no
+tiene campo `es_anticipo_sat`, esa exclusión ocurre en los loaders de DB
+(`reportes.py`), ya cubierta por `test_isr_cargar_datos.py` /
+`test_deducciones_cargar_datos.py`.
 """
 from datetime import date
 from decimal import Decimal
 
-from backend.motor_fiscal import CFDIResumen, MotorConciliacion, MovResumen
+from backend.motor_fiscal import CFDIResumen, MotorConciliacion, MovResumen, PagoResumen
 
 RFC_EMPRESA = "EMP010101AAA"
 RFC_PROV = "PROV010101AAA"
@@ -47,6 +50,19 @@ def _mov(**kw):
     }
     base.update(kw)
     return MovResumen(**base)
+
+
+def _pago(**kw):
+    base = {
+        "id": "P1",
+        "cfdi_pago_id": "CP1",
+        "uuid_cfdi_pago": "00000000-0000-0000-0000-0000000000P1",
+        "fecha_pago": date(2026, 1, 15),
+        "monto": Decimal("0"),
+        "cfdis_relacionados": [],
+    }
+    base.update(kw)
+    return PagoResumen(**base)
 
 
 def _motor():
@@ -253,3 +269,112 @@ def test_conciliar_movimiento_sin_ningun_candidato_no_genera_falso_match():
     res = _motor().conciliar([mov], [], rfc_empresa=RFC_EMPRESA)
     assert res, "debe reportar al menos que el movimiento quedó sin conciliar"
     assert all(r.tipo_match == "sin_cfdi" and r.movimiento_id == "M1" for r in res)
+
+
+# ─── PPD/REP: _conciliar_con_rep (Día 18) ───────────────────────────────────
+
+
+def test_rep_exacto_liquida_cfdi_da_complemento_total():
+    """Monto y fecha exactos + REP cubre el saldo -> complemento_pago_total, alta."""
+    cfdi = _cfdi(uuid="U1", tipo="I", metodo_pago="PPD", total=Decimal("1000.00"),
+                 monto_cobrado=Decimal("1000.00"))
+    pago = _pago(monto=Decimal("1000.00"), fecha_pago=date(2026, 1, 15),
+                 cfdis_relacionados=["U1"])
+    dep = _mov(monto=Decimal("1000.00"), fecha=date(2026, 1, 15))
+
+    res, movs_conciliados = _motor()._conciliar_con_rep([dep], [pago], {"U1": cfdi})
+
+    assert len(res) == 1
+    assert res[0].tipo_match == "complemento_pago_total"
+    assert res[0].confianza == "alta"
+    assert res[0].saldo_insoluto == Decimal("0")
+    assert movs_conciliados == {"M1"}
+
+
+def test_rep_deja_saldo_insoluto_da_complemento_parcial():
+    """El CFDI queda con saldo pendiente tras el REP -> complemento_pago_parcial."""
+    cfdi = _cfdi(uuid="U1", tipo="I", metodo_pago="PPD", total=Decimal("1000.00"),
+                 monto_cobrado=Decimal("600.00"))
+    pago = _pago(monto=Decimal("600.00"), fecha_pago=date(2026, 1, 15),
+                 cfdis_relacionados=["U1"])
+    dep = _mov(monto=Decimal("600.00"), fecha=date(2026, 1, 15))
+
+    res, _ = _motor()._conciliar_con_rep([dep], [pago], {"U1": cfdi})
+
+    assert res[0].tipo_match == "complemento_pago_parcial"
+    assert res[0].saldo_insoluto == Decimal("400.00")
+
+
+def test_rep_comision_bancaria_dentro_de_2pct_da_confianza_media():
+    """Depósito no coincide exacto con el REP (comisión bancaria) pero cae en 2% -> media."""
+    cfdi = _cfdi(uuid="U1", tipo="I", metodo_pago="PPD", total=Decimal("1000.00"),
+                 monto_cobrado=Decimal("1000.00"))
+    pago = _pago(monto=Decimal("1000.00"), fecha_pago=date(2026, 1, 15),
+                 cfdis_relacionados=["U1"])
+    dep = _mov(monto=Decimal("990.00"), fecha=date(2026, 1, 15))  # 1% menos (comisión)
+
+    res, _ = _motor()._conciliar_con_rep([dep], [pago], {"U1": cfdi})
+
+    assert res[0].tipo_match == "complemento_pago_total"
+    assert res[0].confianza == "media"
+    assert res[0].diferencia == Decimal("-10.00")
+
+
+def test_rep_fuera_de_tolerancia_y_ventana_no_matchea():
+    pago = _pago(monto=Decimal("500.00"), fecha_pago=date(2026, 1, 1))  # 14 días + 100% de diff
+    dep = _mov(monto=Decimal("1000.00"), fecha=date(2026, 1, 15))
+
+    res, movs_conciliados = _motor()._conciliar_con_rep([dep], [pago], {})
+
+    assert res == []
+    assert movs_conciliados == set()
+
+
+def test_rep_no_se_reutiliza_entre_dos_depositos():
+    """Cada REP se usa como máximo una vez (dedup por pago.id)."""
+    cfdi = _cfdi(uuid="U1", tipo="I", metodo_pago="PPD", total=Decimal("600.00"),
+                 monto_cobrado=Decimal("600.00"))
+    pago = _pago(monto=Decimal("600.00"), fecha_pago=date(2026, 1, 15), cfdis_relacionados=["U1"])
+    dep_a = _mov(id="MA", monto=Decimal("600.00"), fecha=date(2026, 1, 15))
+    dep_b = _mov(id="MB", monto=Decimal("600.00"), fecha=date(2026, 1, 15))
+
+    res, movs_conciliados = _motor()._conciliar_con_rep([dep_a, dep_b], [pago], {"U1": cfdi})
+
+    assert len(res) == 1
+    assert res[0].movimiento_id == "MA"
+    assert movs_conciliados == {"MA"}
+
+
+# ─── PPD/REP: enriquecer_estados_ppd (Día 18) ───────────────────────────────
+
+
+def test_enriquecer_ppd_sin_rep_queda_pendiente():
+    cfdi = _cfdi(uuid="U1", tipo="I", metodo_pago="PPD")
+    MotorConciliacion.enriquecer_estados_ppd([cfdi], [])
+    assert cfdi.tiene_rep is False
+    assert cfdi.estado_pago == "pendiente_rep"
+
+
+def test_enriquecer_ppd_pagado_total():
+    cfdi = _cfdi(uuid="U2", tipo="I", metodo_pago="PPD", total=Decimal("1000"),
+                 monto_cobrado=Decimal("1000"))
+    pago = _pago(cfdis_relacionados=["U2"])
+    MotorConciliacion.enriquecer_estados_ppd([cfdi], [pago])
+    assert cfdi.tiene_rep is True
+    assert cfdi.estado_pago == "pagado_total"
+
+
+def test_enriquecer_ppd_pagado_parcial():
+    cfdi = _cfdi(uuid="U3", tipo="I", metodo_pago="PPD", total=Decimal("1000"),
+                 monto_cobrado=Decimal("400"))
+    pago = _pago(cfdis_relacionados=["U3"])
+    MotorConciliacion.enriquecer_estados_ppd([cfdi], [pago])
+    assert cfdi.estado_pago == "pagado_parcial"
+
+
+def test_enriquecer_no_afecta_cfdis_pue():
+    """enriquecer_estados_ppd solo toca metodo_pago == PPD; PUE queda intacto."""
+    cfdi = _cfdi(uuid="U4", tipo="I", metodo_pago="PUE")
+    MotorConciliacion.enriquecer_estados_ppd([cfdi], [])
+    assert cfdi.tiene_rep is False
+    assert cfdi.estado_pago == ""
