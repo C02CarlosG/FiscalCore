@@ -48,3 +48,37 @@ describe("createQueryClient", () => {
     expect(onUnauthorized).not.toHaveBeenCalled();
   });
 });
+
+describe("createQueryClient mutations", () => {
+  it("clears the session and calls onUnauthorized on a 401 ApiError from a mutation", async () => {
+    saveSession(loginResponse);
+    const onUnauthorized = vi.fn();
+    const queryClient = createQueryClient(onUnauthorized);
+
+    const mutation = queryClient.getMutationCache().build(queryClient, {
+      mutationFn: () => {
+        throw new ApiError(401, "no autorizado");
+      },
+    });
+
+    await mutation.execute(undefined).catch(() => undefined);
+
+    expect(onUnauthorized).toHaveBeenCalledTimes(1);
+    expect(getToken()).toBeNull();
+  });
+
+  it("does not call onUnauthorized for non-401 mutation errors", async () => {
+    const onUnauthorized = vi.fn();
+    const queryClient = createQueryClient(onUnauthorized);
+
+    const mutation = queryClient.getMutationCache().build(queryClient, {
+      mutationFn: () => {
+        throw new ApiError(500, "error de servidor");
+      },
+    });
+
+    await mutation.execute(undefined).catch(() => undefined);
+
+    expect(onUnauthorized).not.toHaveBeenCalled();
+  });
+});
