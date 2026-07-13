@@ -133,7 +133,11 @@ def test_anticipo_sat_se_excluye(empresa_isr):
     assert ingresos_por_mes[1] == Decimal("0")
 
 
-def test_retencion_isr_del_mes_declarado(empresa_isr):
+def test_retencion_isr_por_mes(empresa_isr):
+    """El loader devuelve la retención de CADA mes del ejercicio hasta el
+    declarado, no solo la del mes declarado — necesario para que
+    isr.isr_provisional recalcule correctamente el pago real de los meses
+    anteriores (fix Kilo Code Review, PR #4)."""
     from backend.routers.reportes import _cargar_datos_isr
 
     db, empresa_id = empresa_isr
@@ -142,10 +146,11 @@ def test_retencion_isr_del_mes_declarado(empresa_isr):
     _cfdi(db, empresa_id, "RET-FEB", fecha_emision="2026-02-10",
           subtotal=Decimal("1000"), total=Decimal("1000"), isr_retenido=Decimal("50"))
 
-    _, _, retencion_enero = _cargar_datos_isr(empresa_id, "2026-01")
-    _, _, retencion_febrero = _cargar_datos_isr(empresa_id, "2026-02")
-    assert retencion_enero == Decimal("100")
-    assert retencion_febrero == Decimal("50")
+    _, _, retenciones_enero = _cargar_datos_isr(empresa_id, "2026-01")
+    _, _, retenciones_febrero = _cargar_datos_isr(empresa_id, "2026-02")
+
+    assert retenciones_enero == {1: Decimal("100")}
+    assert retenciones_febrero == {1: Decimal("100"), 2: Decimal("50")}
 
 
 def test_continuidad_del_acumulado_multi_mes(empresa_isr):
@@ -168,7 +173,7 @@ def test_sin_config_isr_devuelve_none(empresa_isr):
     db, empresa_id = empresa_isr
     db.execute("DELETE FROM config_isr_empresa WHERE empresa_id = %s", (empresa_id,))
 
-    config, ingresos_por_mes, retencion = _cargar_datos_isr(empresa_id, "2026-01")
+    config, ingresos_por_mes, retenciones_por_mes = _cargar_datos_isr(empresa_id, "2026-01")
     assert config is None
     assert ingresos_por_mes == {}
-    assert retencion == Decimal("0")
+    assert retenciones_por_mes == {}
