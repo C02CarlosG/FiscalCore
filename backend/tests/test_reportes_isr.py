@@ -23,17 +23,17 @@ def _config(**kw):
 def _fixture_caso_a_marzo():
     """Caso A de la spec: acumulado ene-mar 2026 -> pago de marzo = 20,400."""
     ingresos_por_mes = {1: Decimal("1000000"), 2: Decimal("2200000"), 3: Decimal("3000000")}
-    return _config(), ingresos_por_mes, Decimal("0")
+    return _config(), ingresos_por_mes, {}
 
 
 def _fixture_con_retencion():
     """Caso B: enero con retención de ISR 1,500 -> pago 24,000."""
     ingresos_por_mes = {1: Decimal("1000000")}
-    return _config(), ingresos_por_mes, Decimal("1500")
+    return _config(), ingresos_por_mes, {1: Decimal("1500")}
 
 
 def _fixture_sin_config():
-    return None, {}, Decimal("0")
+    return None, {}, {}
 
 
 def _override(monkeypatch, fixture=_fixture_caso_a_marzo):
@@ -88,3 +88,22 @@ def test_isr_provisional_sin_config_404(monkeypatch):
     finally:
         main.app.dependency_overrides.clear()
     assert resp.status_code == 404
+
+
+def _fixture_retencion_mes_anterior():
+    """Regresión Kilo (PR #4): enero retuvo 5,000 -> pago real de enero 20,500,
+    no 25,500. El pago de febrero debe restar ese pago real como pagos_previos."""
+    ingresos_por_mes = {1: Decimal("1000000"), 2: Decimal("2200000")}
+    return _config(), ingresos_por_mes, {1: Decimal("5000")}
+
+
+def test_isr_provisional_retencion_de_mes_anterior_no_subestima_el_pago(monkeypatch):
+    _override(monkeypatch, _fixture_retencion_mes_anterior)
+    try:
+        resp = client.get("/api/v1/empresas/emp-1/isr-provisional/2026-02")
+    finally:
+        main.app.dependency_overrides.clear()
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["pagos_provisionales_anteriores"] == 20500.0
+    assert body["resultado"]["pago_del_mes"] == 35600.0

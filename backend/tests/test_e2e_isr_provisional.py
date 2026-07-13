@@ -46,14 +46,15 @@ def _limpiar(db):
     db.execute("DELETE FROM usuarios WHERE email = %s", (EMAIL,))
 
 
-def _insertar_cfdi(db, empresa_id, uuid, fecha_emision, subtotal):
+def _insertar_cfdi(db, empresa_id, uuid, fecha_emision, subtotal, isr_retenido="0"):
     db.execute(
         """
         INSERT INTO cfdi (empresa_id, uuid, tipo_comprobante, metodo_pago, forma_pago,
-                          estado, rfc_emisor, rfc_receptor, fecha_emision, subtotal, total)
-        VALUES (%s, %s, 'I', 'PUE', '03', 'vigente', %s, 'XAXX010101000', %s, %s, %s)
+                          estado, rfc_emisor, rfc_receptor, fecha_emision, subtotal, total,
+                          isr_retenido)
+        VALUES (%s, %s, 'I', 'PUE', '03', 'vigente', %s, 'XAXX010101000', %s, %s, %s, %s)
         """,
-        (empresa_id, uuid, RFC, fecha_emision, subtotal, subtotal),
+        (empresa_id, uuid, RFC, fecha_emision, subtotal, subtotal, isr_retenido),
     )
 
 
@@ -145,5 +146,52 @@ def test_e2e_isr_provisional_sin_cu_devuelve_404():
         # Sin config_isr_empresa capturada -> 404 controlado (no 500)
         r = client.get(f"/api/v1/empresas/{empresa_id}/isr-provisional/2026-01", headers=headers)
         assert r.status_code == 404
+    finally:
+        _limpiar(db)
+
+
+def test_e2e_isr_provisional_retencion_de_mes_anterior_no_subestima_el_pago():
+    """Regresión Kilo Code Review (PR #4), de punta a punta contra Postgres real:
+    enero retuvo $5,000 de ISR -> su pago real fue 20,500, no 25,500. El pago de
+    febrero debe restar ese pago real como pagos_previos, no el ISR acumulado
+    bruto de enero ignorando su retención."""
+    from backend import db
+
+    db.init_db()
+    _limpiar(db)
+
+    from fastapi.testclient import TestClient
+    import backend.main_api as main
+
+    client = TestClient(main.app)
+    try:
+        r = client.post("/api/v1/auth/register",
+                        json={"email": EMAIL, "password": "Test1234!", "nombre": "E2E ISR"})
+        assert r.status_code == 201, r.text
+        headers = {"Authorization": f"Bearer {r.json()['access_token']}"}
+
+        r = client.post("/api/v1/mis-empresas", headers=headers,
+                        json={"rfc": RFC, "razon_social": "E2E ISR Retención"})
+        assert r.status_code == 201, r.text
+        empresa_id = r.json()["empresa_id"]
+
+        db.execute(
+            """
+            INSERT INTO config_isr_empresa (empresa_id, ejercicio, coeficiente_utilidad,
+                                            perdidas_pendientes, ptu_pagada, tasa_isr)
+            VALUES (%s, %s, %s, 0, 0, 0.30)
+            """,
+            (empresa_id, EJERCICIO, Decimal("0.0850")),
+        )
+
+        _insertar_cfdi(db, empresa_id, "E2E-RET-ENE", "2026-01-15", "1000000", isr_retenido="5000")
+        _insertar_cfdi(db, empresa_id, "E2E-RET-FEB", "2026-02-15", "1200000")
+
+        r_feb = client.get(f"/api/v1/empresas/{empresa_id}/isr-provisional/2026-02", headers=headers)
+        assert r_feb.status_code == 200, r_feb.text
+        feb = r_feb.json()
+
+        assert feb["pagos_provisionales_anteriores"] == 20500.0
+        assert feb["resultado"]["pago_del_mes"] == 35600.0
     finally:
         _limpiar(db)

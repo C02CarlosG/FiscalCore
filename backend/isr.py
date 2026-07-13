@@ -26,14 +26,22 @@ def _pago_sin_quantizar(
     tasa: Decimal,
     ptu: Decimal,
     perdidas: Decimal,
-    retencion_mes: Decimal,
+    retenciones_por_mes: dict[int, Decimal],
 ) -> Decimal:
-    """Pago del mes dado, sin redondear (recursión sobre meses anteriores)."""
+    """Pago del mes dado, sin redondear (recursión sobre meses anteriores).
+
+    Cada mes anterior resta su propia retención (``retenciones_por_mes.get(m)``),
+    no la del mes que se está calculando: el pago real de un mes previo ya vino
+    reducido por lo que le retuvieron a él, y es ese pago real el que debe
+    descontarse como "pago previo" del mes actual (Art. 14 LISR, fracción III).
+    """
     isr_acumulado = _isr_acumulado(ingresos_por_mes[mes], cu, tasa, ptu, perdidas)
     pagos_previos = sum(
-        (_pago_sin_quantizar(ingresos_por_mes, m, cu, tasa, ptu, perdidas, Decimal("0")) for m in range(1, mes)),
+        (_pago_sin_quantizar(ingresos_por_mes, m, cu, tasa, ptu, perdidas, retenciones_por_mes)
+         for m in range(1, mes)),
         Decimal("0"),
     )
+    retencion_mes = retenciones_por_mes.get(mes, Decimal("0"))
     return max(isr_acumulado - pagos_previos - retencion_mes, Decimal("0"))
 
 
@@ -44,12 +52,15 @@ def isr_provisional(
     tasa: Decimal,
     ptu: Decimal,
     perdidas: Decimal,
-    retencion_mes: Decimal,
+    retenciones_por_mes: dict[int, Decimal],
 ) -> dict:
     """Pago provisional de ISR del ``mes`` dado, acumulado del ejercicio (Art. 14 LISR).
 
     ``ingresos_por_mes`` mapea mes -> ingreso nominal acumulado del ejercicio a ese
-    corte (enero..mes). La retención solo aplica al mes declarado.
+    corte (enero..mes). ``retenciones_por_mes`` mapea mes -> ISR retenido ESE mes
+    (no solo el mes declarado): se necesita el histórico completo porque
+    ``pagos_previos`` recalcula el pago real de cada mes anterior, y ese pago real
+    ya vino reducido por su propia retención.
     """
     q = lambda d: d.quantize(CENTAVOS)
 
@@ -59,9 +70,11 @@ def isr_provisional(
     isr_acumulado = base_gravable * tasa
 
     pagos_previos = sum(
-        (_pago_sin_quantizar(ingresos_por_mes, m, cu, tasa, ptu, perdidas, Decimal("0")) for m in range(1, mes)),
+        (_pago_sin_quantizar(ingresos_por_mes, m, cu, tasa, ptu, perdidas, retenciones_por_mes)
+         for m in range(1, mes)),
         Decimal("0"),
     )
+    retencion_mes = retenciones_por_mes.get(mes, Decimal("0"))
     pago_del_mes = max(isr_acumulado - pagos_previos - retencion_mes, Decimal("0"))
 
     return {
