@@ -323,8 +323,11 @@ async def cedula_iva(
 
 def _cargar_datos_isr(empresa_id: str, periodo: str):
     """Carga de DB los insumos del pago provisional: config anual (CU/PTU/pérdidas/
-    tasa) y el ingreso nominal acumulado del ejercicio a cada corte mensual (ene..mes),
-    más la retención de ISR del mes declarado. Devuelve ``(None, {}, 0)`` si no hay
+    tasa), el ingreso nominal acumulado del ejercicio a cada corte mensual (ene..mes)
+    y la retención de ISR de CADA mes del ejercicio hasta el declarado (no solo el
+    mes declarado: ``isr.isr_provisional`` recalcula el pago real de los meses
+    anteriores, y ese pago real ya viene reducido por su propia retención — ver
+    fix de Kilo Code Review en PR #4). Devuelve ``(None, {}, {})`` si no hay
     ``config_isr_empresa`` para el ejercicio (falta el CU)."""
     emp = db.query_one("SELECT rfc FROM empresas WHERE id = %s", (empresa_id,))
     if not emp:
@@ -342,7 +345,7 @@ def _cargar_datos_isr(empresa_id: str, periodo: str):
         (empresa_id, ejercicio),
     )
     if not config:
-        return None, {}, Decimal("0")
+        return None, {}, {}
 
     filas = db.query_all(
         """
@@ -370,22 +373,26 @@ def _cargar_datos_isr(empresa_id: str, periodo: str):
         acumulado += ingreso_del_mes.get(m, Decimal("0"))
         ingresos_por_mes[m] = acumulado
 
-    retencion = db.query_one(
+    filas_retencion = db.query_all(
         """
-        SELECT COALESCE(SUM(c.isr_retenido), 0) AS isr_retenido
+        SELECT EXTRACT(MONTH FROM c.fecha_emision)::int AS mes,
+               COALESCE(SUM(c.isr_retenido), 0) AS isr_retenido
         FROM cfdi c
         JOIN empresas e ON e.id = c.empresa_id
         WHERE c.empresa_id = %s
           AND c.rfc_emisor = e.rfc
           AND c.estado = 'vigente'
-          AND c.fecha_emision >= (%s || '-01')::date
+          AND c.fecha_emision >= (%s || '-01-01')::date
           AND c.fecha_emision  < ((%s || '-01')::date + INTERVAL '1 month')
+        GROUP BY EXTRACT(MONTH FROM c.fecha_emision)
         """,
-        (empresa_id, periodo, periodo),
+        (empresa_id, ejercicio, periodo),
     )
-    retencion_mes = Decimal(str(retencion["isr_retenido"])) if retencion else Decimal("0")
+    retenciones_por_mes = {
+        int(f["mes"]): Decimal(str(f["isr_retenido"])) for f in filas_retencion
+    }
 
-    return config, ingresos_por_mes, retencion_mes
+    return config, ingresos_por_mes, retenciones_por_mes
 
 
 @router.get("/api/v1/empresas/{empresa_id}/isr-provisional/{periodo}")
@@ -400,7 +407,7 @@ async def isr_provisional_endpoint(
         raise HTTPException(status_code=422, detail="periodo inválido; formato esperado YYYY-MM")
     validar_acceso_empresa(empresa_id, current_user)
 
-    config, ingresos_por_mes, retencion_mes = _cargar_datos_isr(empresa_id, periodo)
+    config, ingresos_por_mes, retenciones_por_mes = _cargar_datos_isr(empresa_id, periodo)
     if not config:
         raise HTTPException(
             status_code=404,
@@ -413,7 +420,7 @@ async def isr_provisional_endpoint(
     ptu = Decimal(str(config["ptu_pagada"]))
     perdidas = Decimal(str(config["perdidas_pendientes"]))
 
-    calculo = isr.isr_provisional(ingresos_por_mes, mes, cu, tasa, ptu, perdidas, retencion_mes)
+    calculo = isr.isr_provisional(ingresos_por_mes, mes, cu, tasa, ptu, perdidas, retenciones_por_mes)
 
     return _floats({
         "empresa_id": empresa_id,
