@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getToken, clearSession } from "@/lib/auth";
 import { apiFetch, ApiError } from "@/lib/api-client";
+import { AppHeader } from "@/components/layout/AppHeader";
 
 type GuardStatus = "checking" | "authorized" | "unauthorized";
 
@@ -45,5 +46,10 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
     return null;
   }
 
-  return <>{children}</>;
+  return (
+    <>
+      <AppHeader />
+      {children}
+    </>
+  );
 }
