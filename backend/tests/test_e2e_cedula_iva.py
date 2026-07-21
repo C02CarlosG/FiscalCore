@@ -3,30 +3,16 @@
 Se salta automáticamente si no hay DB disponible, para no romper la suite en
 entornos sin Postgres. Levantar la DB con: `docker compose up -d db`.
 """
-import os
-
-import psycopg2
 import pytest
 
-DATABASE_URL = os.environ.get(
-    "DATABASE_URL", "postgresql://postgres:postgres@127.0.0.1:5432/fiscalcore"
-)
+from backend.tests.conftest import db_disponible
 
 RFC = "COE010101E2E"
 EMAIL = "e2e-cedula-iva@test.local"
 PERIODO = "2026-01"
 
 
-def _db_disponible() -> bool:
-    try:
-        conn = psycopg2.connect(DATABASE_URL, connect_timeout=2)
-        conn.close()
-        return True
-    except Exception:
-        return False
-
-
-pytestmark = pytest.mark.skipif(not _db_disponible(), reason="Postgres no disponible (docker compose up -d db)")
+pytestmark = [pytest.mark.db, pytest.mark.skipif(not db_disponible(), reason="Postgres no disponible (docker compose up -d db)")]
 
 
 def _limpiar(db):

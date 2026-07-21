@@ -5,31 +5,18 @@ A diferencia del motor puro (test_isr.py) y del endpoint mockeado
 filtran correctamente los CFDIs (casos borde §2 de la spec) y que el ingreso
 nominal se acumula mes a mes. Se salta si no hay DB (Día 9).
 """
-import os
 from decimal import Decimal
 
-import psycopg2
 import pytest
 
-DATABASE_URL = os.environ.get(
-    "DATABASE_URL", "postgresql://postgres:postgres@127.0.0.1:5432/fiscalcore"
-)
+from backend.tests.conftest import db_disponible
 
 RFC = "COE010101ISR"
 OTRO_RFC = "PROV010101AAA"
 EJERCICIO = "2026"
 
 
-def _db_disponible() -> bool:
-    try:
-        conn = psycopg2.connect(DATABASE_URL, connect_timeout=2)
-        conn.close()
-        return True
-    except Exception:
-        return False
-
-
-pytestmark = pytest.mark.skipif(not _db_disponible(), reason="Postgres no disponible (docker compose up -d db)")
+pytestmark = [pytest.mark.db, pytest.mark.skipif(not db_disponible(), reason="Postgres no disponible (docker compose up -d db)")]
 
 
 def _limpiar(db, empresa_id=None):
