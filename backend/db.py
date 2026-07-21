@@ -190,6 +190,9 @@ def init_db() -> None:
         # 024 es idempotente — config anual de ISR provisional (coeficiente de utilidad, PTU, pérdidas, tasa)
         _run_sql_file("024_coeficiente_utilidad.sql")
 
+        # 025 es idempotente — amplía tipo_match a VARCHAR(30) (complemento_pago_total/_parcial no cabían en 20)
+        _run_sql_file("025_ampliar_tipo_match.sql")
+
         # Seed inicial: usuario admin si la base aún no tiene usuarios
         _seed_admin()
 
