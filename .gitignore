@@ -1,6 +1,7 @@
 # Dependencias
 node_modules/
 .venv/
+.venv-test/
 venv/
 __pycache__/
 *.pyc

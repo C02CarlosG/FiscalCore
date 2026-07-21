@@ -1,5 +1,8 @@
-from __future__ import annotations
-
+# NOTA: NO usar `from __future__ import annotations` en este módulo.
+# El endpoint `login` está envuelto por @limiter.limit (slowapi), cuyo wrapper
+# expone los __globals__ de slowapi. Con anotaciones diferidas (strings),
+# FastAPI/pydantic intentan resolver el forward-ref `LoginRequest` contra ese
+# namespace equivocado y truena al importar. Con anotaciones reales no ocurre.
 import logging
 from typing import Optional
 
