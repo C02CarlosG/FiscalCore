@@ -306,8 +306,11 @@ class MotorConciliacion:
 
         depositos = [m for m in movimientos if m.tipo == "deposito"]
         cargos    = [m for m in movimientos if m.tipo == "cargo"]
-        ingresos  = [c for c in cfdis if c.tipo == "I" and c.estado == "vigente"]
-        egresos   = [c for c in cfdis if c.tipo == "E" and c.estado == "vigente"]
+        # Ventas: CFDI tipo I emitido por la empresa (candidatos para depósitos).
+        # Gastos: CFDI tipo I recibido por la empresa (candidatos para cargos).
+        # tipo "E" es nota de crédito, no un gasto -> nunca es candidato de cargo.
+        ingresos  = [c for c in cfdis if c.tipo == "I" and c.estado == "vigente" and c.rfc_emisor == rfc_empresa]
+        egresos   = [c for c in cfdis if c.tipo == "I" and c.estado == "vigente" and c.rfc_receptor == rfc_empresa]
 
         # ── Paso 0: Enriquecer estados PPD (debe ocurrir antes de cualquier matching)
         # Esto permite que cfdi_no_cobrados / cfdi_no_pagados no generen falsos positivos.

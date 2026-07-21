@@ -228,8 +228,12 @@ def test_heuristico_score_bajo_da_sin_cfdi():
 
 
 def test_conciliar_deposito_y_cargo_exactos():
-    cfdi_ingreso = _cfdi(id="CI", tipo="I", total=Decimal("1000.00"))
-    cfdi_egreso = _cfdi(id="CE", tipo="E", total=Decimal("500.00"))
+    # Venta: la empresa es EMISORA (candidata a depósito).
+    cfdi_ingreso = _cfdi(id="CI", tipo="I", rfc_emisor=RFC_EMPRESA, rfc_receptor="CLIENTE010101XYZ",
+                        total=Decimal("1000.00"))
+    # Gasto real: CFDI tipo I donde la empresa es RECEPTORA (candidato a cargo).
+    # tipo "E" (nota de crédito) NUNCA es candidato de cargo — ver test de regresión abajo.
+    cfdi_egreso = _cfdi(id="CE", tipo="I", total=Decimal("500.00"))
     dep = _mov(id="MD", tipo="deposito", monto=Decimal("1000.00"), rfc_detectado=RFC_EMPRESA)
     cargo = _mov(id="MC", tipo="cargo", monto=Decimal("-500.00"), rfc_detectado=RFC_PROV)
 
@@ -240,6 +244,43 @@ def test_conciliar_deposito_y_cargo_exactos():
     assert por_mov["MD"].cfdi_id == "CI"
     assert por_mov["MC"].tipo_match == "exacto"
     assert por_mov["MC"].cfdi_id == "CE"
+
+
+def test_conciliar_cargo_no_matchea_contra_nota_de_credito():
+    """Regresión: un CFDI tipo E (nota de crédito) NUNCA es candidato de cargo.
+
+    Antes del fix, `egresos` se construía con `tipo == "E"`, así que un cargo
+    bancario solo podía conciliar contra notas de crédito, nunca contra la
+    factura de compra real (tipo I recibido) — en cualquier instalación real,
+    todo gasto pagado por transferencia se reportaba como 'sin_cfdi'.
+    Reproducido en vivo durante la validación E2E de la Fase C (Día 26-27).
+    """
+    nota_credito = _cfdi(id="NC", tipo="E", total=Decimal("500.00"))
+    gasto_real = _cfdi(id="G1", tipo="I", total=Decimal("500.00"))
+    cargo = _mov(id="MC", tipo="cargo", monto=Decimal("-500.00"), rfc_detectado=RFC_PROV)
+
+    res = _motor().conciliar([cargo], [nota_credito, gasto_real], rfc_empresa=RFC_EMPRESA)
+
+    match_cargo = next(r for r in res if r.movimiento_id == "MC")
+    assert match_cargo.tipo_match == "exacto"
+    assert match_cargo.cfdi_id == "G1"  # matchea contra el gasto real, no la NC
+
+
+def test_conciliar_ingresos_excluye_cfdis_recibidos():
+    """Regresión: un CFDI recibido (compra) no debe ser candidato de depósito.
+
+    Antes del fix, `ingresos` no filtraba por `rfc_emisor`, así que una compra
+    (tipo I, empresa receptora) del mismo monto que un depósito real podía
+    generar un falso match de venta.
+    """
+    compra = _cfdi(id="G1", tipo="I", total=Decimal("1000.00"))  # empresa es receptora
+    dep = _mov(id="MD", tipo="deposito", monto=Decimal("1000.00"), rfc_detectado=RFC_EMPRESA)
+
+    res = _motor().conciliar([dep], [compra], rfc_empresa=RFC_EMPRESA)
+
+    match_dep = next(r for r in res if r.movimiento_id == "MD")
+    assert match_dep.tipo_match == "sin_cfdi"
+    assert match_dep.cfdi_id is None
 
 
 def test_conciliar_cfdi_vigente_sin_movimiento_bancario():
