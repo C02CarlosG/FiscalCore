@@ -301,15 +301,16 @@ def test_conciliar_excluye_cfdis_cancelados():
 
 
 def test_conciliar_movimiento_sin_ningun_candidato_no_genera_falso_match():
-    """Caracterización: un movimiento sin ningún CFDI candidato en todo el
-    pipeline pasa por los 3 niveles y cada uno reporta 'sin_cfdi' — el
-    resultado trae duplicados (uno por nivel) en vez de una sola fila.
-    Deuda técnica conocida (no se corrige aquí, Día 17 es solo de pruebas):
-    el pipeline no deduplica 'sin_cfdi' por movimiento_id entre niveles."""
+    """Un movimiento sin ningún CFDI candidato en todo el pipeline pasa por
+    los 3 niveles (1:1, multi-match, heurístico) y debe reportar UNA sola
+    fila 'sin_cfdi', no una por nivel. Regresión: antes cada nivel agregaba
+    su propio 'sin_cfdi' sin descartar el de los niveles anteriores para el
+    mismo movimiento_id."""
     mov = _mov(monto=Decimal("1000.00"))
     res = _motor().conciliar([mov], [], rfc_empresa=RFC_EMPRESA)
-    assert res, "debe reportar al menos que el movimiento quedó sin conciliar"
-    assert all(r.tipo_match == "sin_cfdi" and r.movimiento_id == "M1" for r in res)
+    assert len(res) == 1, f"esperaba 1 sola fila 'sin_cfdi', llegaron {len(res)}"
+    assert res[0].tipo_match == "sin_cfdi"
+    assert res[0].movimiento_id == "M1"
 
 
 # ─── PPD/REP: _conciliar_con_rep (Día 18) ───────────────────────────────────
