@@ -258,11 +258,14 @@ def _cargar_datos_cedula_iva(empresa_id: str, periodo: str):
 
     diot = db.query_one(
         """
-        SELECT COALESCE(SUM(c.iva_trasladado), 0) AS iva
+        SELECT COALESCE(SUM(
+                 CASE WHEN c.tipo_comprobante = 'E' THEN -c.iva_trasladado ELSE c.iva_trasladado END
+               ), 0) AS iva
         FROM cfdi c
         JOIN empresas e ON e.id = c.empresa_id
         WHERE c.empresa_id = %s
           AND c.rfc_receptor = e.rfc
+          AND c.tipo_comprobante IN ('I', 'E')
           AND c.estado = 'vigente'
           AND c.fecha_emision >= (%s || '-01')::date
           AND c.fecha_emision  < ((%s || '-01')::date + INTERVAL '1 month')

@@ -24,16 +24,17 @@ def _limpiar(db):
     db.execute("DELETE FROM usuarios WHERE email = %s", (EMAIL,))
 
 
-def _insertar_cfdi(db, empresa_id, uuid, emisor, receptor, subtotal, total, iva):
+def _insertar_cfdi(db, empresa_id, uuid, emisor, receptor, subtotal, total, iva,
+                    tipo_comprobante="I"):
     db.execute(
         """
         INSERT INTO cfdi (empresa_id, uuid, tipo_comprobante, metodo_pago, forma_pago,
                           estado, rfc_emisor, rfc_receptor, fecha_emision,
                           subtotal, total, iva_trasladado)
-        VALUES (%s, %s, 'I', 'PUE', '03', 'vigente', %s, %s, '2026-01-10',
+        VALUES (%s, %s, %s, 'PUE', '03', 'vigente', %s, %s, '2026-01-10',
                 %s, %s, %s)
         """,
-        (empresa_id, uuid, emisor, receptor, subtotal, total, iva),
+        (empresa_id, uuid, tipo_comprobante, emisor, receptor, subtotal, total, iva),
     )
 
 
@@ -75,5 +76,44 @@ def test_e2e_cedula_iva_consultora():
         assert body["acreditable"]["bruto"] == 736.0
         assert body["resultado"]["iva_por_pagar"] == 864.0
         assert body["resultado"]["saldo_a_cargo"] == 864.0
+    finally:
+        _limpiar(db)
+
+
+def test_e2e_cedula_iva_diot_resta_notas_credito_recibidas():
+    """Regresión: una nota de crédito recibida (tipo 'E') debe RESTAR del
+    comparativo DIOT, no sumarse como si fuera un gasto más."""
+    from backend import db
+
+    db.init_db()
+    _limpiar(db)
+
+    from fastapi.testclient import TestClient
+    import backend.main_api as main
+
+    client = TestClient(main.app)
+    try:
+        r = client.post("/api/v1/auth/register",
+                        json={"email": EMAIL, "password": "Test1234!", "nombre": "E2E"})
+        assert r.status_code == 201, r.text
+        headers = {"Authorization": f"Bearer {r.json()['access_token']}"}
+
+        r = client.post("/api/v1/mis-empresas", headers=headers,
+                        json={"rfc": RFC, "razon_social": "Consultora E2E"})
+        assert r.status_code == 201, r.text
+        empresa_id = r.json()["empresa_id"]
+
+        # Ingreso $1,600 IVA + 1 gasto $200 IVA + 1 NC recibida $50 IVA
+        # DIOT esperado (devengado, recibidos): 200 - 50 = 150 (no 250)
+        _insertar_cfdi(db, empresa_id, "E2E-ING", RFC, "XAXX010101000", "10000", "11600", "1600")
+        _insertar_cfdi(db, empresa_id, "E2E-GAS", "PROV010101AAA", RFC, "1000", "1160", "200")
+        _insertar_cfdi(db, empresa_id, "E2E-NC", "PROV010101AAA", RFC, "250", "290", "50",
+                       tipo_comprobante="E")
+
+        r = client.get(f"/api/v1/empresas/{empresa_id}/cedula-iva/{PERIODO}", headers=headers)
+        assert r.status_code == 200, r.text
+        body = r.json()
+
+        assert body["comparativo_sat"]["diot_iva_pagado"] == 150.0
     finally:
         _limpiar(db)
