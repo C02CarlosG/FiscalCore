@@ -66,5 +66,8 @@
     "additionalDirectories": [
       "/tmp"
     ]
-  }
+  },
+  "enabledMcpjsonServers": [
+    "postgres"
+  ]
 }
