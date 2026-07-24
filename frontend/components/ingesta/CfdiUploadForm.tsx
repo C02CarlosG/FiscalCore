@@ -37,6 +37,7 @@ export function CfdiUploadForm({ empresaId }: { empresaId: string }) {
       });
       setResultado(response);
       setArchivos(null);
+      setPeriodo("");
       event.currentTarget.reset();
     } catch (err) {
       if (err instanceof ApiError) {
@@ -63,6 +64,7 @@ export function CfdiUploadForm({ empresaId }: { empresaId: string }) {
 
       <div className="space-y-2">
         <Label htmlFor="cfdi-archivos">Archivos XML</Label>
+        {/* sin accept=".xml": rompe el test de error de backend — user-event filtra el archivo por accept antes de disparar change */}
         <Input
           id="cfdi-archivos"
           type="file"
