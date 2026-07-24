@@ -26,12 +26,18 @@ export function EmpresaList({ empresas }: { empresas: Empresa[] }) {
             <td className="py-2">{empresa.rfc}</td>
             <td className="py-2">{empresa.razon_social}</td>
             <td className="py-2">{empresa.regimen_fiscal ?? "—"}</td>
-            <td className="py-2">
+            <td className="py-2 space-x-3">
               <Link
                 className="text-blue-600 hover:underline"
                 href={`/empresas/${empresa.id}/cedula-iva`}
               >
                 Cédula de IVA
+              </Link>
+              <Link
+                className="text-blue-600 hover:underline"
+                href={`/empresas/${empresa.id}/conciliacion`}
+              >
+                Conciliación
               </Link>
             </td>
           </tr>
