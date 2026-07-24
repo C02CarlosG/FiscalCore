@@ -95,4 +95,36 @@ describe("apiFetch", () => {
       expect((err as ApiError).fieldErrors).toEqual({ rfc: "campo requerido" });
     }
   });
+
+  it("does not add a Content-Type header when the body is FormData", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(mockResponse(200, { ok: true }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const formData = new FormData();
+    formData.append("periodo", "2026-07");
+    await apiFetch("/api/v1/empresas/e1/cfdi/upload", {
+      method: "POST",
+      body: formData,
+    });
+
+    const [, options] = fetchMock.mock.calls[0];
+    expect(
+      (options.headers as Record<string, string>)["Content-Type"],
+    ).toBeUndefined();
+  });
+
+  it("adds a Content-Type header of application/json for a plain object body", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(mockResponse(200, { ok: true }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await apiFetch("/api/v1/mis-empresas", {
+      method: "POST",
+      body: JSON.stringify({ rfc: "AAA010101AAA" }),
+    });
+
+    const [, options] = fetchMock.mock.calls[0];
+    expect((options.headers as Record<string, string>)["Content-Type"]).toBe(
+      "application/json",
+    );
+  });
 });
