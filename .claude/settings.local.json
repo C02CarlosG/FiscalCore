@@ -66,9 +66,5 @@
     "additionalDirectories": [
       "/tmp"
     ]
-  },
-  "enabledMcpjsonServers": [
-    "postgres"
-  ],
-  "outputStyle": "Proactive"
+  }
 }
