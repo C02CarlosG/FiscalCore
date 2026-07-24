@@ -135,3 +135,10 @@ export interface CedulaIva {
   resultado: ResultadoIva;
   comparativo_sat: ComparativoSat;
 }
+
+export interface IngestaResponse {
+  mensaje: string;
+  registros_procesados: number;
+  errores: string[];
+  periodo: string;
+}
