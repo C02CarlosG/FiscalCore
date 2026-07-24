@@ -51,3 +51,4 @@ uploads/
 .kilocode/
 .claude/worktrees/
 .claude/settings.json.bak-*
+.worktrees/
