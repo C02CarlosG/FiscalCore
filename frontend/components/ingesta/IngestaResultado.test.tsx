@@ -34,6 +34,7 @@ describe("IngestaResultado", () => {
     );
 
     expect(screen.queryByRole("list")).not.toBeInTheDocument();
+    expect(screen.getByText("1 registro procesado.")).toBeInTheDocument();
   });
 
   it("renders each partial error as a list item", () => {
