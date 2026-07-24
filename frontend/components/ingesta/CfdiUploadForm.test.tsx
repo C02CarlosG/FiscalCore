@@ -102,7 +102,7 @@ describe("CfdiUploadForm", () => {
     const user = userEvent.setup();
     renderForm();
 
-    const file = new File(["not xml"], "cfdi.txt", { type: "text/plain" });
+    const file = new File(["<xml></xml>"], "cfdi.xml", { type: "text/xml" });
     await user.type(screen.getByLabelText("Periodo (YYYY-MM)"), "2026-07");
     await user.upload(screen.getByLabelText("Archivos XML"), file);
     await user.click(screen.getByRole("button", { name: /subir cfdi/i }));

@@ -64,11 +64,11 @@ export function CfdiUploadForm({ empresaId }: { empresaId: string }) {
 
       <div className="space-y-2">
         <Label htmlFor="cfdi-archivos">Archivos XML</Label>
-        {/* sin accept=".xml": rompe el test de error de backend — user-event filtra el archivo por accept antes de disparar change */}
         <Input
           id="cfdi-archivos"
           type="file"
           multiple
+          accept=".xml"
           onChange={(e) => setArchivos(e.target.files)}
         />
       </div>
