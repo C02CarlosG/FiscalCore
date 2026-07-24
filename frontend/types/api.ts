@@ -135,3 +135,33 @@ export interface CedulaIva {
   resultado: ResultadoIva;
   comparativo_sat: ComparativoSat;
 }
+
+export interface ConciliacionResumen {
+  total: number;
+  exacto: number;
+  parcial: number;
+  sin_cfdi: number;
+  sin_movimiento: number;
+  pct_conciliado: number;
+}
+
+export interface ParConciliacion {
+  id: string;
+  tipo_match: "sin_cfdi" | "parcial";
+  monto_movimiento: number | null;
+  monto_cfdi: number | null;
+  diferencia: number | null;
+  porcentaje_match: number | null;
+  periodo: string;
+  movimiento_id: string | null;
+  mov_fecha: string | null;
+  concepto: string | null;
+  mov_monto: number | null;
+  mov_tipo: string | null;
+  rfc_detectado: string | null;
+}
+
+export interface ConciliacionesAccionables {
+  total: number;
+  pares: ParConciliacion[];
+}
