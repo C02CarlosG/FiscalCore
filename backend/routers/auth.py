@@ -18,7 +18,8 @@ router = APIRouter(tags=["Auth"])
 
 
 @router.post("/api/v1/auth/register", status_code=status.HTTP_201_CREATED)
-async def registrar(data: RegisterRequest):
+@limiter.limit("10/hour")  # límite conservador contra registro masivo automatizado
+async def registrar(request: Request, data: RegisterRequest):
     """Registra un contador (usuario). Retorna JWT. Las empresas se agregan después con POST /mis-empresas."""
     email_existente = db.query_one("SELECT id FROM usuarios WHERE email = %s", (data.email,))
     if email_existente:

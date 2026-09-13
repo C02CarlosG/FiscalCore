@@ -32,6 +32,16 @@ _SEED_ADMIN_PASSWORD = os.getenv("SEED_ADMIN_PASSWORD", _SEED_ADMIN_DEFAULT_PASS
 if DATABASE_URL == _LOCAL_DEFAULT and os.getenv("RAILWAY_ENVIRONMENT"):
     log.warning("DB: usando credenciales locales en Railway — configura DATABASE_URL")
 
+# Mismo criterio que JWT_SECRET/FIEL_ENCRYPTION_KEY: en producción (Railway) no
+# se permite el default de desarrollo — falla explícito al importar en vez de
+# sembrar un admin con contraseña pública y conocida.
+if os.getenv("RAILWAY_ENVIRONMENT") and _SEED_ADMIN_PASSWORD == _SEED_ADMIN_DEFAULT_PASSWORD:
+    raise RuntimeError(
+        "SEED_ADMIN_PASSWORD no configurada en un entorno de producción "
+        "(RAILWAY_ENVIRONMENT detectado). Define una contraseña explícita antes "
+        "de desplegar — no uses el default de desarrollo."
+    )
+
 # ─── Connection pool ──────────────────────────────────────────
 _pool: Optional[SimpleConnectionPool] = None
 
