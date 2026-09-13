@@ -15,7 +15,7 @@ This repository contains the FastAPI backend for FiscalCore. The previous React/
 - `docker compose up -d db` starts PostgreSQL for data-backed endpoints.
 - `python -m pytest` runs the test suite (see Testing Guidelines below).
 
-Install backend dependencies inside a virtualenv with `pip install -r requirements.txt`.
+Install backend dependencies inside a virtualenv with `pip install -r requirements.txt`. To also run tests, use `pip install -r requirements-dev.txt` instead (it pulls in `requirements.txt` plus `pytest`/`httpx`, which are test-only and not shipped in production).
 
 ## Coding Style & Naming Conventions
 
@@ -30,6 +30,8 @@ Tests live under `backend/tests/` (`test_*.py`), configured via `pytest.ini` at 
 - `python -m pytest -m db` — only the tests that hit a real Postgres (`docker compose up -d db` first).
 
 Tests that need a real database use `pytestmark = [pytest.mark.db, pytest.mark.skipif(not db_disponible(), reason=...)]`, importing `db_disponible` from `backend/tests/conftest.py` — do not duplicate the connection-probe helper in new test files. For backend changes beyond what tests cover, also start Uvicorn and verify relevant routes through `/docs` or targeted HTTP requests.
+
+CI (`.github/workflows/tests.yml`) runs on every push/PR to `main`: a `unit` job (`pytest -m "not db"`, no Postgres) and an `integration` job with an ephemeral Postgres 15 service running the full suite.
 
 ## Commit & Pull Request Guidelines
 
