@@ -47,6 +47,12 @@ tags:
     description: Vista consolidada de indicadores fiscales
   - name: SAT FIEL
     description: Descarga masiva de CFDIs directamente del SAT usando la e.firma
+  - name: Admin
+    description: Administración de usuarios y métricas de la plataforma (requiere rol admin)
+  - name: Movimientos
+    description: Movimientos bancarios y categorías de clasificación
+  - name: Reportes
+    description: Cédulas fiscales (IVA, ISR, deducciones, DIOT) y exportables en Excel
 
 security:
   - BearerAuth: []
@@ -644,198 +650,6 @@ paths:
           $ref: '#/components/responses/UnauthorizedError'
         '404':
           $ref: '#/components/responses/NotFoundError'
-
-  # ============================================================
-  # PATRONES DE RIESGO — Búsqueda híbrida (AgentDB-style)
-  # ============================================================
-
-  /api/v1/riesgos/patrones/buscar:
-    get:
-      operationId: buscarPatronesRiesgo
-      tags: [Riesgos]
-      summary: Búsqueda híbrida de patrones de riesgo
-      description: |
-        Recupera patrones de riesgo similares usando búsqueda híbrida:
-        70% similitud textual (pg_trgm) + 30% confianza del patrón + filtros de metadata.
-
-        Opcionalmente aplica MMR (Maximal Marginal Relevance) para maximizar
-        la diversidad de resultados y evitar redundancia.
-
-        Incluye síntesis de contexto: tasa de éxito histórica, resoluciones
-        frecuentes y severidad predominante.
-      security:
-        - BearerAuth: []
-      parameters:
-        - name: q
-          in: query
-          required: true
-          schema:
-            type: string
-          description: Texto de búsqueda (descripción del riesgo a buscar)
-          example: "depósito bancario sin CFDI de ingreso correspondiente"
-        - name: tipo_riesgo
-          in: query
-          required: false
-          schema:
-            type: string
-            enum: [INGRESO_NO_FACTURADO, GASTO_SIN_CFDI, CFDI_NO_COBRADO, CFDI_NO_PAGADO,
-                   DIFERENCIA_IVA, RFC_INVALIDO, CFDI_CANCELADO_COBRADO, DIFERENCIA_TIPO_CAMBIO]
-          description: Filtrar por tipo de riesgo
-        - name: severidad
-          in: query
-          required: false
-          schema:
-            type: string
-            enum: [critico, alto, medio, bajo]
-          description: Filtrar por severidad
-        - name: categoria
-          in: query
-          required: false
-          schema:
-            type: string
-          description: Filtrar por categoría fiscal (IVA, ISR, COMPROBACION, etc.)
-        - $ref: '#/components/parameters/EmpresaId'
-        - name: mmr
-          in: query
-          required: false
-          schema:
-            type: boolean
-            default: true
-          description: Aplicar MMR para diversificar resultados
-        - name: lambda_mmr
-          in: query
-          required: false
-          schema:
-            type: number
-            minimum: 0
-            maximum: 1
-            default: 0.5
-          description: "Balance MMR: 0=máxima relevancia, 1=máxima diversidad"
-        - name: k
-          in: query
-          required: false
-          schema:
-            type: integer
-            minimum: 1
-            maximum: 50
-            default: 10
-          description: Número máximo de patrones a retornar
-      responses:
-        '200':
-          description: Patrones similares con contexto sintetizado
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  total:
-                    type: integer
-                  patrones:
-                    type: array
-                    items:
-                      $ref: '#/components/schemas/RiskPattern'
-                  contexto:
-                    $ref: '#/components/schemas/ContextoSintetizado'
-              example:
-                total: 3
-                patrones:
-                  - id: "a1b2c3d4-0001-0001-0001-000000000001"
-                    tipo_riesgo: "INGRESO_NO_FACTURADO"
-                    severidad: "critico"
-                    categoria: "ISR/IVA"
-                    descripcion: "Depósito de $45,000 sin CFDI de ingreso"
-                    resolucion: "Se emitió CFDI retroactivo con folio 2024-0123"
-                    confianza: 0.95
-                    uso_count: 12
-                    similitud: 0.8734
-                  - id: "a1b2c3d4-0002-0002-0002-000000000002"
-                    tipo_riesgo: "INGRESO_NO_FACTURADO"
-                    severidad: "critico"
-                    categoria: "ISR/IVA"
-                    descripcion: "Transferencia recibida $32,500 sin factura"
-                    resolucion: "Ingreso correspondía a préstamo de socio, se documentó"
-                    confianza: 0.88
-                    uso_count: 5
-                    similitud: 0.7621
-                contexto:
-                  total_patrones: 3
-                  tasa_exito: 0.93
-                  severidad_predominante: "critico"
-                  resoluciones_frecuentes:
-                    - "Se emitió CFDI retroactivo con folio 2024-0123"
-                    - "Ingreso correspondía a préstamo de socio, se documentó"
-                  resumen: "Basado en 3 casos similares: 93% resueltos exitosamente. Severidad predominante: critico. Resolución más frecuente: Se emitió CFDI retroactivo."
-        '401':
-          $ref: '#/components/responses/UnauthorizedError'
-
-  /api/v1/riesgos/{riesgo_id}/guardar-patron:
-    post:
-      operationId: guardarPatronRiesgo
-      tags: [Riesgos]
-      summary: Guardar detección resuelta como patrón
-      description: |
-        Persiste una detección resuelta como patrón reutilizable en la base de
-        conocimiento. Alimenta la búsqueda híbrida para casos futuros similares.
-
-        Se recomienda llamar este endpoint al resolver o descartar una detección
-        para que el sistema aprenda de cada resolución.
-      security:
-        - BearerAuth: []
-      parameters:
-        - name: riesgo_id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-          description: ID de la detección a guardar como patrón
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [resolucion]
-              properties:
-                resolucion:
-                  type: string
-                  description: Descripción de cómo se resolvió el riesgo
-                fue_falso_positivo:
-                  type: boolean
-                  default: false
-                  description: Marcar si era un falso positivo para excluir de búsquedas
-                confianza:
-                  type: number
-                  minimum: 0
-                  maximum: 1
-                  default: 1.0
-                  description: Confianza en la calidad de esta resolución (0.0–1.0)
-            example:
-              resolucion: "Depósito correspondía a anticipo de cliente. Se emitió CFDI tipo ingreso folio A-2024-089."
-              fue_falso_positivo: false
-              confianza: 0.95
-      responses:
-        '200':
-          description: Patrón guardado correctamente
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  patron_id:
-                    type: string
-                    format: uuid
-                  mensaje:
-                    type: string
-              example:
-                patron_id: "f9e8d7c6-0001-0001-0001-000000000001"
-                mensaje: "Patrón guardado correctamente"
-        '401':
-          $ref: '#/components/responses/UnauthorizedError'
-        '404':
-          $ref: '#/components/responses/NotFoundError'
-        '422':
-          $ref: '#/components/responses/ValidationError'
 
   # ============================================================
   # ACCIONES
@@ -1753,6 +1567,535 @@ paths:
         '502':
           $ref: '#/components/responses/GatewayError'
 
+  # ============================================================
+  # ADMIN
+  # ============================================================
+
+  /api/v1/admin/usuarios:
+    get:
+      operationId: listarUsuariosAdmin
+      tags: [Admin]
+      summary: Listar usuarios de la plataforma
+      description: Lista todos los usuarios con sus empresas vinculadas. Requiere rol admin.
+      responses:
+        '200':
+          description: Lista de usuarios
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/UsuarioAdmin'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+
+  /api/v1/admin/usuarios/{user_id}:
+    patch:
+      operationId: actualizarUsuarioAdmin
+      tags: [Admin]
+      summary: Activar/desactivar usuario o cambiar su rol
+      description: Requiere rol admin. Un admin no puede quitarse su propio rol admin.
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                activo:
+                  type: boolean
+                  nullable: true
+                rol:
+                  type: string
+                  enum: [admin, contador]
+                  nullable: true
+      responses:
+        '200':
+          description: Usuario actualizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UsuarioAdmin'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/v1/admin/stats:
+    get:
+      operationId: statsAdmin
+      tags: [Admin]
+      summary: Estadísticas generales de la plataforma
+      description: Requiere rol admin.
+      responses:
+        '200':
+          description: Conteos generales
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  usuarios_activos: { type: integer }
+                  admins: { type: integer }
+                  empresas_activas: { type: integer }
+                  cfdi_total: { type: integer }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+
+  /api/v1/admin/metricas:
+    get:
+      operationId: metricasAdmin
+      tags: [Admin]
+      summary: Métricas globales del sistema
+      description: Requiere rol admin.
+      responses:
+        '200':
+          description: Métricas agregadas
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total_usuarios: { type: integer }
+                  usuarios_activos: { type: integer }
+                  total_empresas: { type: integer }
+                  total_cfdi: { type: integer }
+                  total_riesgos: { type: integer }
+                  riesgos_criticos: { type: integer }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+
+  # ============================================================
+  # MOVIMIENTOS Y CATEGORIAS
+  # ============================================================
+
+  /api/v1/empresas/{empresa_id}/movimientos/cuentas:
+    get:
+      operationId: listarCuentasMovimientos
+      tags: [Movimientos]
+      summary: Cuentas/bancos cargados
+      description: Cuentas bancarias con conteo de movimientos, para construir pestañas en el frontend.
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+      responses:
+        '200':
+          description: Cuentas encontradas
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  cuentas:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        banco: { type: string }
+                        cuenta: { type: string }
+                        total: { type: integer }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+
+  /api/v1/empresas/{empresa_id}/movimientos:
+    get:
+      operationId: listarMovimientos
+      tags: [Movimientos]
+      summary: Listar movimientos bancarios
+      description: Lista movimientos con la subcategoría sugerida calculada por el motor de categorización.
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - { name: banco, in: query, schema: { type: string } }
+        - { name: cuenta, in: query, schema: { type: string } }
+        - { name: tipo, in: query, schema: { type: string } }
+        - { name: conciliado, in: query, schema: { type: boolean } }
+        - { name: categoria, in: query, schema: { type: string } }
+        - { name: q, in: query, schema: { type: string }, description: Búsqueda en concepto/RFC detectado }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 1000, default: 200 } }
+        - { name: offset, in: query, schema: { type: integer, minimum: 0, default: 0 } }
+      responses:
+        '200':
+          description: Movimientos y resumen agregado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  movimientos:
+                    type: array
+                    items:
+                      type: object
+                  total: { type: integer }
+                  resumen:
+                    type: object
+                    properties:
+                      total: { type: integer }
+                      total_depositos: { type: string }
+                      total_retiros: { type: string }
+                      conciliados: { type: integer }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+
+  /api/v1/empresas/{empresa_id}/movimientos/{mov_id}:
+    patch:
+      operationId: actualizarMovimiento
+      tags: [Movimientos]
+      summary: Corregir RFC detectado o categoría de un movimiento
+      description: Al confirmar una categoría, refuerza reglas de categorización automática por RFC y por concepto normalizado.
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - { name: mov_id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                rfc_detectado: { type: string, nullable: true }
+                categoria_id: { type: string, format: uuid, nullable: true }
+      responses:
+        '200':
+          description: Movimiento actualizado
+          content:
+            application/json:
+              schema:
+                type: object
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/v1/empresas/{empresa_id}/categorias:
+    get:
+      operationId: listarCategorias
+      tags: [Movimientos]
+      summary: Listar categorías de movimientos de la empresa
+      description: Siembra categorías/reglas base automáticamente si la empresa aún no tiene ninguna.
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+      responses:
+        '200':
+          description: Categorías de la empresa
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  categorias:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/CategoriaMovimiento'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+    post:
+      operationId: crearCategoria
+      tags: [Movimientos]
+      summary: Crear categoría de movimientos
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [nombre]
+              properties:
+                nombre: { type: string }
+                tipo: { type: string, enum: [deposito, retiro, ambos], default: ambos }
+                color: { type: string, default: "#6B7280" }
+      responses:
+        '200':
+          description: Categoría creada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CategoriaMovimiento'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '409':
+          $ref: '#/components/responses/ConflictError'
+
+  /api/v1/empresas/{empresa_id}/categorias/{cat_id}:
+    patch:
+      operationId: actualizarCategoria
+      tags: [Movimientos]
+      summary: Actualizar categoría de movimientos
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - { name: cat_id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                nombre: { type: string, nullable: true }
+                tipo: { type: string, enum: [deposito, retiro, ambos], nullable: true }
+                color: { type: string, nullable: true }
+      responses:
+        '200':
+          description: Categoría actualizada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CategoriaMovimiento'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+    delete:
+      operationId: borrarCategoria
+      tags: [Movimientos]
+      summary: Eliminar categoría de movimientos
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - { name: cat_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Eliminada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  # ============================================================
+  # REPORTES (cedulas fiscales y exportables)
+  # ============================================================
+
+  /api/v1/empresas/{empresa_id}/reportes/conciliacion/{periodo}:
+    get:
+      operationId: reporteConciliacionExcel
+      tags: [Reportes]
+      summary: Exportar conciliación del periodo a Excel
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - { name: periodo, in: path, required: true, schema: { type: string, pattern: '^\d{4}-\d{2}$' }, example: "2024-01" }
+      responses:
+        '200':
+          description: Archivo .xlsx de conciliación
+          content:
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+
+  /api/v1/empresas/{empresa_id}/reportes/riesgos/{periodo}:
+    get:
+      operationId: reporteRiesgosExcel
+      tags: [Reportes]
+      summary: Exportar riesgos detectados del periodo a Excel
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - { name: periodo, in: path, required: true, schema: { type: string, pattern: '^\d{4}-\d{2}$' }, example: "2024-01" }
+      responses:
+        '200':
+          description: Archivo .xlsx de riesgos
+          content:
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+
+  /api/v1/empresas/{empresa_id}/reportes/scoring/{periodo}:
+    get:
+      operationId: reporteScoringJson
+      tags: [Reportes]
+      summary: Detalle de scoring del periodo (JSON)
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - { name: periodo, in: path, required: true, schema: { type: string, pattern: '^\d{4}-\d{2}$' }, example: "2024-01" }
+      responses:
+        '200':
+          description: Scoring del periodo
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScoringFiscal'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/v1/empresas/{empresa_id}/diot/{periodo}:
+    get:
+      operationId: generarDiot
+      tags: [Reportes]
+      summary: Generar reporte DIOT del periodo
+      description: Agrupa CFDI de gasto vigentes del periodo por proveedor (RFC emisor), con IVA pagado, para la Declaración Informativa de Operaciones con Terceros.
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - { name: periodo, in: path, required: true, schema: { type: string, pattern: '^\d{4}-\d{2}$' }, example: "2024-01" }
+      responses:
+        '200':
+          description: Registros DIOT del periodo
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  periodo: { type: string }
+                  total_proveedores: { type: integer }
+                  registros:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        rfc_proveedor: { type: string }
+                        nombre: { type: string }
+                        tipo_operacion: { type: string }
+                        monto_total: { type: number }
+                        iva_pagado: { type: number }
+                        num_facturas: { type: integer }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+
+  /api/v1/empresas/{empresa_id}/cedula-iva/{periodo}:
+    get:
+      operationId: cedulaIva
+      tags: [Reportes]
+      summary: Cédula mensual de IVA por flujo de efectivo
+      description: |
+        IVA trasladado, acreditable (con prorrateo Art. 5-V), resultado del
+        periodo y comparativo contra el IVA devengado (base DIOT). Art. 1-B LIVA.
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - { name: periodo, in: path, required: true, schema: { type: string, pattern: '^\d{4}-(0[1-9]|1[0-2])$' }, example: "2024-01" }
+        - { name: factor, in: query, schema: { type: number, default: 1.0 }, description: "Factor de prorrateo (Art. 5-V); 1.0 = 100% gravado" }
+      responses:
+        '200':
+          description: Cédula de IVA del periodo
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '422':
+          description: Periodo con formato inválido (se espera YYYY-MM)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/empresas/{empresa_id}/isr-provisional/{periodo}:
+    get:
+      operationId: isrProvisional
+      tags: [Reportes]
+      summary: Pago provisional mensual de ISR
+      description: Persona moral, régimen general, acumulado del ejercicio a la fecha de corte (base devengado, Art. 14 LISR).
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - { name: periodo, in: path, required: true, schema: { type: string, pattern: '^\d{4}-(0[1-9]|1[0-2])$' }, example: "2024-01" }
+      responses:
+        '200':
+          description: Cálculo del pago provisional
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          description: Sin coeficiente de utilidad configurado para el ejercicio
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Periodo con formato inválido (se espera YYYY-MM)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/empresas/{empresa_id}/deducciones/{periodo}:
+    get:
+      operationId: deduccionesAutorizadas
+      tags: [Reportes]
+      summary: Deducciones autorizadas del periodo
+      description: MVP del Art. 27 LISR — "del mes" y "acumulado del ejercicio", clasificadas en gasto / inversión / costo por uso_cfdi.
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - { name: periodo, in: path, required: true, schema: { type: string, pattern: '^\d{4}-(0[1-9]|1[0-2])$' }, example: "2024-01" }
+      responses:
+        '200':
+          description: Deducciones del mes y acumuladas del ejercicio
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '422':
+          description: Periodo con formato inválido (se espera YYYY-MM)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
 # ============================================================
 # COMPONENTS
 # ============================================================
@@ -1855,60 +2198,6 @@ components:
 
   schemas:
 
-    RiskPattern:
-      type: object
-      properties:
-        id:
-          type: string
-          format: uuid
-        tipo_riesgo:
-          type: string
-          description: Código del tipo de riesgo
-        severidad:
-          type: string
-          enum: [critico, alto, medio, bajo]
-        categoria:
-          type: string
-          description: Categoría fiscal (IVA, ISR, COMPROBACION, etc.)
-        descripcion:
-          type: string
-          description: Descripción del caso de riesgo
-        resolucion:
-          type: string
-          nullable: true
-          description: Cómo se resolvió este caso
-        confianza:
-          type: number
-          minimum: 0
-          maximum: 1
-          description: Calidad del patrón (0.0–1.0)
-        uso_count:
-          type: integer
-          description: Número de veces que se ha consultado este patrón
-        similitud:
-          type: number
-          description: Score de similitud con la búsqueda (0.0–1.0)
-
-    ContextoSintetizado:
-      type: object
-      properties:
-        total_patrones:
-          type: integer
-        tasa_exito:
-          type: number
-          description: Porcentaje de casos resueltos exitosamente (0.0–1.0)
-        severidad_predominante:
-          type: string
-          enum: [critico, alto, medio, bajo, ""]
-        resoluciones_frecuentes:
-          type: array
-          items:
-            type: string
-          description: Top 3 resoluciones más frecuentes
-        resumen:
-          type: string
-          description: Resumen narrativo generado automáticamente
-
     ErrorResponse:
       type: object
       required: [detail]
@@ -1916,6 +2205,47 @@ components:
         detail:
           type: string
           description: Descripcion del error
+
+    UsuarioAdmin:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+        nombre:
+          type: string
+        rol:
+          type: string
+          enum: [admin, contador]
+        activo:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        empresas:
+          type: array
+          items:
+            type: object
+            properties:
+              empresa_id: { type: string, format: uuid }
+              rfc: { type: string }
+              razon_social: { type: string }
+
+    CategoriaMovimiento:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        nombre:
+          type: string
+        tipo:
+          type: string
+          enum: [deposito, retiro, ambos]
+        color:
+          type: string
 
     HealthResponse:
       type: object
