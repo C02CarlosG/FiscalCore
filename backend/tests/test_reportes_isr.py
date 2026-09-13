@@ -37,7 +37,7 @@ def _fixture_sin_config():
 
 
 def _override(monkeypatch, fixture=_fixture_caso_a_marzo):
-    main.app.dependency_overrides[get_current_user] = lambda: {"id": "u1"}
+    main.app.dependency_overrides[get_current_user] = lambda: {"user_id": "u1"}
     monkeypatch.setattr(reportes, "validar_acceso_empresa", lambda *a, **k: None)
     monkeypatch.setattr(reportes, "_cargar_datos_isr", lambda emp, per: fixture())
 

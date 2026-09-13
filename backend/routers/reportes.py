@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
 from .. import db, deducciones, isr, iva
+from ..auditoria import registrar_evento
 from ..deps import get_current_user, validar_acceso_empresa, serializar
 
 router = APIRouter(tags=["Reportes"])
@@ -184,6 +185,8 @@ async def generar_diot(
         (empresa_id, periodo, periodo),
     )
 
+    registrar_evento(current_user["user_id"], "reporte_generado", empresa_id=empresa_id, metadata={"tipo": "diot", "periodo": periodo})
+
     return {
         "periodo":           periodo,
         "total_proveedores": len(rows),
@@ -305,6 +308,8 @@ async def cedula_iva(
         "saldo_a_favor": -por_pagar if por_pagar < 0 else Decimal("0.00"),
     }
 
+    registrar_evento(current_user["user_id"], "reporte_generado", empresa_id=empresa_id, metadata={"tipo": "cedula_iva", "periodo": periodo})
+
     return _floats({
         "empresa_id": empresa_id,
         "periodo": periodo,
@@ -424,6 +429,8 @@ async def isr_provisional_endpoint(
     perdidas = Decimal(str(config["perdidas_pendientes"]))
 
     calculo = isr.isr_provisional(ingresos_por_mes, mes, cu, tasa, ptu, perdidas, retenciones_por_mes)
+
+    registrar_evento(current_user["user_id"], "reporte_generado", empresa_id=empresa_id, metadata={"tipo": "isr_provisional", "periodo": periodo})
 
     return _floats({
         "empresa_id": empresa_id,

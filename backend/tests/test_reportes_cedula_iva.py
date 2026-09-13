@@ -51,7 +51,7 @@ def _fixture_saldo_a_favor():
 
 
 def _override(monkeypatch, fixture=_fixture_consultora):
-    main.app.dependency_overrides[get_current_user] = lambda: {"id": "u1"}
+    main.app.dependency_overrides[get_current_user] = lambda: {"user_id": "u1"}
     monkeypatch.setattr(reportes, "validar_acceso_empresa", lambda *a, **k: None)
     monkeypatch.setattr(reportes, "_cargar_datos_cedula_iva",
                         lambda emp, per: fixture())

@@ -17,6 +17,7 @@ from datetime import date
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Request, UploadFile
 
 from .. import db
+from ..auditoria import registrar_evento
 from ..deps import get_current_user, validar_acceso_empresa, serializar, limiter
 from ..sat_fiel import FIELError, cargar_fiel, descargar_paquete, solicitar_descarga, verificar_solicitud
 
@@ -401,6 +402,8 @@ async def guardar_fiel_empresa(
         raise HTTPException(status_code=422, detail=str(exc))
     except RuntimeError as exc:
         raise HTTPException(status_code=500, detail=str(exc))
+
+    registrar_evento(current_user["user_id"], "fiel_cargada", empresa_id=empresa_id)
 
     return resultado
 

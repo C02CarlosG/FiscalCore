@@ -11,6 +11,7 @@ import psycopg2.extras
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 
 from .. import db
+from ..auditoria import registrar_evento
 from ..deps import get_current_user, empresa_or_404, validar_acceso_empresa, serializar, validar_upload
 from ..schemas import IngestaResponse
 
@@ -408,6 +409,11 @@ async def subir_cfdi(
 
     if procesados > 0:
         _correr_pipeline(empresa_id, periodo, empresa["rfc"])
+
+    registrar_evento(
+        current_user["user_id"], "cfdi_subido", empresa_id=empresa_id,
+        metadata={"periodo": periodo, "procesados": procesados, "errores": len(errores)},
+    )
 
     return IngestaResponse(
         mensaje=f"{procesados} CFDI procesados correctamente",

@@ -193,6 +193,9 @@ def init_db() -> None:
         # 025 es idempotente — amplía tipo_match a VARCHAR(30) (complemento_pago_total/_parcial no cabían en 20)
         _run_sql_file("025_ampliar_tipo_match.sql")
 
+        # 026 es idempotente — tabla auditoria para eventos sensibles (CFDI, FIEL, admin, reportes)
+        _run_sql_file("026_auditoria.sql")
+
         # Seed inicial: usuario admin si la base aún no tiene usuarios
         _seed_admin()
 
