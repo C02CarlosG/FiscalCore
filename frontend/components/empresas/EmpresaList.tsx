@@ -39,6 +39,12 @@ export function EmpresaList({ empresas }: { empresas: Empresa[] }) {
               >
                 Cédula de IVA
               </Link>
+              <Link
+                className="text-blue-600 hover:underline"
+                href={`/empresas/${empresa.id}/conciliacion`}
+              >
+                Conciliación
+              </Link>
             </td>
           </tr>
         ))}
