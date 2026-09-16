@@ -44,11 +44,45 @@ const config: Config = {
           DEFAULT: "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))",
         },
+        severity: {
+          critico: {
+            DEFAULT: "var(--severity-critico)",
+            soft: "var(--severity-critico-soft)",
+          },
+          alto: {
+            DEFAULT: "var(--severity-alto)",
+            soft: "var(--severity-alto-soft)",
+          },
+          medio: {
+            DEFAULT: "var(--severity-medio)",
+            soft: "var(--severity-medio-soft)",
+          },
+          bajo: {
+            DEFAULT: "var(--severity-bajo)",
+            soft: "var(--severity-bajo-soft)",
+          },
+        },
+        status: {
+          ok: { DEFAULT: "var(--status-ok)", soft: "var(--status-ok-soft)" },
+          pendiente: {
+            DEFAULT: "var(--status-pendiente)",
+            soft: "var(--status-pendiente-soft)",
+          },
+          error: {
+            DEFAULT: "var(--status-error)",
+            soft: "var(--status-error-soft)",
+          },
+        },
       },
       borderRadius: {
         lg: "var(--radius)",
         md: "calc(var(--radius) - 2px)",
         sm: "calc(var(--radius) - 4px)",
+      },
+      fontFamily: {
+        sans: ["var(--font-public-sans)", "system-ui", "sans-serif"],
+        display: ["var(--font-sora)", "var(--font-public-sans)", "system-ui"],
+        mono: ["var(--font-mono)", "ui-monospace", "monospace"],
       },
     },
   },
