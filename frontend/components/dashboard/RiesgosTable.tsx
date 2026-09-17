@@ -1,38 +1,62 @@
+import { DataTable, type DataTableColumn } from "@/components/shared/DataTable";
+import { StatusBadge } from "@/components/shared/StatusBadge";
 import type { RiesgoAbierto } from "@/types/api";
 
-export function RiesgosTable({ riesgos }: { riesgos: RiesgoAbierto[] }) {
-  if (riesgos.length === 0) {
-    return (
-      <p className="text-sm text-muted-foreground">
-        No hay riesgos abiertos en este periodo.
-      </p>
-    );
-  }
+const SEVERIDAD_RANK: Record<RiesgoAbierto["severidad"], number> = {
+  critico: 0,
+  alto: 1,
+  medio: 2,
+  bajo: 3,
+};
 
+function formatMoney(value: number | null): string {
+  if (value == null) return "—";
+  return value.toLocaleString("es-MX", { style: "currency", currency: "MXN" });
+}
+
+const columns: DataTableColumn<RiesgoAbierto>[] = [
+  {
+    key: "severidad",
+    header: "Severidad",
+    cell: (r) => <StatusBadge status={r.severidad} />,
+    sortValue: (r) => SEVERIDAD_RANK[r.severidad],
+  },
+  {
+    key: "nombre",
+    header: "Riesgo",
+    cell: (r) => <span className="font-medium">{r.nombre}</span>,
+    sortValue: (r) => r.nombre,
+    searchable: true,
+  },
+  {
+    key: "estado",
+    header: "Estado",
+    cell: (r) => <StatusBadge status={r.estado} />,
+  },
+  {
+    key: "monto",
+    header: "Monto afectado",
+    cell: (r) => formatMoney(r.monto_afectado),
+    sortValue: (r) => r.monto_afectado ?? 0,
+    align: "right",
+  },
+  {
+    key: "descripcion",
+    header: "Descripción",
+    cell: (r) => r.descripcion ?? "—",
+    searchable: true,
+    searchValue: (r) => r.descripcion ?? "",
+  },
+];
+
+export function RiesgosTable({ riesgos }: { riesgos: RiesgoAbierto[] }) {
   return (
-    <table className="w-full text-sm">
-      <thead>
-        <tr className="border-b text-left">
-          <th className="py-2">Severidad</th>
-          <th className="py-2">Riesgo</th>
-          <th className="py-2">Monto afectado</th>
-          <th className="py-2">Descripción</th>
-        </tr>
-      </thead>
-      <tbody>
-        {riesgos.map((riesgo) => (
-          <tr key={riesgo.id} className="border-b">
-            <td className="py-2 capitalize">{riesgo.severidad}</td>
-            <td className="py-2">{riesgo.nombre}</td>
-            <td className="py-2">
-              {riesgo.monto_afectado != null
-                ? `$${riesgo.monto_afectado.toLocaleString("es-MX")}`
-                : "—"}
-            </td>
-            <td className="py-2">{riesgo.descripcion ?? "—"}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
+    <DataTable
+      data={riesgos}
+      columns={columns}
+      getRowId={(r) => r.id}
+      searchPlaceholder="Buscar riesgo..."
+      emptyMessage="No hay riesgos abiertos en este periodo."
+    />
   );
 }

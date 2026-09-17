@@ -30,4 +30,9 @@ describe("RiesgosTable", () => {
     expect(screen.getByText("Brecha de ingresos")).toBeInTheDocument();
     expect(screen.getByText("Depósitos bancarios sin CFDI")).toBeInTheDocument();
   });
+
+  it("renders a status badge for the risk's estado", () => {
+    render(<RiesgosTable riesgos={[riesgo]} />);
+    expect(screen.getByText("Pendiente")).toBeInTheDocument();
+  });
 });
