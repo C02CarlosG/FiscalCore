@@ -1,3 +1,10 @@
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableRow,
+} from "@/components/ui/table";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { CedulaIva } from "@/types/api";
 
 function formatMoney(value: number): string {
@@ -19,17 +26,24 @@ export function CedulaIvaTable({ cedula }: { cedula: CedulaIva }) {
   ];
 
   return (
-    <table className="w-full text-sm">
-      <tbody>
-        {filas.map(([label, value]) => (
-          <tr key={label} className="border-b">
-            <td className="py-2 font-medium">{label}</td>
-            <td className="py-2 text-right">
-              {label === "Factor de prorrateo" ? value : formatMoney(value)}
-            </td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
+    <Card>
+      <CardHeader>
+        <CardTitle>Cédula de IVA</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <Table>
+          <TableBody>
+            {filas.map(([label, value]) => (
+              <TableRow key={label}>
+                <TableCell className="font-medium">{label}</TableCell>
+                <TableCell className="text-right font-mono">
+                  {label === "Factor de prorrateo" ? value : formatMoney(value)}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </CardContent>
+    </Card>
   );
 }

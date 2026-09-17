@@ -14,8 +14,7 @@ export default function CedulaIvaPage() {
   const cedula = useCedulaIva(params.empresaId, periodo);
 
   return (
-    <main className="mx-auto max-w-3xl space-y-6 p-6">
-      <h1 className="text-2xl font-semibold">Cédula de IVA</h1>
+    <main className="mx-auto max-w-3xl space-y-6">
 
       <div className="space-y-2">
         <Label htmlFor="periodo">Periodo (YYYY-MM)</Label>
