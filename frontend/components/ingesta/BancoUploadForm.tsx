@@ -4,6 +4,7 @@ import { FormEvent, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useSubirBanco } from "@/hooks/useIngesta";
 import { ApiError } from "@/lib/api-client";
 import { IngestaResultado } from "@/components/ingesta/IngestaResultado";
@@ -71,68 +72,73 @@ export function BancoUploadForm({ empresaId }: { empresaId: string }) {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4 rounded-lg border p-4">
-      <h2 className="text-lg font-semibold">Subir estado de cuenta</h2>
+    <Card>
+      <CardHeader>
+        <CardTitle>Subir estado de cuenta</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="banco-periodo">Periodo (YYYY-MM)</Label>
+            <Input
+              id="banco-periodo"
+              placeholder="2026-07"
+              value={periodo}
+              onChange={(e) => setPeriodo(e.target.value)}
+            />
+          </div>
 
-      <div className="space-y-2">
-        <Label htmlFor="banco-periodo">Periodo (YYYY-MM)</Label>
-        <Input
-          id="banco-periodo"
-          placeholder="2026-07"
-          value={periodo}
-          onChange={(e) => setPeriodo(e.target.value)}
-        />
-      </div>
+          <div className="space-y-2">
+            <Label htmlFor="banco-select">Banco</Label>
+            <select
+              id="banco-select"
+              className="w-full rounded-md border border-input bg-background p-2 text-sm"
+              value={bancoSeleccionado}
+              onChange={(e) => setBancoSeleccionado(e.target.value)}
+            >
+              <option value="">Selecciona un banco</option>
+              {BANCOS_COMUNES.map((banco) => (
+                <option key={banco.value} value={banco.value}>
+                  {banco.label}
+                </option>
+              ))}
+            </select>
+          </div>
 
-      <div className="space-y-2">
-        <Label htmlFor="banco-select">Banco</Label>
-        <select
-          id="banco-select"
-          className="w-full rounded-md border p-2"
-          value={bancoSeleccionado}
-          onChange={(e) => setBancoSeleccionado(e.target.value)}
-        >
-          <option value="">Selecciona un banco</option>
-          {BANCOS_COMUNES.map((banco) => (
-            <option key={banco.value} value={banco.value}>
-              {banco.label}
-            </option>
-          ))}
-        </select>
-      </div>
+          {esOtro && (
+            <div className="space-y-2">
+              <Label htmlFor="banco-libre">Nombre del banco</Label>
+              <Input
+                id="banco-libre"
+                value={bancoLibre}
+                onChange={(e) => setBancoLibre(e.target.value)}
+              />
+            </div>
+          )}
 
-      {esOtro && (
-        <div className="space-y-2">
-          <Label htmlFor="banco-libre">Nombre del banco</Label>
-          <Input
-            id="banco-libre"
-            value={bancoLibre}
-            onChange={(e) => setBancoLibre(e.target.value)}
-          />
-        </div>
-      )}
+          <div className="space-y-2">
+            <Label htmlFor="banco-archivo">Estado de cuenta (.xlsx o .csv)</Label>
+            <Input
+              id="banco-archivo"
+              type="file"
+              accept=".xlsx,.csv"
+              onChange={(e) => setArchivo(e.target.files?.[0] ?? null)}
+            />
+          </div>
 
-      <div className="space-y-2">
-        <Label htmlFor="banco-archivo">Estado de cuenta (.xlsx o .csv)</Label>
-        <Input
-          id="banco-archivo"
-          type="file"
-          accept=".xlsx,.csv"
-          onChange={(e) => setArchivo(e.target.files?.[0] ?? null)}
-        />
-      </div>
+          {formError && (
+            <p role="alert" className="text-sm text-status-error">
+              {formError}
+            </p>
+          )}
 
-      {formError && (
-        <p role="alert" className="text-sm text-red-600">
-          {formError}
-        </p>
-      )}
+          <Button type="submit" disabled={subirBanco.isPending}>
+            {subirBanco.isPending ? "Subiendo..." : "Subir estado de cuenta"}
+          </Button>
 
-      <Button type="submit" disabled={subirBanco.isPending}>
-        {subirBanco.isPending ? "Subiendo..." : "Subir estado de cuenta"}
-      </Button>
-
-      {resultado && <IngestaResultado resultado={resultado} />}
-    </form>
+          {resultado && <IngestaResultado resultado={resultado} />}
+        </form>
+      </CardContent>
+    </Card>
   );
 }

@@ -4,6 +4,7 @@ import { FormEvent, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useSubirCfdi } from "@/hooks/useIngesta";
 import { ApiError } from "@/lib/api-client";
 import { IngestaResultado } from "@/components/ingesta/IngestaResultado";
@@ -49,41 +50,46 @@ export function CfdiUploadForm({ empresaId }: { empresaId: string }) {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4 rounded-lg border p-4">
-      <h2 className="text-lg font-semibold">Subir CFDI</h2>
+    <Card>
+      <CardHeader>
+        <CardTitle>Subir CFDI</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="cfdi-periodo">Periodo (YYYY-MM)</Label>
+            <Input
+              id="cfdi-periodo"
+              placeholder="2026-07"
+              value={periodo}
+              onChange={(e) => setPeriodo(e.target.value)}
+            />
+          </div>
 
-      <div className="space-y-2">
-        <Label htmlFor="cfdi-periodo">Periodo (YYYY-MM)</Label>
-        <Input
-          id="cfdi-periodo"
-          placeholder="2026-07"
-          value={periodo}
-          onChange={(e) => setPeriodo(e.target.value)}
-        />
-      </div>
+          <div className="space-y-2">
+            <Label htmlFor="cfdi-archivos">Archivos XML</Label>
+            <Input
+              id="cfdi-archivos"
+              type="file"
+              multiple
+              accept=".xml"
+              onChange={(e) => setArchivos(e.target.files)}
+            />
+          </div>
 
-      <div className="space-y-2">
-        <Label htmlFor="cfdi-archivos">Archivos XML</Label>
-        <Input
-          id="cfdi-archivos"
-          type="file"
-          multiple
-          accept=".xml"
-          onChange={(e) => setArchivos(e.target.files)}
-        />
-      </div>
+          {formError && (
+            <p role="alert" className="text-sm text-status-error">
+              {formError}
+            </p>
+          )}
 
-      {formError && (
-        <p role="alert" className="text-sm text-red-600">
-          {formError}
-        </p>
-      )}
+          <Button type="submit" disabled={subirCfdi.isPending}>
+            {subirCfdi.isPending ? "Subiendo..." : "Subir CFDI"}
+          </Button>
 
-      <Button type="submit" disabled={subirCfdi.isPending}>
-        {subirCfdi.isPending ? "Subiendo..." : "Subir CFDI"}
-      </Button>
-
-      {resultado && <IngestaResultado resultado={resultado} />}
-    </form>
+          {resultado && <IngestaResultado resultado={resultado} />}
+        </form>
+      </CardContent>
+    </Card>
   );
 }
