@@ -20,7 +20,7 @@ export default function ConciliacionPage() {
   const accionables = useConciliacionesAccionables(params.empresaId, periodo);
 
   return (
-    <main className="mx-auto max-w-4xl space-y-6 p-6">
+    <main className="mx-auto max-w-5xl space-y-6">
       <h1 className="text-2xl font-semibold">Conciliación banco-CFDI</h1>
 
       <div className="space-y-2">
