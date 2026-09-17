@@ -59,9 +59,7 @@ export function EmpresaForm({ onCreated }: { onCreated?: () => void }) {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4 rounded-lg border p-4">
-      <h2 className="text-lg font-semibold">Agregar empresa</h2>
-
+    <form onSubmit={handleSubmit} className="space-y-4">
       <div className="space-y-2">
         <Label htmlFor="rfc">RFC</Label>
         <Input id="rfc" value={rfc} onChange={(e) => setRfc(e.target.value)} />

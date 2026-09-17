@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { EmpresaList } from "./EmpresaList";
 import type { Empresa } from "@/types/api";
 
@@ -18,18 +19,39 @@ const empresa: Empresa = {
   updated_at: "2026-01-01T00:00:00Z",
 };
 
-describe("EmpresaList", () => {
-  it("renders an Ingesta link pointing to the empresa's ingesta page", () => {
-    render(<EmpresaList empresas={[empresa]} />);
+async function abrirMenuAcciones() {
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("button", { name: /Acciones para/ }));
+  return user;
+}
 
-    const link = screen.getByRole("link", { name: "Ingesta" });
+describe("EmpresaList", () => {
+  it("shows the empty state message when there are no empresas", () => {
+    render(<EmpresaList empresas={[]} />);
+    expect(
+      screen.getByText("Aún no hay empresas registradas."),
+    ).toBeInTheDocument();
+  });
+
+  it("renders an Ingesta link pointing to the empresa's ingesta page", async () => {
+    render(<EmpresaList empresas={[empresa]} />);
+    await abrirMenuAcciones();
+
+    const link = screen.getByRole("menuitem", { name: "Ingesta" });
     expect(link).toHaveAttribute("href", "/empresas/e1/ingesta");
   });
 
-  it("still renders the Cédula de IVA link", () => {
+  it("still renders the Cédula de IVA and Conciliación links", async () => {
     render(<EmpresaList empresas={[empresa]} />);
+    await abrirMenuAcciones();
 
-    const link = screen.getByRole("link", { name: "Cédula de IVA" });
-    expect(link).toHaveAttribute("href", "/empresas/e1/cedula-iva");
+    expect(screen.getByRole("menuitem", { name: "Cédula de IVA" })).toHaveAttribute(
+      "href",
+      "/empresas/e1/cedula-iva",
+    );
+    expect(screen.getByRole("menuitem", { name: "Conciliación" })).toHaveAttribute(
+      "href",
+      "/empresas/e1/conciliacion",
+    );
   });
 });
