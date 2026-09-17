@@ -37,12 +37,18 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center p-4">
+    <main className="flex min-h-screen items-center justify-center bg-background p-4">
       <form
         onSubmit={handleSubmit}
-        className="w-full max-w-sm space-y-4 rounded-lg border p-6"
+        className="w-full max-w-sm space-y-5 rounded-2xl border border-border bg-card p-8 shadow-sm"
       >
-        <h1 className="text-xl font-semibold">Iniciar sesión</h1>
+        <div className="space-y-1 text-center">
+          <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-xl bg-primary text-primary-foreground">
+            F
+          </div>
+          <h1 className="font-display text-xl font-bold">FiscalCore</h1>
+          <p className="text-sm text-muted-foreground">Inicia sesión para continuar</p>
+        </div>
 
         <div className="space-y-2">
           <Label htmlFor="email">Correo</Label>
@@ -65,7 +71,7 @@ export default function LoginPage() {
         </div>
 
         {formError && (
-          <p role="alert" className="text-sm text-red-600">
+          <p role="alert" className="text-sm text-status-error">
             {formError}
           </p>
         )}
