@@ -4,7 +4,7 @@ import calendar
 import logging
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from .. import db
 from ..deps import get_current_user, validar_acceso_empresa, empresa_or_404
@@ -13,19 +13,24 @@ _log = logging.getLogger(__name__)
 
 router = APIRouter(tags=["CFDI"])
 
+_PERIODO_PATTERN = r"^\d{4}-\d{2}$"
+
 
 def _rango_periodo(periodo: str) -> tuple[str, str]:
-    año, mes = periodo.split("-")
-    inicio = f"{año}-{mes}-01"
-    ultimo = calendar.monthrange(int(año), int(mes))[1]
-    fin = f"{año}-{mes}-{ultimo:02d}"
-    return inicio, fin
+    try:
+        año, mes = periodo.split("-")
+        inicio = f"{año}-{mes}-01"
+        ultimo = calendar.monthrange(int(año), int(mes))[1]
+        fin = f"{año}-{mes}-{ultimo:02d}"
+        return inicio, fin
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Periodo inválido, usa formato YYYY-MM")
 
 
 @router.get("/api/v1/empresas/{empresa_id}/cfdi/visor")
 async def get_visor_sat(
     empresa_id: str,
-    periodo: str = Query(..., description="Período en formato YYYY-MM"),
+    periodo: str = Query(..., pattern=_PERIODO_PATTERN, description="Período en formato YYYY-MM"),
     current_user: dict = Depends(get_current_user),
 ):
     """
@@ -89,7 +94,7 @@ async def get_visor_sat(
 @router.get("/api/v1/empresas/{empresa_id}/cfdi/nomina")
 async def get_cfdi_nomina(
     empresa_id: str,
-    periodo: str = Query(..., description="Período en formato YYYY-MM"),
+    periodo: str = Query(..., pattern=_PERIODO_PATTERN, description="Período en formato YYYY-MM"),
     current_user: dict = Depends(get_current_user),
 ):
     """CFDIs de nómina (tipo_comprobante='N') emitidos por la empresa a sus empleados en el período."""

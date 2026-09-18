@@ -58,6 +58,24 @@ def test_visor_sat_periodo_requerido(monkeypatch):
     assert resp.status_code == 422
 
 
+def test_visor_sat_periodo_con_formato_invalido(monkeypatch):
+    _override(monkeypatch, [])
+    try:
+        resp = client.get("/api/v1/empresas/emp-1/cfdi/visor?periodo=2026-1")
+    finally:
+        main.app.dependency_overrides.clear()
+    assert resp.status_code == 422
+
+
+def test_visor_sat_periodo_con_mes_invalido(monkeypatch):
+    _override(monkeypatch, [])
+    try:
+        resp = client.get("/api/v1/empresas/emp-1/cfdi/visor?periodo=2026-13")
+    finally:
+        main.app.dependency_overrides.clear()
+    assert resp.status_code == 400
+
+
 def test_cfdi_nomina_resumen(monkeypatch):
     rows = [
         {

@@ -14,8 +14,8 @@ export default function ProtectedLayout({
   const [mobileOpen, setMobileOpen] = useState(false);
 
   return (
-    <EmpresaProvider>
-      <AuthGuard>
+    <AuthGuard>
+      <EmpresaProvider>
         <div className="flex h-screen overflow-hidden bg-background">
           <Sidebar mobileOpen={mobileOpen} onMobileOpenChange={setMobileOpen} />
           <div className="flex min-w-0 flex-1 flex-col">
@@ -25,7 +25,7 @@ export default function ProtectedLayout({
             </main>
           </div>
         </div>
-      </AuthGuard>
-    </EmpresaProvider>
+      </EmpresaProvider>
+    </AuthGuard>
   );
 }

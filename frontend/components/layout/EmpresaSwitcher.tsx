@@ -17,8 +17,8 @@ const SUB_RUTAS = ["dashboard", "cfdi", "ingesta", "conciliacion", "cedula-iva"]
 function resolverDestino(pathname: string, empresaId: string, nuevoId: string): string {
   const segmentos = pathname.split("/").filter(Boolean);
   const idx = segmentos.indexOf(empresaId);
-  const subRuta = idx >= 0 ? segmentos[idx + 1] : undefined;
-  const destino = subRuta && SUB_RUTAS.includes(subRuta) ? subRuta : "dashboard";
+  const resto = idx >= 0 ? segmentos.slice(idx + 1) : [];
+  const destino = resto.length > 0 && SUB_RUTAS.includes(resto[0]) ? resto.join("/") : "dashboard";
   return `/empresas/${nuevoId}/${destino}`;
 }
 

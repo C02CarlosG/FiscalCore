@@ -42,7 +42,9 @@ tags:
   - name: Cierre
     description: Vista de cierre mensual con bloqueos y acciones pendientes
   - name: Emitidos
-    description: CFDIs emitidos y recibidos por la empresa
+    description: CFDIs emitidos y recibidos por la empresa (clasificados por anticipos/notas de credito)
+  - name: CFDI
+    description: Visor general y nomina de CFDIs (sin la clasificacion de Emitidos/Recibidos)
   - name: Dashboard
     description: Vista consolidada de indicadores fiscales
   - name: SAT FIEL
@@ -1068,7 +1070,7 @@ paths:
   /api/v1/empresas/{empresa_id}/cfdi/visor:
     get:
       operationId: getVisorSat
-      tags: [Emitidos]
+      tags: [CFDI]
       summary: Visor general de CFDI (emitidos y recibidos, cualquier tipo)
       description: |
         Retorna todos los CFDIs (cualquier tipo_comprobante) emitidos o
@@ -1102,7 +1104,7 @@ paths:
   /api/v1/empresas/{empresa_id}/cfdi/nomina:
     get:
       operationId: getCfdiNomina
-      tags: [Emitidos]
+      tags: [CFDI]
       summary: CFDIs de nomina emitidos por la empresa en el periodo
       description: |
         Retorna los CFDIs de nomina (tipo_comprobante='N') emitidos por la
