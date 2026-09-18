@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
 import {
-  Building2,
+  FileSpreadsheet,
   FileText,
   GitBranch,
   LayoutGrid,
@@ -18,14 +18,13 @@ import { clearSession, loadSession } from "@/lib/auth";
 
 const NAV_ITEMS = [
   { slug: "dashboard", label: "Dashboard", icon: LayoutGrid, requiresEmpresa: true },
-  { slug: "empresas", label: "Empresas", icon: Building2, requiresEmpresa: false },
+  { slug: "cfdi", label: "Gestión de CFDI", icon: FileSpreadsheet, requiresEmpresa: true },
   { slug: "ingesta", label: "Ingesta", icon: Upload, requiresEmpresa: true },
   { slug: "conciliacion", label: "Conciliación", icon: GitBranch, requiresEmpresa: true },
   { slug: "cedula-iva", label: "Cédula de IVA", icon: FileText, requiresEmpresa: true },
 ] as const;
 
 function isActive(pathname: string, slug: string): boolean {
-  if (slug === "empresas") return pathname === "/empresas";
   return pathname.includes(`/${slug}`);
 }
 
@@ -62,7 +61,7 @@ function SidebarBody() {
         {NAV_ITEMS.map((item) => {
           const Icon = item.icon;
           const disabled = item.requiresEmpresa && !empresaId;
-          const href = item.slug === "empresas" ? "/empresas" : `/empresas/${empresaId}/${item.slug}`;
+          const href = `/empresas/${empresaId}/${item.slug}`;
           const active = isActive(pathname, item.slug);
 
           if (disabled) {

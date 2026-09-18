@@ -172,3 +172,79 @@ export interface ConciliacionesAccionables {
   total: number;
   pares: ParConciliacion[];
 }
+
+export interface CfdiEmitidoRow {
+  uuid: string;
+  serie_folio: string | null;
+  fecha: string;
+  rfc_receptor: string;
+  nombre_receptor: string | null;
+  subtotal: number;
+  descuento: number;
+  total: number;
+  iva: number;
+  metodo_pago: string | null;
+  forma_pago: string | null;
+  uso_cfdi: string | null;
+  moneda: string | null;
+  estado: string;
+  estado_pago: string | null;
+  es_anticipo: boolean;
+  es_factura_con_anticipo: boolean;
+}
+
+export interface EmitidosResumen {
+  subtotal: number;
+  iva_trasladado: number;
+  total_facturado: number;
+  vigentes: number;
+  canceladas: number;
+  total_cfdi_periodo: number;
+  ingreso_neto_periodo: number;
+  num_ingresos: number;
+  num_egresos: number;
+}
+
+export interface EmitidosResponse {
+  periodo: string;
+  empresa_rfc: string;
+  resumen: EmitidosResumen;
+  ingresos: {
+    ventas_servicios: CfdiEmitidoRow[];
+    anticipos: CfdiEmitidoRow[];
+    facturas_con_anticipo: CfdiEmitidoRow[];
+  };
+  egresos: {
+    notas_credito: CfdiEmitidoRow[];
+    aplicaciones_anticipo: CfdiEmitidoRow[];
+  };
+}
+
+export interface CfdiRecibidoRow {
+  uuid: string;
+  serie_folio: string | null;
+  fecha: string;
+  rfc_emisor: string;
+  nombre_emisor: string | null;
+  subtotal: number;
+  total: number;
+  iva: number;
+  estado: string;
+}
+
+export interface RecibidosResumen {
+  subtotal: number;
+  iva_acreditable: number;
+  total: number;
+  num_compras: number;
+  num_egresos: number;
+  vigentes: number;
+  canceladas: number;
+}
+
+export interface RecibidosResponse {
+  periodo: string;
+  resumen: RecibidosResumen;
+  compras: CfdiRecibidoRow[];
+  egresos: CfdiRecibidoRow[];
+}

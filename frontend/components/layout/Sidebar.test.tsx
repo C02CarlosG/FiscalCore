@@ -45,9 +45,9 @@ describe("Sidebar", () => {
       "href",
       "/empresas/e1/dashboard",
     );
-    expect(screen.getByRole("link", { name: /Empresas/ })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: /Gestión de CFDI/ })).toHaveAttribute(
       "href",
-      "/empresas",
+      "/empresas/e1/cfdi",
     );
     expect(screen.getByRole("link", { name: /Ingesta/ })).toHaveAttribute(
       "href",
@@ -63,7 +63,7 @@ describe("Sidebar", () => {
     );
   });
 
-  it("disables empresa-scoped items when there is no empresa selected", () => {
+  it("disables all nav items when there is no empresa selected", () => {
     vi.mocked(useEmpresaContext).mockReturnValue({
       empresaId: null,
       empresas: [],
@@ -74,7 +74,10 @@ describe("Sidebar", () => {
     expect(
       screen.queryByRole("link", { name: /Dashboard/ }),
     ).not.toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /Empresas/ })).toBeInTheDocument();
+    expect(
+      screen.queryByRole("link", { name: /Gestión de CFDI/ }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText("Gestión de CFDI")).toBeInTheDocument();
   });
 
   it("clears the session and redirects to /login on logout", async () => {

@@ -50,4 +50,16 @@ describe("EmpresaSwitcher", () => {
 
     expect(pushMock).toHaveBeenCalledWith("/empresas/e2/dashboard");
   });
+
+  it("incluye un enlace para administrar empresas", async () => {
+    mockPathname.mockReturnValue("/empresas/e1/dashboard");
+    const user = userEvent.setup();
+    render(<EmpresaSwitcher />);
+
+    await user.click(screen.getByRole("button"));
+
+    expect(
+      screen.getByRole("menuitem", { name: /Administrar empresas/ }),
+    ).toHaveAttribute("href", "/empresas");
+  });
 });

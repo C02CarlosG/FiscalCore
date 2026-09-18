@@ -13,6 +13,8 @@ const STATUS_MAP: Record<string, { label: string; className: string }> = {
   parcial: { label: "Match parcial", className: "bg-status-pendiente-soft text-status-pendiente" },
   sin_cfdi: { label: "Sin CFDI", className: "bg-status-error-soft text-status-error" },
   sin_movimiento: { label: "Sin movimiento", className: "bg-status-error-soft text-status-error" },
+  vigente: { label: "Vigente", className: "bg-status-ok-soft text-status-ok" },
+  cancelado: { label: "Cancelado", className: "bg-status-error-soft text-status-error" },
 };
 
 function capitalizar(texto: string): string {

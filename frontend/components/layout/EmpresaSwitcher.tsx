@@ -1,16 +1,18 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
-import { Building2, ChevronsUpDown } from "lucide-react";
+import { Building2, ChevronsUpDown, Settings } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useEmpresaContext } from "@/components/providers/EmpresaProvider";
 
-const SUB_RUTAS = ["dashboard", "ingesta", "conciliacion", "cedula-iva"];
+const SUB_RUTAS = ["dashboard", "cfdi", "ingesta", "conciliacion", "cedula-iva"];
 
 function resolverDestino(pathname: string, empresaId: string, nuevoId: string): string {
   const segmentos = pathname.split("/").filter(Boolean);
@@ -61,6 +63,13 @@ export function EmpresaSwitcher() {
             <span className="truncate">{empresa.razon_social}</span>
           </DropdownMenuItem>
         ))}
+        {empresas.length > 0 && <DropdownMenuSeparator />}
+        <DropdownMenuItem asChild>
+          <Link href="/empresas" className="flex items-center gap-2">
+            <Settings className="h-3.5 w-3.5" />
+            Administrar empresas
+          </Link>
+        </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   );

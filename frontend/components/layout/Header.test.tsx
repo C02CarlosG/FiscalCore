@@ -47,6 +47,13 @@ describe("Header", () => {
     expect(screen.getByText("Dashboard")).toBeInTheDocument();
   });
 
+  it("shows the Gestión de CFDI breadcrumb and not Empresas on the cfdi route", () => {
+    mockPathname.mockReturnValue("/empresas/e1/cfdi");
+    render(<Header onMenuClick={() => {}} />);
+    expect(screen.getByText("Gestión de CFDI")).toBeInTheDocument();
+    expect(screen.queryByText("Empresas")).not.toBeInTheDocument();
+  });
+
   it("navigates to the matched empresa on search", async () => {
     const user = userEvent.setup();
     render(<Header onMenuClick={() => {}} />);

@@ -15,6 +15,7 @@ import { clearSession, loadSession } from "@/lib/auth";
 const LABELS: Record<string, string> = {
   dashboard: "Dashboard",
   empresas: "Empresas",
+  cfdi: "Gestión de CFDI",
   ingesta: "Ingesta",
   conciliacion: "Conciliación",
   "cedula-iva": "Cédula de IVA",
