@@ -306,8 +306,11 @@ class MotorConciliacion:
 
         depositos = [m for m in movimientos if m.tipo == "deposito"]
         cargos    = [m for m in movimientos if m.tipo == "cargo"]
-        ingresos  = [c for c in cfdis if c.tipo == "I" and c.estado == "vigente"]
-        egresos   = [c for c in cfdis if c.tipo == "E" and c.estado == "vigente"]
+        # Ventas: CFDI tipo I emitido por la empresa (candidatos para depósitos).
+        # Gastos: CFDI tipo I recibido por la empresa (candidatos para cargos).
+        # tipo "E" es nota de crédito, no un gasto -> nunca es candidato de cargo.
+        ingresos  = [c for c in cfdis if c.tipo == "I" and c.estado == "vigente" and c.rfc_emisor == rfc_empresa]
+        egresos   = [c for c in cfdis if c.tipo == "I" and c.estado == "vigente" and c.rfc_receptor == rfc_empresa]
 
         # ── Paso 0: Enriquecer estados PPD (debe ocurrir antes de cualquier matching)
         # Esto permite que cfdi_no_cobrados / cfdi_no_pagados no generen falsos positivos.
@@ -367,13 +370,15 @@ class MotorConciliacion:
         egresos_libres = [c for c in egresos if c.id not in usados_cfdi_e]
         res_multi_car = self.match_multiple(movs_sin_car, egresos_libres, es_egreso=True)
 
-        # Sustituir sin_cfdi resueltos por multi-match; mantener los que siguen sin match
-        reemplazados_dep = {r.movimiento_id for r in res_multi_dep if r.tipo_match != "sin_cfdi"}
-        reemplazados_car = {r.movimiento_id for r in res_multi_car if r.tipo_match != "sin_cfdi"}
+        # match_multiple() devuelve exactamente 1 resultado por movimiento de entrada
+        # (match o sin_cfdi) -> sustituye por completo el resultado del paso 1:1 para
+        # todo movimiento que pasó por acá, nunca deben coexistir ambos sin_cfdi.
+        procesados_multi_dep = {m.id for m in movs_sin_dep}
+        procesados_multi_car = {m.id for m in movs_sin_car}
 
-        resultados += [r for r in res_1a1_dep if r.movimiento_id not in reemplazados_dep]
+        resultados += [r for r in res_1a1_dep if r.movimiento_id not in procesados_multi_dep]
         resultados += res_multi_dep
-        resultados += [r for r in res_1a1_car if r.movimiento_id not in reemplazados_car]
+        resultados += [r for r in res_1a1_car if r.movimiento_id not in procesados_multi_car]
         resultados += res_multi_car
 
         # IDs de CFDIs usados en multi-match (para excluirlos de pasos posteriores)
@@ -413,11 +418,10 @@ class MotorConciliacion:
             es_egreso=True,
         )
 
-        reemplazados_heur = {
-            r.movimiento_id for r in res_heur_dep + res_heur_car
-            if r.tipo_match != "sin_cfdi"
-        }
-        resultados = [r for r in resultados if r.movimiento_id not in reemplazados_heur]
+        # match_heuristico() también devuelve exactamente 1 resultado por movimiento
+        # de entrada -> sustituye por completo, igual que el multi-match del Paso 3.
+        procesados_heur = sin_cfdi_dep_ids | sin_cfdi_car_ids
+        resultados = [r for r in resultados if r.movimiento_id not in procesados_heur]
         resultados += res_heur_dep + res_heur_car
 
         # Solo los matches automáticos (alta) consumen el CFDI

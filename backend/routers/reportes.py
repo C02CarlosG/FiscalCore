@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from datetime import date
 from decimal import Decimal
 from io import BytesIO
 from typing import Optional
@@ -10,7 +11,8 @@ from openpyxl.styles import Font
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
-from .. import db, iva
+from .. import db, deducciones, isr, iva
+from ..auditoria import registrar_evento
 from ..deps import get_current_user, validar_acceso_empresa, serializar
 
 router = APIRouter(tags=["Reportes"])
@@ -183,6 +185,8 @@ async def generar_diot(
         (empresa_id, periodo, periodo),
     )
 
+    registrar_evento(current_user["user_id"], "reporte_generado", empresa_id=empresa_id, metadata={"tipo": "diot", "periodo": periodo})
+
     return {
         "periodo":           periodo,
         "total_proveedores": len(rows),
@@ -257,11 +261,14 @@ def _cargar_datos_cedula_iva(empresa_id: str, periodo: str):
 
     diot = db.query_one(
         """
-        SELECT COALESCE(SUM(c.iva_trasladado), 0) AS iva
+        SELECT COALESCE(SUM(
+                 CASE WHEN c.tipo_comprobante = 'E' THEN -c.iva_trasladado ELSE c.iva_trasladado END
+               ), 0) AS iva
         FROM cfdi c
         JOIN empresas e ON e.id = c.empresa_id
         WHERE c.empresa_id = %s
           AND c.rfc_receptor = e.rfc
+          AND c.tipo_comprobante IN ('I', 'E')
           AND c.estado = 'vigente'
           AND c.fecha_emision >= (%s || '-01')::date
           AND c.fecha_emision  < ((%s || '-01')::date + INTERVAL '1 month')
@@ -301,6 +308,8 @@ async def cedula_iva(
         "saldo_a_favor": -por_pagar if por_pagar < 0 else Decimal("0.00"),
     }
 
+    registrar_evento(current_user["user_id"], "reporte_generado", empresa_id=empresa_id, metadata={"tipo": "cedula_iva", "periodo": periodo})
+
     return _floats({
         "empresa_id": empresa_id,
         "periodo": periodo,
@@ -312,4 +321,219 @@ async def cedula_iva(
             "diot_iva_pagado": diot_iva,
             "diferencia": (ajustado - diot_iva).quantize(Decimal("0.01")),
         },
+    })
+
+
+# ---------------------------------------------------------------------------
+# ISR provisional (Módulo 5) — pago provisional mensual, base devengado (Art. 14 LISR)
+# ---------------------------------------------------------------------------
+
+
+def _cargar_datos_isr(empresa_id: str, periodo: str):
+    """Carga de DB los insumos del pago provisional: config anual (CU/PTU/pérdidas/
+    tasa), el ingreso nominal acumulado del ejercicio a cada corte mensual (ene..mes)
+    y la retención de ISR de CADA mes del ejercicio hasta el declarado (no solo el
+    mes declarado: ``isr.isr_provisional`` recalcula el pago real de los meses
+    anteriores, y ese pago real ya viene reducido por su propia retención — ver
+    fix de Kilo Code Review en PR #4). Devuelve ``(None, {}, {})`` si no hay
+    ``config_isr_empresa`` para el ejercicio (falta el CU)."""
+    emp = db.query_one("SELECT rfc FROM empresas WHERE id = %s", (empresa_id,))
+    if not emp:
+        raise HTTPException(status_code=404, detail="Empresa no encontrada")
+
+    ejercicio = periodo[:4]
+    mes = int(periodo[5:7])
+
+    config = db.query_one(
+        """
+        SELECT coeficiente_utilidad, tasa_isr, ptu_pagada, perdidas_pendientes
+        FROM config_isr_empresa
+        WHERE empresa_id = %s AND ejercicio = %s
+        """,
+        (empresa_id, ejercicio),
+    )
+    if not config:
+        return None, {}, {}
+
+    filas = db.query_all(
+        """
+        SELECT EXTRACT(MONTH FROM c.fecha_emision)::int AS mes,
+               COALESCE(SUM(
+                 CASE WHEN c.tipo_comprobante = 'E' THEN -c.subtotal ELSE c.subtotal END
+               ), 0) AS ingreso
+        FROM cfdi c
+        JOIN empresas e ON e.id = c.empresa_id
+        WHERE c.empresa_id = %s
+          AND c.rfc_emisor = e.rfc
+          AND c.tipo_comprobante IN ('I','E')
+          AND c.estado = 'vigente'
+          AND c.es_anticipo_sat = FALSE
+          AND c.fecha_emision >= (%s || '-01-01')::date
+          AND c.fecha_emision  < ((%s || '-01')::date + INTERVAL '1 month')
+        GROUP BY EXTRACT(MONTH FROM c.fecha_emision)
+        """,
+        (empresa_id, ejercicio, periodo),
+    )
+    ingreso_del_mes = {int(f["mes"]): Decimal(str(f["ingreso"])) for f in filas}
+    ingresos_por_mes: dict[int, Decimal] = {}
+    acumulado = Decimal("0")
+    for m in range(1, mes + 1):
+        acumulado += ingreso_del_mes.get(m, Decimal("0"))
+        ingresos_por_mes[m] = acumulado
+
+    filas_retencion = db.query_all(
+        """
+        SELECT EXTRACT(MONTH FROM c.fecha_emision)::int AS mes,
+               COALESCE(SUM(c.isr_retenido), 0) AS isr_retenido
+        FROM cfdi c
+        JOIN empresas e ON e.id = c.empresa_id
+        WHERE c.empresa_id = %s
+          AND c.rfc_emisor = e.rfc
+          AND c.estado = 'vigente'
+          AND c.fecha_emision >= (%s || '-01-01')::date
+          AND c.fecha_emision  < ((%s || '-01')::date + INTERVAL '1 month')
+        GROUP BY EXTRACT(MONTH FROM c.fecha_emision)
+        """,
+        (empresa_id, ejercicio, periodo),
+    )
+    retenciones_por_mes = {
+        int(f["mes"]): Decimal(str(f["isr_retenido"])) for f in filas_retencion
+    }
+
+    return config, ingresos_por_mes, retenciones_por_mes
+
+
+@router.get("/api/v1/empresas/{empresa_id}/isr-provisional/{periodo}")
+async def isr_provisional_endpoint(
+    empresa_id: str,
+    periodo: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Pago provisional mensual de ISR (persona moral, régimen general, Art. 14 LISR):
+    acumulado del ejercicio a la fecha de corte, base devengado."""
+    if not _PERIODO_RE.match(periodo):
+        raise HTTPException(status_code=422, detail="periodo inválido; formato esperado YYYY-MM")
+    validar_acceso_empresa(empresa_id, current_user)
+
+    config, ingresos_por_mes, retenciones_por_mes = _cargar_datos_isr(empresa_id, periodo)
+    if not config:
+        raise HTTPException(
+            status_code=404,
+            detail="Sin coeficiente de utilidad configurado para este ejercicio",
+        )
+
+    mes = int(periodo[5:7])
+    cu = Decimal(str(config["coeficiente_utilidad"]))
+    tasa = Decimal(str(config["tasa_isr"]))
+    ptu = Decimal(str(config["ptu_pagada"]))
+    perdidas = Decimal(str(config["perdidas_pendientes"]))
+
+    calculo = isr.isr_provisional(ingresos_por_mes, mes, cu, tasa, ptu, perdidas, retenciones_por_mes)
+
+    registrar_evento(current_user["user_id"], "reporte_generado", empresa_id=empresa_id, metadata={"tipo": "isr_provisional", "periodo": periodo})
+
+    return _floats({
+        "empresa_id": empresa_id,
+        "periodo": periodo,
+        "ejercicio": int(periodo[:4]),
+        "coeficiente_utilidad": cu,
+        "ingreso_nominal_acumulado": calculo["ingreso_nominal_acum"],
+        "utilidad_estimada": calculo["utilidad_estimada"],
+        "deducciones_base": {"ptu_pagada": ptu, "perdidas_pendientes": perdidas},
+        "base_gravable": calculo["base_gravable"],
+        "tasa_isr": tasa,
+        "isr_acumulado": calculo["isr_acumulado"],
+        "pagos_provisionales_anteriores": calculo["pagos_previos"],
+        "isr_retenido": calculo["isr_retenido"],
+        "resultado": {"pago_del_mes": calculo["pago_del_mes"]},
+    })
+
+
+# ---------------------------------------------------------------------------
+# Deducciones autorizadas (Módulo 4, MVP) — Art. 27 LISR, flujo de efectivo
+# ---------------------------------------------------------------------------
+
+
+def _cargar_datos_deducciones(empresa_id: str, periodo: str):
+    """Carga de DB los insumos de la cédula de deducciones: RFC y CFDIs/pagos
+    candidatos desde el 1 de enero del ejercicio hasta el fin del mes declarado
+    (una sola consulta cubre tanto "del mes" como "acumulado del ejercicio")."""
+    emp = db.query_one("SELECT rfc FROM empresas WHERE id = %s", (empresa_id,))
+    if not emp:
+        raise HTTPException(status_code=404, detail="Empresa no encontrada")
+    rfc = emp["rfc"]
+
+    ejercicio = periodo[:4]
+
+    cfdis = db.query_all(
+        """
+        SELECT uuid, tipo_comprobante, metodo_pago, estado, es_anticipo_sat, uso_cfdi,
+               rfc_emisor, rfc_receptor, forma_pago, fecha_emision, subtotal, total
+        FROM cfdi
+        WHERE empresa_id = %s
+          AND estado = 'vigente'
+          AND (
+                metodo_pago = 'PPD'
+                OR (fecha_emision >= (%s || '-01-01')::date
+                    AND fecha_emision  < ((%s || '-01')::date + INTERVAL '1 month'))
+              )
+        """,
+        (empresa_id, ejercicio, periodo),
+    )
+
+    pagos = db.query_all(
+        """
+        SELECT pr.cfdi_uuid, pr.importe_pagado, p.fecha_pago
+        FROM pagos_cfdi p
+        JOIN pagos_relaciones pr ON pr.pago_id = p.id
+        WHERE p.empresa_id = %s
+          AND p.fecha_pago >= (%s || '-01-01')::date
+          AND p.fecha_pago  < ((%s || '-01')::date + INTERVAL '1 month')
+        """,
+        (empresa_id, ejercicio, periodo),
+    )
+
+    return rfc, cfdis, pagos
+
+
+@router.get("/api/v1/empresas/{empresa_id}/deducciones/{periodo}")
+async def deducciones_endpoint(
+    empresa_id: str,
+    periodo: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Deducciones autorizadas del MVP (Art. 27 LISR): "del mes" y "acumulado del
+    ejercicio" (ene->mes), clasificadas en gasto / inversión / costo por
+    uso_cfdi. Independiente del ISR provisional (aplica a la declaración anual)."""
+    if not _PERIODO_RE.match(periodo):
+        raise HTTPException(status_code=422, detail="periodo inválido; formato esperado YYYY-MM")
+    validar_acceso_empresa(empresa_id, current_user)
+
+    rfc, cfdis, pagos = _cargar_datos_deducciones(empresa_id, periodo)
+
+    ejercicio = int(periodo[:4])
+    mes = int(periodo[5:7])
+    desde_mes = date(ejercicio, mes, 1)
+    hasta_mes = date(ejercicio, mes + 1, 1) if mes < 12 else date(ejercicio + 1, 1, 1)
+    desde_ejercicio = date(ejercicio, 1, 1)
+
+    calculo_mes = deducciones.deducciones_periodo(cfdis, pagos, rfc, desde_mes, hasta_mes)
+    calculo_acum = deducciones.deducciones_periodo(cfdis, pagos, rfc, desde_ejercicio, hasta_mes)
+
+    def _cubetas(c: dict) -> dict:
+        return {
+            "gasto": c["gasto"],
+            "inversion_identificada": c["inversion_identificada"],
+            "costo_identificado": c["costo_identificado"],
+            "excluido_efectivo": c["excluido_efectivo"],
+        }
+
+    return _floats({
+        "empresa_id": empresa_id,
+        "periodo": periodo,
+        "ejercicio": ejercicio,
+        "del_mes": _cubetas(calculo_mes),
+        "acumulado_ejercicio": _cubetas(calculo_acum),
+        "total_deducible_mes": calculo_mes["total_deducible"],
+        "total_deducible_acumulado": calculo_acum["total_deducible"],
     })

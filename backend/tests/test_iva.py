@@ -177,6 +177,18 @@ def test_nota_de_credito_recibida_resta_acreditable():
     assert res["bruto"] == Decimal("70.00")
 
 
+def test_anticipo_sat_recibido_se_excluye_de_acreditable():
+    # Regresión: un anticipo SAT recibido no debe acreditarse (se acredita al
+    # llegar la factura final que lo aplica). Antes del fix, este anticipo se
+    # sumaba dos veces: una al recibirlo, otra al recibir la factura final.
+    cfdis = [
+        _gasto(uuid="A1", es_anticipo_sat=True, forma_pago="03", iva_trasladado=Decimal("1600")),
+        _gasto(uuid="G1", forma_pago="03", total=Decimal("11600"), iva_trasladado=Decimal("1600")),
+    ]
+    res = iva_acreditable(cfdis, [], "2026-01", RFC)
+    assert res["bruto"] == Decimal("1600.00")
+
+
 # ── Prorrateo (Art. 5-V LIVA) ─────────────────────────────────────────────
 
 

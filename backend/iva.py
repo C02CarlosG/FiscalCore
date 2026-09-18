@@ -115,7 +115,9 @@ def iva_acreditable(
     """IVA acreditable (gastos/compras) pagado en el periodo, por flujo de efectivo.
 
     Simétrico a :func:`iva_trasladado` pero sobre CFDIs donde la empresa es la
-    RECEPTORA. Regla de bancarización de v1: pagos en efectivo
+    RECEPTORA. Se excluyen los anticipos SAT recibidos (se acreditan cuando llega
+    la factura final que los aplica, no al recibir el anticipo, evitando doble
+    conteo). Regla de bancarización de v1: pagos en efectivo
     (``forma_pago == '01'``) por más de $2,000 no son acreditables (van a un
     balde ``excluido_efectivo``). El resultado es el IVA **bruto**; el ajuste por
     prorrateo se aplica aparte con :func:`aplicar_prorrateo`.
@@ -134,6 +136,8 @@ def iva_acreditable(
             continue  # la empresa no es receptora -> no es gasto
         if c.get("estado") != "vigente":
             continue
+        if c.get("es_anticipo_sat"):
+            continue  # se acredita cuando llega la factura final que lo aplica
 
         tipo = c.get("tipo_comprobante")
         if tipo == "E":  # nota de crédito recibida -> reduce el IVA acreditable

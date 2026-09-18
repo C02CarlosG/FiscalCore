@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
 from .. import db
+from ..auditoria import registrar_evento
 from ..deps import require_admin, serializar
 
 _log = logging.getLogger(__name__)
@@ -67,6 +68,12 @@ async def actualizar_usuario(
     )
     if not usuario:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
+
+    registrar_evento(
+        admin["user_id"], "usuario_actualizado", entidad="usuario", entidad_id=user_id,
+        metadata=campos,
+    )
+
     return serializar(usuario)
 
 

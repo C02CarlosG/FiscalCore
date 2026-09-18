@@ -28,6 +28,13 @@ class RegisterRequest(BaseModel):
     password: str
     nombre: Optional[str] = None
 
+    @field_validator("password")
+    @classmethod
+    def password_longitud_minima(cls, v: str) -> str:
+        if len(v) < 8:
+            raise ValueError("La contraseña debe tener al menos 8 caracteres")
+        return v
+
 
 class AgregarEmpresaRequest(BaseModel):
     rfc: str

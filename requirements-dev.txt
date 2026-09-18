@@ -1,0 +1,6 @@
+-r requirements.txt
+
+# Dependencias solo para tests (backend/tests/). No se instalan en producción.
+pytest==8.3.3
+httpx==0.28.1
+PyYAML==6.0.3

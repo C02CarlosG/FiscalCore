@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
 from typing import Optional
-from xml.etree import ElementTree as ET
+from defusedxml import ElementTree as ET
 
 # Namespaces oficiales SAT
 NS = {

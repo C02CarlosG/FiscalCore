@@ -1,0 +1,66 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "anthropic/claude-sonnet-4-6",
+  "small_model": "anthropic/claude-haiku-3-5",
+  "default_agent": "build",
+  "instructions": ["AGENTS.md"],
+  "skills": {
+    "paths": [".opencode/skills"]
+  },
+  "mcp": {
+    "postgres": {
+      "type": "local",
+      "command": ["npx", "-y", "@modelcontextprotocol/server-postgres", "postgresql://postgres:postgres@127.0.0.1:5432/fiscalcore"],
+      "enabled": true
+    }
+  },
+  "permission": {
+    "edit": "ask",
+    "bash": {
+      "python *": "allow",
+      "python3 *": "allow",
+      ".venv/bin/python *": "allow",
+      "pip install *": "allow",
+      ".venv/bin/pip install *": "allow",
+      "pip3 install *": "allow",
+      "python -m pytest *": "allow",
+      ".venv/bin/python -m pytest *": "allow",
+      "pytest *": "allow",
+      "git *": "allow",
+      "docker compose *": "allow",
+      "docker *": "allow",
+      "psql *": "allow",
+      "PGPASSWORD=* psql *": "allow",
+      "uvicorn *": "allow",
+      ".venv/bin/python -m uvicorn *": "allow",
+      "curl *": "allow",
+      "kill *": "allow",
+      "pkill *": "allow",
+      "pg_lsclusters": "allow",
+      "psql --version": "allow",
+      "ls *": "allow",
+      "cat *": "allow",
+      "head *": "allow",
+      "tail *": "allow",
+      "wc *": "allow",
+      "mkdir *": "allow",
+      "cp *": "allow",
+      "mv *": "allow",
+      "rm *": "ask",
+      "sudo *": "ask",
+      "*": "ask"
+    },
+    "external_directory": {
+      "~/secrets/**": "deny",
+      "*": "allow"
+    }
+  },
+  "tool_output": {
+    "max_lines": 200,
+    "max_bytes": 8192
+  },
+  "compaction": {
+    "auto": true,
+    "tail_turns": 15
+  }
+}
