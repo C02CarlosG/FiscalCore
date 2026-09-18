@@ -2,21 +2,21 @@
 
 import { useParams } from "next/navigation";
 import { useState } from "react";
-import { useVisorSat } from "@/hooks/useCfdi";
-import { VisorSatPanel } from "@/components/cfdi/VisorSatPanel";
+import { useNominaCfdi } from "@/hooks/useCfdi";
+import { NominaPanel } from "@/components/cfdi/NominaPanel";
 import { ErrorState } from "@/components/shared/ErrorState";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-export default function VisorSatPage() {
+export default function CfdiNominaPage() {
   const params = useParams<{ empresaId: string }>();
   const [periodo, setPeriodo] = useState("");
 
-  const visor = useVisorSat(params.empresaId, periodo);
+  const nomina = useNominaCfdi(params.empresaId, periodo);
 
   return (
     <main className="mx-auto max-w-6xl space-y-6">
-      <h1 className="text-2xl font-semibold">Visor SAT</h1>
+      <h1 className="text-2xl font-semibold">CFDI Nómina</h1>
 
       <div className="space-y-2">
         <Label htmlFor="periodo">Periodo (YYYY-MM)</Label>
@@ -30,16 +30,19 @@ export default function VisorSatPage() {
       </div>
 
       {!periodo && (
-        <p className="text-sm text-muted-foreground">Ingresa un periodo para ver los CFDI.</p>
+        <p className="text-sm text-muted-foreground">Ingresa un periodo para ver los recibos de nómina.</p>
       )}
 
-      {periodo && visor.isLoading && <p className="text-sm text-muted-foreground">Cargando CFDI...</p>}
+      {periodo && nomina.isLoading && <p className="text-sm text-muted-foreground">Cargando recibos...</p>}
 
-      {periodo && visor.isError && (
-        <ErrorState message="No se pudieron cargar los CFDI." onRetry={() => visor.refetch()} />
+      {periodo && nomina.isError && (
+        <ErrorState
+          message="No se pudieron cargar los recibos de nómina."
+          onRetry={() => nomina.refetch()}
+        />
       )}
 
-      {periodo && visor.data && <VisorSatPanel data={visor.data} />}
+      {periodo && nomina.data && <NominaPanel data={nomina.data} />}
     </main>
   );
 }

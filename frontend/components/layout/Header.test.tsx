@@ -47,10 +47,10 @@ describe("Header", () => {
     expect(screen.getByText("Dashboard")).toBeInTheDocument();
   });
 
-  it("shows the Gestión de CFDI breadcrumb and not Empresas on the cfdi route", () => {
+  it("shows the Visor SAT breadcrumb and not Empresas on the cfdi route", () => {
     mockPathname.mockReturnValue("/empresas/e1/cfdi");
     render(<Header onMenuClick={() => {}} />);
-    expect(screen.getByText("Gestión de CFDI")).toBeInTheDocument();
+    expect(screen.getByText("Visor SAT")).toBeInTheDocument();
     expect(screen.queryByText("Empresas")).not.toBeInTheDocument();
   });
 

@@ -15,7 +15,10 @@ import { clearSession, loadSession } from "@/lib/auth";
 const LABELS: Record<string, string> = {
   dashboard: "Dashboard",
   empresas: "Empresas",
-  cfdi: "Gestión de CFDI",
+  cfdi: "Visor SAT",
+  emitidos: "CFDI Emitidos",
+  recibidos: "CFDI Recibidos",
+  nomina: "CFDI Nómina",
   ingesta: "Ingesta",
   conciliacion: "Conciliación",
   "cedula-iva": "Cédula de IVA",

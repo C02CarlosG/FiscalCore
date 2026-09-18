@@ -38,16 +38,12 @@ describe("Sidebar", () => {
     });
   });
 
-  it("renders the 5 nav items with links scoped to the active empresa", () => {
+  it("renders the flat nav items with links scoped to the active empresa", () => {
     render(<Sidebar mobileOpen={false} onMobileOpenChange={() => {}} />);
 
     expect(screen.getByRole("link", { name: /Dashboard/ })).toHaveAttribute(
       "href",
       "/empresas/e1/dashboard",
-    );
-    expect(screen.getByRole("link", { name: /Gestión de CFDI/ })).toHaveAttribute(
-      "href",
-      "/empresas/e1/cfdi",
     );
     expect(screen.getByRole("link", { name: /Ingesta/ })).toHaveAttribute(
       "href",
@@ -63,6 +59,42 @@ describe("Sidebar", () => {
     );
   });
 
+  it("expands the Gestión de CFDI submenu with its 4 options on click", async () => {
+    const user = userEvent.setup();
+    render(<Sidebar mobileOpen={false} onMobileOpenChange={() => {}} />);
+
+    expect(screen.queryByRole("link", { name: "Visor SAT" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /Gestión de CFDI/ }));
+
+    expect(screen.getByRole("link", { name: "Visor SAT" })).toHaveAttribute(
+      "href",
+      "/empresas/e1/cfdi",
+    );
+    expect(screen.getByRole("link", { name: "CFDI Emitidos" })).toHaveAttribute(
+      "href",
+      "/empresas/e1/cfdi/emitidos",
+    );
+    expect(screen.getByRole("link", { name: "CFDI Recibidos" })).toHaveAttribute(
+      "href",
+      "/empresas/e1/cfdi/recibidos",
+    );
+    expect(screen.getByRole("link", { name: "CFDI Nómina" })).toHaveAttribute(
+      "href",
+      "/empresas/e1/cfdi/nomina",
+    );
+  });
+
+  it("auto-expands the Gestión de CFDI submenu when a cfdi route is active", () => {
+    mockPathname.mockReturnValue("/empresas/e1/cfdi/nomina");
+    render(<Sidebar mobileOpen={false} onMobileOpenChange={() => {}} />);
+
+    expect(screen.getByRole("link", { name: "CFDI Nómina" })).toHaveAttribute(
+      "href",
+      "/empresas/e1/cfdi/nomina",
+    );
+  });
+
   it("disables all nav items when there is no empresa selected", () => {
     vi.mocked(useEmpresaContext).mockReturnValue({
       empresaId: null,
@@ -75,7 +107,7 @@ describe("Sidebar", () => {
       screen.queryByRole("link", { name: /Dashboard/ }),
     ).not.toBeInTheDocument();
     expect(
-      screen.queryByRole("link", { name: /Gestión de CFDI/ }),
+      screen.queryByRole("button", { name: /Gestión de CFDI/ }),
     ).not.toBeInTheDocument();
     expect(screen.getByText("Gestión de CFDI")).toBeInTheDocument();
   });

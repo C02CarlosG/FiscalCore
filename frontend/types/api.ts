@@ -248,3 +248,59 @@ export interface RecibidosResponse {
   compras: CfdiRecibidoRow[];
   egresos: CfdiRecibidoRow[];
 }
+
+export interface CfdiVisorRow {
+  uuid: string;
+  tipo_comprobante: string;
+  serie_folio: string | null;
+  fecha: string;
+  rfc_emisor: string;
+  nombre_emisor: string | null;
+  rfc_receptor: string;
+  nombre_receptor: string | null;
+  total: number;
+  iva: number;
+  estado: string;
+  direccion: "emitido" | "recibido";
+}
+
+export interface VisorSatResumen {
+  total_cfdi: number;
+  emitidos: number;
+  recibidos: number;
+  vigentes: number;
+  canceladas: number;
+  monto_total: number;
+}
+
+export interface VisorSatResponse {
+  periodo: string;
+  empresa_rfc: string;
+  resumen: VisorSatResumen;
+  cfdi: CfdiVisorRow[];
+}
+
+export interface CfdiNominaRow {
+  uuid: string;
+  serie_folio: string | null;
+  fecha: string;
+  rfc_receptor: string;
+  nombre_receptor: string | null;
+  subtotal: number;
+  total: number;
+  estado: string;
+}
+
+export interface NominaResumen {
+  total_nomina: number;
+  num_recibos: number;
+  vigentes: number;
+  canceladas: number;
+}
+
+export interface NominaResponse {
+  periodo: string;
+  empresa_rfc: string;
+  resumen: NominaResumen;
+  recibos: CfdiNominaRow[];
+}
