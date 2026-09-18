@@ -1065,6 +1065,70 @@ paths:
         '403':
           $ref: '#/components/responses/ForbiddenError'
 
+  /api/v1/empresas/{empresa_id}/cfdi/visor:
+    get:
+      operationId: getVisorSat
+      tags: [Emitidos]
+      summary: Visor general de CFDI (emitidos y recibidos, cualquier tipo)
+      description: |
+        Retorna todos los CFDIs (cualquier tipo_comprobante) emitidos o
+        recibidos por el RFC de la empresa en el periodo especificado — la
+        vista "como en el portal del SAT", sin la clasificacion de
+        anticipos/notas de credito que aplican los endpoints de
+        Emitidos/Recibidos. Cada CFDI incluye `direccion` (emitido/recibido)
+        segun si el RFC de la empresa aparece como emisor o receptor.
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - name: periodo
+          in: query
+          required: true
+          schema:
+            type: string
+            pattern: '^\d{4}-\d{2}$'
+          description: Periodo fiscal YYYY-MM
+          example: "2024-01"
+      responses:
+        '200':
+          description: CFDIs del periodo, emitidos y recibidos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VisorSatResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+
+  /api/v1/empresas/{empresa_id}/cfdi/nomina:
+    get:
+      operationId: getCfdiNomina
+      tags: [Emitidos]
+      summary: CFDIs de nomina emitidos por la empresa en el periodo
+      description: |
+        Retorna los CFDIs de nomina (tipo_comprobante='N') emitidos por la
+        empresa (como patron) a sus empleados en el periodo especificado.
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - name: periodo
+          in: query
+          required: true
+          schema:
+            type: string
+            pattern: '^\d{4}-\d{2}$'
+          description: Periodo fiscal YYYY-MM
+          example: "2024-01"
+      responses:
+        '200':
+          description: Recibos de nomina del periodo
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NominaResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+
   # ============================================================
   # DASHBOARD
   # ============================================================
@@ -2987,6 +3051,112 @@ components:
           type: array
           items:
             type: object
+
+    VisorSatResponse:
+      type: object
+      properties:
+        periodo:
+          type: string
+        empresa_rfc:
+          type: string
+        resumen:
+          type: object
+          properties:
+            total_cfdi:
+              type: integer
+            emitidos:
+              type: integer
+            recibidos:
+              type: integer
+            vigentes:
+              type: integer
+            canceladas:
+              type: integer
+            monto_total:
+              type: number
+              format: float
+        cfdi:
+          type: array
+          items:
+            type: object
+            properties:
+              uuid:
+                type: string
+              tipo_comprobante:
+                type: string
+              serie_folio:
+                type: string
+                nullable: true
+              fecha:
+                type: string
+                format: date
+              rfc_emisor:
+                type: string
+              nombre_emisor:
+                type: string
+                nullable: true
+              rfc_receptor:
+                type: string
+              nombre_receptor:
+                type: string
+                nullable: true
+              total:
+                type: number
+                format: float
+              iva:
+                type: number
+                format: float
+              estado:
+                type: string
+              direccion:
+                type: string
+                enum: [emitido, recibido]
+
+    NominaResponse:
+      type: object
+      properties:
+        periodo:
+          type: string
+        empresa_rfc:
+          type: string
+        resumen:
+          type: object
+          properties:
+            total_nomina:
+              type: number
+              format: float
+            num_recibos:
+              type: integer
+            vigentes:
+              type: integer
+            canceladas:
+              type: integer
+        recibos:
+          type: array
+          items:
+            type: object
+            properties:
+              uuid:
+                type: string
+              serie_folio:
+                type: string
+                nullable: true
+              fecha:
+                type: string
+                format: date
+              rfc_receptor:
+                type: string
+              nombre_receptor:
+                type: string
+                nullable: true
+              subtotal:
+                type: number
+                format: float
+              total:
+                type: number
+                format: float
+              estado:
+                type: string
 
     DashboardResponse:
       type: object
