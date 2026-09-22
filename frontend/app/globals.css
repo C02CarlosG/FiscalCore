@@ -1,0 +1,89 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 240 33% 98%;
+    --foreground: 248 20% 11%;
+    --card: 0 0% 100%;
+    --card-foreground: 248 20% 11%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 248 20% 11%;
+    --primary: 243 75% 59%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 245 30% 95%;
+    --secondary-foreground: 248 20% 11%;
+    --muted: 245 30% 95%;
+    --muted-foreground: 247 8% 45%;
+    --accent: 246 78% 95%;
+    --accent-foreground: 244 62% 47%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 245 30% 92%;
+    --input: 245 30% 88%;
+    --ring: 243 75% 59%;
+    --radius: 0.625rem;
+
+    --severity-critico: #DC2626;
+    --severity-critico-soft: #FDECEC;
+    --severity-alto: #EA580C;
+    --severity-alto-soft: #FDEEE4;
+    --severity-medio: #D97706;
+    --severity-medio-soft: #FDF3E1;
+    --severity-bajo: #2563EB;
+    --severity-bajo-soft: #EAF0FE;
+    --status-ok: #059669;
+    --status-ok-soft: #E4F5EE;
+    --status-pendiente: #D97706;
+    --status-pendiente-soft: #FDF3E1;
+    --status-error: #DC2626;
+    --status-error-soft: #FDECEC;
+  }
+
+  .dark {
+    --background: 253 22% 8%;
+    --foreground: 250 43% 95%;
+    --card: 249 24% 14%;
+    --card-foreground: 250 43% 95%;
+    --popover: 249 24% 14%;
+    --popover-foreground: 250 43% 95%;
+    --primary: 243 82% 71%;
+    --primary-foreground: 253 22% 8%;
+    --secondary: 247 22% 18%;
+    --secondary-foreground: 250 43% 95%;
+    --muted: 247 22% 18%;
+    --muted-foreground: 250 13% 68%;
+    --accent: 250 40% 20%;
+    --accent-foreground: 245 100% 82%;
+    --destructive: 0 63% 60%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 247 22% 20%;
+    --input: 247 22% 22%;
+    --ring: 243 82% 71%;
+
+    --severity-critico: #F87171;
+    --severity-critico-soft: #3A1B1F;
+    --severity-alto: #FB923C;
+    --severity-alto-soft: #3A2716;
+    --severity-medio: #FBBF24;
+    --severity-medio-soft: #3A2E10;
+    --severity-bajo: #60A5FA;
+    --severity-bajo-soft: #182A47;
+    --status-ok: #34D399;
+    --status-ok-soft: #12302A;
+    --status-pendiente: #FBBF24;
+    --status-pendiente-soft: #3A2E10;
+    --status-error: #F87171;
+    --status-error-soft: #3A1B1F;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}

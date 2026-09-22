@@ -1,0 +1,306 @@
+export interface EmpresaResumen {
+  empresa_id: string;
+  rfc: string;
+  razon_social: string;
+  regimen_fiscal: string | null;
+}
+
+export interface LoginResponse {
+  access_token: string;
+  token_type: string;
+  user_id: string;
+  email: string;
+  nombre: string | null;
+  empresas: EmpresaResumen[];
+}
+
+export interface Empresa {
+  id: string;
+  rfc: string;
+  razon_social: string;
+  regimen_fiscal: string | null;
+  cp_fiscal: string | null;
+  curp: string | null;
+  obligaciones: string[] | null;
+  representante_legal: string | null;
+  rfc_representante: string | null;
+  activo: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AgregarEmpresaRequest {
+  rfc: string;
+  razon_social: string;
+  regimen_fiscal?: string;
+  cp_fiscal?: string;
+  curp?: string;
+  obligaciones?: string[];
+  representante_legal?: string;
+  rfc_representante?: string;
+}
+
+export interface AgregarEmpresaResponse {
+  mensaje: string;
+  empresa_id: string;
+  rfc: string;
+  razon_social: string;
+}
+
+export interface RiesgoAbierto {
+  id: string;
+  codigo: string;
+  nombre: string;
+  severidad: "critico" | "alto" | "medio" | "bajo";
+  monto_afectado: number | null;
+  descripcion: string | null;
+  cfdi_id: string | null;
+  movimiento_id: string | null;
+  estado: string;
+  periodo: string;
+  created_at: string;
+}
+
+export interface ResumenRiesgos {
+  critico: number;
+  alto: number;
+  medio: number;
+  bajo: number;
+  monto_total_en_riesgo: number;
+}
+
+export interface Indicadores {
+  ingresos_cfdi?: number;
+  egresos_cfdi?: number;
+  depositos_banco?: number;
+  cargos_banco?: number;
+  brecha_ingresos?: number;
+  brecha_egresos?: number;
+  pct_conciliacion?: number;
+}
+
+export interface TendenciaScore {
+  periodo: string;
+  score: number;
+}
+
+export interface DashboardData {
+  empresa: Empresa;
+  score_actual: Record<string, unknown> | null;
+  riesgos_abiertos: RiesgoAbierto[];
+  resumen_riesgos: ResumenRiesgos;
+  tendencia_score: TendenciaScore[];
+  indicadores: Indicadores;
+}
+
+export interface IvaDesglose {
+  base: number;
+  iva: number;
+}
+
+export interface TrasladadoIva {
+  pue: IvaDesglose;
+  ppd: { cobrado: number; iva: number };
+  notas_credito: IvaDesglose;
+  total: number;
+}
+
+export interface AcreditableIva {
+  pue: IvaDesglose;
+  ppd: { pagado: number; iva: number };
+  notas_credito: IvaDesglose;
+  excluido_efectivo: { iva: number };
+  bruto: number;
+  factor_prorrateo: number;
+  ajustado: number;
+}
+
+export interface ResultadoIva {
+  iva_por_pagar: number;
+  saldo_a_cargo: number;
+  saldo_a_favor: number;
+}
+
+export interface ComparativoSat {
+  diot_iva_pagado: number;
+  diferencia: number;
+}
+
+export interface CedulaIva {
+  empresa_id: string;
+  periodo: string;
+  trasladado: TrasladadoIva;
+  acreditable: AcreditableIva;
+  iva_retenido: number;
+  resultado: ResultadoIva;
+  comparativo_sat: ComparativoSat;
+}
+
+export interface IngestaResponse {
+  mensaje: string;
+  registros_procesados: number;
+  errores: string[];
+  periodo: string;
+}
+
+export interface ConciliacionResumen {
+  total: number;
+  exacto: number;
+  parcial: number;
+  sin_cfdi: number;
+  sin_movimiento: number;
+  pct_conciliado: number;
+}
+
+export interface ParConciliacion {
+  id: string;
+  tipo_match: "sin_cfdi" | "parcial";
+  monto_movimiento: number | null;
+  monto_cfdi: number | null;
+  diferencia: number | null;
+  porcentaje_match: number | null;
+  periodo: string;
+  movimiento_id: string | null;
+  mov_fecha: string | null;
+  concepto: string | null;
+  mov_monto: number | null;
+  mov_tipo: string | null;
+  rfc_detectado: string | null;
+}
+
+export interface ConciliacionesAccionables {
+  total: number;
+  pares: ParConciliacion[];
+}
+
+export interface CfdiEmitidoRow {
+  uuid: string;
+  serie_folio: string | null;
+  fecha: string;
+  rfc_receptor: string;
+  nombre_receptor: string | null;
+  subtotal: number;
+  descuento: number;
+  total: number;
+  iva: number;
+  metodo_pago: string | null;
+  forma_pago: string | null;
+  uso_cfdi: string | null;
+  moneda: string | null;
+  estado: string;
+  estado_pago: string | null;
+  es_anticipo: boolean;
+  es_factura_con_anticipo: boolean;
+}
+
+export interface EmitidosResumen {
+  subtotal: number;
+  iva_trasladado: number;
+  total_facturado: number;
+  vigentes: number;
+  canceladas: number;
+  total_cfdi_periodo: number;
+  ingreso_neto_periodo: number;
+  num_ingresos: number;
+  num_egresos: number;
+}
+
+export interface EmitidosResponse {
+  periodo: string;
+  empresa_rfc: string;
+  resumen: EmitidosResumen;
+  ingresos: {
+    ventas_servicios: CfdiEmitidoRow[];
+    anticipos: CfdiEmitidoRow[];
+    facturas_con_anticipo: CfdiEmitidoRow[];
+  };
+  egresos: {
+    notas_credito: CfdiEmitidoRow[];
+    aplicaciones_anticipo: CfdiEmitidoRow[];
+  };
+}
+
+export interface CfdiRecibidoRow {
+  uuid: string;
+  serie_folio: string | null;
+  fecha: string;
+  rfc_emisor: string;
+  nombre_emisor: string | null;
+  subtotal: number;
+  total: number;
+  iva: number;
+  estado: string;
+}
+
+export interface RecibidosResumen {
+  subtotal: number;
+  iva_acreditable: number;
+  total: number;
+  num_compras: number;
+  num_egresos: number;
+  vigentes: number;
+  canceladas: number;
+}
+
+export interface RecibidosResponse {
+  periodo: string;
+  resumen: RecibidosResumen;
+  compras: CfdiRecibidoRow[];
+  egresos: CfdiRecibidoRow[];
+}
+
+export interface CfdiVisorRow {
+  uuid: string;
+  tipo_comprobante: string;
+  serie_folio: string | null;
+  fecha: string;
+  rfc_emisor: string;
+  nombre_emisor: string | null;
+  rfc_receptor: string;
+  nombre_receptor: string | null;
+  total: number;
+  iva: number;
+  estado: string;
+  direccion: "emitido" | "recibido";
+}
+
+export interface VisorSatResumen {
+  total_cfdi: number;
+  emitidos: number;
+  recibidos: number;
+  vigentes: number;
+  canceladas: number;
+  monto_total: number;
+}
+
+export interface VisorSatResponse {
+  periodo: string;
+  empresa_rfc: string;
+  resumen: VisorSatResumen;
+  cfdi: CfdiVisorRow[];
+}
+
+export interface CfdiNominaRow {
+  uuid: string;
+  serie_folio: string | null;
+  fecha: string;
+  rfc_receptor: string;
+  nombre_receptor: string | null;
+  subtotal: number;
+  total: number;
+  estado: string;
+}
+
+export interface NominaResumen {
+  total_nomina: number;
+  num_recibos: number;
+  vigentes: number;
+  canceladas: number;
+}
+
+export interface NominaResponse {
+  periodo: string;
+  empresa_rfc: string;
+  resumen: NominaResumen;
+  recibos: CfdiNominaRow[];
+}
