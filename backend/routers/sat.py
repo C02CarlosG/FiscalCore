@@ -558,10 +558,13 @@ def _avanzar_solicitud(creds, solicitud: dict) -> str:
             paquetes=id_paquetes,
         ) or "terminado"
 
-    if estado_str in _ESTADOS_FALLO_SAT:
+    # Sin un estado reconocible (el SAT manda 0 cuando rechaza la consulta, p. ej.
+    # "No se encontró la información") tampoco hay nada que esperar.
+    if estado_str in _ESTADOS_FALLO_SAT or not estado_str:
+        motivo = f"SAT reportó estado: {estado_str}." if estado_str else "El SAT respondió:"
         db.execute(
             "UPDATE sat_solicitudes SET estado='fallo', error_msg=%s, updated_at=NOW() WHERE id=%s",
-            (f"SAT reportó estado: {estado_str}. {resultado.get('mensaje') or ''}".strip(), sol_id),
+            (f"{motivo} {resultado.get('mensaje') or 'sin detalle'}", sol_id),
         )
         return "fallo"
 

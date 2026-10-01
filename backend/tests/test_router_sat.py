@@ -860,3 +860,23 @@ def test_verificar_solicitud_estado_numerico_terminada(monkeypatch):
         _teardown()
 
     assert r.json()["estado"] == "terminado"
+
+
+def test_avanzar_estado_cero_del_sat_deja_de_esperar_y_guarda_el_motivo(monkeypatch):
+    """El SAT responde EstadoSolicitud=0 cuando no hay información para la consulta."""
+    _auth(monkeypatch)
+    monkeypatch.setattr(db, "query_all", lambda *a, **k: [_solicitud_pendiente("en_proceso")])
+    monkeypatch.setattr(fiel_store, "obtener_signer", lambda db_, eid: _FakeSigner())
+    monkeypatch.setattr(sat, "verificar_solicitud", lambda *a, **k: {
+        "estado": 0, "id_paquetes": [], "num_cfdi": 0, "mensaje": "No se encontro la informacion",
+    })
+    params_vistos = []
+    monkeypatch.setattr(db, "execute", lambda sql, params=(), returning=False: params_vistos.append(params))
+
+    try:
+        r = client.post(_AVANZAR_URL)
+    finally:
+        _teardown()
+
+    assert r.json() == {"avanzadas": [{"id": "sol-1", "estado": "fallo"}]}
+    assert params_vistos[0][0] == "El SAT respondió: No se encontro la informacion"
