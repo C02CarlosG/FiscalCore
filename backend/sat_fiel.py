@@ -80,6 +80,8 @@ def cargar_fiel(cer_bytes: bytes, key_bytes: bytes, password: str | bytes) -> "S
         )
         return signer
     except Exception as exc:
+        if "password" in str(exc).lower() or "decrypt" in str(exc).lower():
+            raise FIELError("la contraseña de la llave privada es incorrecta") from exc
         raise FIELError(f"No se pudo cargar la FIEL: {exc}") from exc
 
 

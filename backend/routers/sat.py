@@ -344,7 +344,7 @@ async def guardar_fiel_empresa(
     """Guarda la FIEL cifrada para una empresa. Reemplaza cualquier FIEL previa."""
     validar_acceso_empresa(empresa_id, current_user)
 
-    empresa = db.query_one("SELECT id FROM empresas WHERE id = %s", (empresa_id,))
+    empresa = db.query_one("SELECT id, rfc FROM empresas WHERE id = %s", (empresa_id,))
     if not empresa:
         raise HTTPException(status_code=404, detail="Empresa no encontrada")
 
@@ -356,6 +356,7 @@ async def guardar_fiel_empresa(
             cer_bytes=await cer_file.read(),
             key_bytes=await key_file.read(),
             password=password,
+            rfc_esperado=empresa.get("rfc"),
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))

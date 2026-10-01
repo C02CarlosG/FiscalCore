@@ -392,6 +392,25 @@ def test_guardar_fiel_exitoso(monkeypatch):
     assert r.json()["tiene_fiel"] is True
 
 
+def test_guardar_fiel_valida_contra_el_rfc_de_la_empresa(monkeypatch):
+    _auth(monkeypatch)
+    monkeypatch.setattr(db, "query_one", lambda *a, **k: {"id": EMPRESA, "rfc": "TEST010101AAA"})
+    recibido = {}
+    monkeypatch.setattr(fiel_store, "guardar_fiel", lambda **kw: recibido.update(kw) or {"guardada": True})
+
+    try:
+        r = client.post(
+            f"/api/v1/sat/empresas/{EMPRESA}/fiel/guardar",
+            data={"password": "x"},
+            files={"cer_file": _CER, "key_file": _KEY},
+        )
+    finally:
+        _teardown()
+
+    assert r.status_code == 200
+    assert recibido["rfc_esperado"] == "TEST010101AAA"
+
+
 def test_guardar_fiel_empresa_no_encontrada_da_404(monkeypatch):
     _auth(monkeypatch)
     monkeypatch.setattr(db, "query_one", lambda *a, **k: None)

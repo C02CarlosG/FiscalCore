@@ -61,9 +61,14 @@ def guardar_fiel(
     cer_bytes: bytes,
     key_bytes: bytes,
     password: str,
+    rfc_esperado: str | None = None,
 ) -> dict:
     """
     Guarda (o reemplaza) la FIEL de una empresa de forma cifrada.
+
+    Si se pasa ``rfc_esperado`` (el RFC de la empresa) y el certificado es de
+    otro contribuyente, se rechaza: el SAT no entregaría los CFDI de la empresa
+    con una e.firma ajena, y la falla llegaría hasta el momento de descargar.
 
     Valida primero que los archivos sean una FIEL válida usando satcfdi.
     Si ya existía una FIEL para la empresa, la sobreescribe.
@@ -102,6 +107,12 @@ def guardar_fiel(
             pass
     except Exception as exc:
         _log.warning("No se pudo extraer metadatos del certificado: %s", exc)
+
+    if rfc_esperado and rfc_cert and rfc_cert.strip().upper() != rfc_esperado.strip().upper():
+        raise ValueError(
+            f"La e.firma corresponde al RFC {rfc_cert.strip().upper()}, "
+            f"no al de la empresa ({rfc_esperado.strip().upper()})"
+        )
 
     # 3. Cifrar credenciales
     cer_cifrado = _cifrar(cer_bytes)
