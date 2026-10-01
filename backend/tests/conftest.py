@@ -24,3 +24,21 @@ def db_disponible() -> bool:
         return True
     except Exception:
         return False
+
+
+def headers_usuario_e2e(db, email: str) -> dict:
+    """Crea un contador directamente en la DB y devuelve sus headers de auth.
+
+    Para tests E2E que no prueban el registro en sí: `POST /auth/register` está
+    limitado a 10/hora por IP (slowapi, en memoria del proceso), y cada E2E que
+    se registra por la API consume cupo de toda la corrida de pytest.
+    """
+    from backend.deps import crear_token
+
+    usuario = db.execute(
+        "INSERT INTO usuarios (email, password_hash, nombre) VALUES (%s, 'no-login', 'E2E') RETURNING id",
+        (email,),
+        returning=True,
+    )
+    token = crear_token({"user_id": str(usuario["id"]), "email": email})
+    return {"Authorization": f"Bearer {token}"}

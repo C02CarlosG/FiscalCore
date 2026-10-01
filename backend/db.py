@@ -206,6 +206,10 @@ def init_db() -> None:
         # 026 es idempotente — tabla auditoria para eventos sensibles (CFDI, FIEL, admin, reportes)
         _run_sql_file("026_auditoria.sql")
 
+        # 027 es idempotente — UUIDs en mayúsculas, UNIQUE en pagos_relaciones y
+        # recálculo de monto_cobrado derivado de los pagos (REP re-ingeridos)
+        _run_sql_file("027_pagos_idempotentes.sql")
+
         # Seed inicial: usuario admin si la base aún no tiene usuarios
         _seed_admin()
 

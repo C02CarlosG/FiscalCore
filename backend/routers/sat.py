@@ -16,7 +16,7 @@ from datetime import date
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Request, UploadFile
 
-from .. import db
+from .. import cfdi_store, db
 from ..auditoria import registrar_evento
 from ..deps import get_current_user, validar_acceso_empresa, serializar, limiter
 from ..sat_fiel import FIELError, cargar_fiel, descargar_paquete, solicitar_descarga, verificar_solicitud
@@ -318,54 +318,13 @@ def _importar_paquetes_bg(
 
 
 def _insertar_cfdi(empresa_id: str, resultado, periodo: str, xml_raw_bytes: bytes) -> None:
-    """Inserta un CFDIParsed en la DB. ON CONFLICT (uuid) DO NOTHING para idempotencia."""
-    import json
+    """Inserta un CFDIParsed en la DB (idempotente por UUID).
 
-    xml_raw_str = xml_raw_bytes.decode("utf-8", errors="replace")
-
-    db.execute(
-        """
-        INSERT INTO cfdi (
-            empresa_id, uuid, tipo_comprobante, serie, folio, version,
-            rfc_emisor, nombre_emisor, rfc_receptor, nombre_receptor,
-            fecha_emision, fecha_timbrado,
-            subtotal, descuento, iva_trasladado, iva_retenido, isr_retenido, total,
-            metodo_pago, forma_pago, uso_cfdi, moneda, tipo_cambio, xml_raw,
-            exportacion, lugar_expedicion,
-            domicilio_fiscal_receptor, regimen_fiscal_receptor,
-            cfdi_relacionados, es_anticipo_sat
-        ) VALUES (
-            %s,%s,%s,%s,%s,%s,
-            %s,%s,%s,%s,
-            %s,%s,
-            %s,%s,%s,%s,%s,%s,
-            %s,%s,%s,%s,%s,%s,
-            %s,%s,%s,%s,
-            %s,%s
-        )
-        ON CONFLICT (uuid) DO NOTHING
-        """,
-        (
-            empresa_id, resultado.uuid, resultado.tipo_comprobante,
-            resultado.serie, resultado.folio, resultado.version,
-            resultado.rfc_emisor, resultado.nombre_emisor,
-            resultado.rfc_receptor, resultado.nombre_receptor,
-            resultado.fecha_emision, resultado.fecha_timbrado,
-            str(resultado.subtotal), str(resultado.descuento),
-            str(resultado.iva_trasladado), str(resultado.iva_retenido),
-            str(resultado.isr_retenido), str(resultado.total),
-            resultado.metodo_pago, resultado.forma_pago,
-            resultado.uso_cfdi, resultado.moneda,
-            str(resultado.tipo_cambio),
-            xml_raw_str,
-            resultado.exportacion,
-            resultado.lugar_expedicion,
-            resultado.domicilio_fiscal_receptor,
-            resultado.regimen_fiscal_receptor,
-            json.dumps(resultado.cfdi_relacionados),
-            resultado.es_anticipo_sat,
-        ),
-    )
+    Delega en cfdi_store para compartir la lógica con la subida manual: además
+    del INSERT, registra los Complementos de Pago (tipo P) y recalcula lo
+    cobrado de los CFDIs relacionados.
+    """
+    cfdi_store.insertar_cfdi(empresa_id, resultado, xml_raw_bytes)
 
 
 # ===========================================================================

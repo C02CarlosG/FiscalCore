@@ -12,7 +12,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
-from .iva import UMBRAL_EFECTIVO
+from .iva import UMBRAL_EFECTIVO, _uuid_key
 
 CENTAVOS = Decimal("0.01")
 USOS_INVERSION = {f"I0{n}" for n in range(1, 9)}  # I01..I08 (catálogo SAT c_UsoCFDI)
@@ -79,7 +79,7 @@ def deducciones_periodo(
 
     pagos_por_uuid: dict[str, list[dict]] = {}
     for p in pagos:
-        pagos_por_uuid.setdefault(p["cfdi_uuid"], []).append(p)
+        pagos_por_uuid.setdefault(_uuid_key(p["cfdi_uuid"]), []).append(p)
 
     for c in cfdis:
         if c.get("rfc_receptor") != rfc_empresa:
@@ -111,7 +111,7 @@ def deducciones_periodo(
                 else:
                     buckets[cubeta] += subtotal
         elif c.get("metodo_pago") == "PPD":
-            for p in pagos_por_uuid.get(c.get("uuid"), []):
+            for p in pagos_por_uuid.get(_uuid_key(c.get("uuid")), []):
                 if not _en_rango(p.get("fecha_pago"), desde, hasta):
                     continue
                 importe = _dec(p.get("importe_pagado"))

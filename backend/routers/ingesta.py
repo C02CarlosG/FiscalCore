@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import json
 import logging
+from collections import Counter
 from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Optional
@@ -10,7 +10,7 @@ import psycopg2
 import psycopg2.extras
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 
-from .. import db
+from .. import cfdi_store, db
 from ..auditoria import registrar_evento
 from ..deps import get_current_user, empresa_or_404, validar_acceso_empresa, serializar, validar_upload
 from ..schemas import IngestaResponse
@@ -30,82 +30,6 @@ _BANCO_CONTENT_TYPES = (
 _log = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Ingesta"])
-
-
-def _persistir_complemento_pago(empresa_id: str, resultado) -> None:
-    """
-    Persiste los nodos pago20:Pago de un CFDI tipo P:
-    - Inserta en pagos_cfdi y pagos_relaciones.
-    - Actualiza monto_cobrado y estado_pago en los CFDIs de ingreso/egreso relacionados.
-    """
-    cfdi_row = db.query_one("SELECT id FROM cfdi WHERE uuid = %s", (resultado.uuid,))
-    if not cfdi_row:
-        return
-    cfdi_db_id = str(cfdi_row["id"])
-
-    for pago in resultado.pagos:
-        if not pago.fecha_pago or pago.monto <= 0:
-            continue
-
-        pago_row = db.execute(
-            """
-            INSERT INTO pagos_cfdi (empresa_id, cfdi_id, uuid_cfdi_pago, fecha_pago, monto, moneda, tipo_cambio)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
-            ON CONFLICT (cfdi_id, fecha_pago, monto) DO NOTHING
-            RETURNING id
-            """,
-            (
-                empresa_id, cfdi_db_id, resultado.uuid,
-                pago.fecha_pago, str(pago.monto),
-                pago.moneda, str(pago.tipo_cambio),
-            ),
-            returning=True,
-        )
-        if not pago_row:
-            # Ya existía (ON CONFLICT DO NOTHING) — recuperar id existente
-            pago_row = db.query_one(
-                "SELECT id FROM pagos_cfdi WHERE cfdi_id = %s AND fecha_pago = %s AND monto = %s",
-                (cfdi_db_id, pago.fecha_pago, str(pago.monto)),
-            )
-        if not pago_row:
-            continue
-        pago_db_id = str(pago_row["id"])
-
-        for docto in pago.doctos_relacionados:
-            if not docto.uuid:
-                continue
-            db.execute(
-                """
-                INSERT INTO pagos_relaciones (pago_id, cfdi_uuid, parcialidad, importe_pagado, saldo_anterior, saldo_restante)
-                VALUES (%s, %s, %s, %s, %s, %s)
-                ON CONFLICT DO NOTHING
-                """,
-                (
-                    pago_db_id, docto.uuid, docto.num_parcialidad,
-                    str(docto.imp_pagado), str(docto.imp_saldo_ant), str(docto.imp_saldo_insoluto),
-                ),
-            )
-            # Actualizar monto_cobrado y estado_pago en el CFDI relacionado
-            db.execute(
-                """
-                UPDATE cfdi
-                SET
-                    monto_cobrado = LEAST(total, monto_cobrado + %s),
-                    estado_pago = CASE
-                        WHEN LEAST(total, monto_cobrado + %s) >= total THEN 'pagado_total'
-                        WHEN LEAST(total, monto_cobrado + %s) > 0     THEN 'pagado_parcial'
-                        ELSE 'pendiente'
-                    END
-                WHERE uuid = %s AND empresa_id = %s
-                """,
-                (
-                    str(docto.imp_pagado),
-                    str(docto.imp_pagado),
-                    str(docto.imp_pagado),
-                    docto.uuid,
-                    empresa_id,
-                ),
-            )
 
 
 def _correr_pipeline(empresa_id: str, periodo: str, rfc_empresa: str) -> None:
@@ -323,6 +247,71 @@ def _correr_pipeline(empresa_id: str, periodo: str, rfc_empresa: str) -> None:
     )
 
 
+def _clave_movimiento(fecha, monto, concepto, referencia, saldo) -> tuple:
+    """Identidad de un movimiento para detectar recargas del mismo estado de cuenta."""
+    centavos = Decimal("0.01")
+    return (
+        fecha,
+        Decimal(str(monto)).quantize(centavos),
+        (concepto or "").strip(),
+        (referencia or "").strip(),
+        Decimal(str(saldo)).quantize(centavos) if saldo is not None else None,
+    )
+
+
+def _insertar_movimientos_nuevos(empresa_id: str, banco: str, archivo_origen: str, movimientos) -> tuple[int, int]:
+    """Inserta solo los movimientos que aún no están cargados. Retorna (nuevos, duplicados).
+
+    Volver a subir el mismo estado de cuenta (o uno que se traslapa con otro ya
+    cargado) duplicaba todos los movimientos y, con ellos, depósitos "sin CFDI"
+    y riesgos. La comparación es por conteo: si el archivo trae dos movimientos
+    idénticos legítimos (p. ej. dos comisiones iguales el mismo día) y en la
+    base solo hay uno, se inserta el que falta.
+    """
+    if not movimientos:
+        return 0, 0
+
+    fechas = [m.fecha for m in movimientos]
+    existentes: Counter = Counter()
+    for r in db.query_all(
+        """
+        SELECT fecha, monto, concepto, referencia, saldo, COUNT(*) AS n
+        FROM movimientos_bancarios
+        WHERE empresa_id = %s AND banco = %s AND fecha BETWEEN %s AND %s
+        GROUP BY fecha, monto, concepto, referencia, saldo
+        """,
+        (empresa_id, banco, min(fechas), max(fechas)),
+    ):
+        clave = _clave_movimiento(r["fecha"], r["monto"], r["concepto"], r["referencia"], r["saldo"])
+        existentes[clave] += r["n"]
+
+    vistos: Counter = Counter()
+    nuevos = duplicados = 0
+    for mov in movimientos:
+        clave = _clave_movimiento(mov.fecha, mov.monto, mov.concepto, mov.referencia, mov.saldo)
+        vistos[clave] += 1
+        if vistos[clave] <= existentes[clave]:
+            duplicados += 1
+            continue
+        db.execute(
+            """
+            INSERT INTO movimientos_bancarios (
+                empresa_id, banco, archivo_origen,
+                fecha, concepto, referencia, monto, tipo, saldo, rfc_detectado
+            ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            """,
+            (
+                empresa_id, banco, archivo_origen,
+                mov.fecha, mov.concepto, mov.referencia,
+                str(mov.monto), mov.tipo,
+                str(mov.saldo) if mov.saldo is not None else None,
+                mov.rfc_detectado,
+            ),
+        )
+        nuevos += 1
+    return nuevos, duplicados
+
+
 @router.post("/api/v1/empresas/{empresa_id}/cfdi/upload")
 async def subir_cfdi(
     empresa_id: str,
@@ -351,54 +340,9 @@ async def subir_cfdi(
             if avisos:
                 errores += [f"{archivo.filename}: {e}" for e in avisos]
 
-            # Insertar en DB (ignorar duplicados por UUID)
-            db.execute(
-                """
-                INSERT INTO cfdi (
-                    empresa_id, uuid, tipo_comprobante, serie, folio, version,
-                    rfc_emisor, nombre_emisor, rfc_receptor, nombre_receptor,
-                    fecha_emision, fecha_timbrado,
-                    subtotal, descuento, iva_trasladado, iva_retenido, isr_retenido, total,
-                    metodo_pago, forma_pago, uso_cfdi, moneda, tipo_cambio, xml_raw,
-                    exportacion, lugar_expedicion,
-                    domicilio_fiscal_receptor, regimen_fiscal_receptor,
-                    cfdi_relacionados, es_anticipo_sat
-                ) VALUES (
-                    %s,%s,%s,%s,%s,%s,
-                    %s,%s,%s,%s,
-                    %s,%s,
-                    %s,%s,%s,%s,%s,%s,
-                    %s,%s,%s,%s,%s,%s,
-                    %s,%s,%s,%s,
-                    %s,%s
-                )
-                ON CONFLICT (uuid) DO NOTHING
-                """,
-                (
-                    empresa_id, resultado.uuid, resultado.tipo_comprobante,
-                    resultado.serie, resultado.folio, resultado.version,
-                    resultado.rfc_emisor, resultado.nombre_emisor,
-                    resultado.rfc_receptor, resultado.nombre_receptor,
-                    resultado.fecha_emision, resultado.fecha_timbrado,
-                    str(resultado.subtotal), str(resultado.descuento),
-                    str(resultado.iva_trasladado), str(resultado.iva_retenido),
-                    str(resultado.isr_retenido), str(resultado.total),
-                    resultado.metodo_pago, resultado.forma_pago,
-                    resultado.uso_cfdi, resultado.moneda,
-                    str(resultado.tipo_cambio),
-                    contenido.decode("utf-8", errors="replace"),
-                    resultado.exportacion,
-                    resultado.lugar_expedicion,
-                    resultado.domicilio_fiscal_receptor,
-                    resultado.regimen_fiscal_receptor,
-                    json.dumps(resultado.cfdi_relacionados),
-                    resultado.es_anticipo_sat,
-                ),
-            )
-
-            # Si es Complemento de Pago, persistir pagos y actualizar CFDIs relacionados
-            if resultado.tipo_comprobante == "P" and resultado.pagos:
-                _persistir_complemento_pago(empresa_id, resultado)
+            # Insertar en DB (ignora duplicados por UUID) y aplicar pagos:
+            # complemento si es tipo P, o REPs previos si es tipo I/E.
+            cfdi_store.insertar_cfdi(empresa_id, resultado, contenido)
 
             procesados += 1
         except HTTPException:
@@ -439,36 +383,27 @@ async def subir_estado_cuenta(
     validar_upload(archivo, contenido, _BANCO_EXTENSIONES, _BANCO_CONTENT_TYPES)
 
     try:
-        if archivo.filename.endswith(".xlsx"):
+        if (archivo.filename or "").lower().endswith(".xlsx"):
             resultado = parser.parse_xlsx(contenido, banco=banco)
         else:
             resultado = parser.parse_csv(contenido, banco=banco)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    for mov in resultado.movimientos:
-        db.execute(
-            """
-            INSERT INTO movimientos_bancarios (
-                empresa_id, banco, archivo_origen,
-                fecha, concepto, referencia, monto, tipo, saldo, rfc_detectado
-            ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-            """,
-            (
-                empresa_id, banco, archivo.filename,
-                mov.fecha, mov.concepto, mov.referencia,
-                str(mov.monto), mov.tipo,
-                str(mov.saldo) if mov.saldo is not None else None,
-                mov.rfc_detectado,
-            ),
-        )
+    nuevos, duplicados = _insertar_movimientos_nuevos(
+        empresa_id, banco, archivo.filename, resultado.movimientos
+    )
 
     if resultado.movimientos:
         _correr_pipeline(empresa_id, periodo, empresa["rfc"])
 
+    mensaje = f"{nuevos} movimientos procesados"
+    if duplicados:
+        mensaje += f" ({duplicados} ya estaban cargados y se omitieron)"
+
     return IngestaResponse(
-        mensaje=f"{len(resultado.movimientos)} movimientos procesados",
-        registros_procesados=len(resultado.movimientos),
+        mensaje=mensaje,
+        registros_procesados=nuevos,
         errores=resultado.errores,
         periodo=periodo,
     )
