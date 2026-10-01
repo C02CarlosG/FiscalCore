@@ -229,20 +229,21 @@ reinicia, la descarga se pierde). F2 la vuelve desatendida.
 
 | Fase | Estado | Spec | Plan |
 |---|---|---|---|
-| F0 | Pendiente | (no requiere) | (lista de verificación abajo) |
+| F0 | En revisión (PR abierto; falta cargar CFDI reales) | (no requiere) | (lista de verificación abajo) |
 | F1 | Plan escrito | este documento, sección "Fases" y "Reglas comunes" | `docs/superpowers/plans/2026-10-01-fase1-detalle-fiscal-cfdi.md` |
 | F2–F8, M1–M7 | Pendiente | — | — |
 
 ### Lista de verificación de F0
 
-- [ ] Revisar y commitear el trabajo sin integrar del árbol actual (correcciones de
-      seguridad y fiscales, `cfdi_store.py`, migración 027, pruebas nuevas), en commits
-      separados por tema.
-- [ ] Integrar `chore/dev-sh-stack-completo` a `main` mediante PR.
-- [ ] Normalizar finales de línea (CRLF → LF) en un commit aparte.
-- [ ] `python -m pytest` completo y `npm test` en verde sobre `main`.
+- [x] Revisar y commitear el trabajo sin integrar (seguridad, migraciones, parsers,
+      persistencia de CFDI y pagos, frontend), en commits separados por tema — rama
+      `chore/f0-preparacion`.
+- [x] Normalizar finales de línea (CRLF → LF) en un commit aparte, con `.gitattributes`.
+- [x] `python -m pytest` completo (389) y `npm test` (115) en verde.
+- [x] Guardar el script de comparación con Playwright: `frontend/scripts/capturas.cjs`.
+- [ ] Integrar `chore/f0-preparacion` a `main` mediante PR (incluye el commit de
+      `chore/dev-sh-stack-completo`).
 - [ ] Cargar en local los CFDI de COPLASUR de enero a septiembre de 2026 con la
       descarga manual que ya existe (`/fiel/sync` por mes) o con XML ya descargados.
-      Nunca se commitean. A partir de F2 esto ocurre solo.
-- [ ] Guardar el script de comparación con Playwright en `frontend/e2e/` para repetirlo
-      en cada fase.
+      Requiere la e.firma de la empresa; nunca se commitean. A partir de F2 esto
+      ocurre solo.

@@ -18,7 +18,7 @@
 - Migraciones idempotentes (`IF NOT EXISTS`), numeradas, y registradas en `backend/db.py::init_db`.
 - Todo endpoint nuevo se documenta en `docs/openapi.yaml` (lo exige `backend/tests/test_openapi_sync.py`).
 - 4 espacios en Python; módulos en snake_case; commits Conventional Commit en imperativo.
-- `backend/db.py` y varios routers están en CRLF: editar solo las líneas necesarias, sin scripts que conviertan finales de línea.
+- Finales de línea LF (los fija `.gitattributes` desde F0).
 - Nunca commitear XML reales, `.env`, archivos FIEL ni dumps.
 - Comandos de prueba: `python -m pytest -m "not db"` (rápido) y `python -m pytest -m db` (requiere `docker compose up -d db`). Línea base antes de empezar: 356 unitarias y 33 de integración en verde (389).
 
