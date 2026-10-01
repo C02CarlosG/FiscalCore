@@ -17,6 +17,95 @@ import json
 
 from . import db
 
+# Versión del extractor de detalle. Subirla cuando el parser extraiga algo nuevo
+# hace que reproceso.reprocesar_detalle vuelva a tomar los CFDI ya guardados.
+DETALLE_VERSION = 1
+
+
+def _tasa(valor):
+    return None if valor is None else str(valor)
+
+
+def _reemplazar_impuestos(tabla: str, columna_fk: str, fk_id: str, impuestos) -> None:
+    """Borra e inserta los impuestos de un CFDI o de una relación de pago.
+    ``tabla`` y ``columna_fk`` son constantes internas, nunca entrada externa."""
+    db.execute(f"DELETE FROM {tabla} WHERE {columna_fk} = %s", (fk_id,))
+    if not impuestos:
+        return
+    params: list = []
+    for i in impuestos:
+        params += [fk_id, i.ambito, i.impuesto, i.tipo_factor, _tasa(i.tasa_o_cuota), str(i.base), str(i.importe)]
+    db.execute(
+        f"INSERT INTO {tabla} ({columna_fk}, ambito, impuesto, tipo_factor, tasa_o_cuota, base, importe) VALUES "
+        + ",".join(["(%s,%s,%s,%s,%s,%s,%s)"] * len(impuestos)),
+        tuple(params),
+    )
+
+
+def _reemplazar_conceptos(cfdi_id: str, conceptos) -> None:
+    db.execute("DELETE FROM cfdi_conceptos WHERE cfdi_id = %s", (cfdi_id,))
+    if not conceptos:
+        return
+    params: list = []
+    for c in conceptos:
+        impuestos = [
+            {"ambito": i.ambito, "impuesto": i.impuesto, "tipo_factor": i.tipo_factor,
+             "tasa_o_cuota": _tasa(i.tasa_o_cuota), "base": str(i.base), "importe": str(i.importe)}
+            for i in c.impuestos
+        ]
+        params += [
+            cfdi_id, c.linea, c.clave_prod_serv, c.no_identificacion, str(c.cantidad),
+            c.clave_unidad, c.unidad, c.descripcion, str(c.valor_unitario), str(c.importe),
+            str(c.descuento), c.objeto_imp, c.cuenta_predial, json.dumps(impuestos),
+        ]
+    db.execute(
+        """INSERT INTO cfdi_conceptos (
+               cfdi_id, linea, clave_prod_serv, no_identificacion, cantidad,
+               clave_unidad, unidad, descripcion, valor_unitario, importe,
+               descuento, objeto_imp, cuenta_predial, impuestos
+           ) VALUES """
+        + ",".join(["(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"] * len(conceptos)),
+        tuple(params),
+    )
+
+
+def guardar_detalle(empresa_id: str, resultado) -> bool:
+    """Guarda encabezados adicionales, impuestos por tasa y conceptos de un CFDI
+    ya insertado. Idempotente: reemplaza lo que hubiera. ``detalle_version`` se
+    escribe al final, así un fallo a medias deja el CFDI como pendiente de
+    reproceso. Devuelve False si el CFDI no existe en esa empresa."""
+    n = resultado.nomina
+
+    def _nomina(campo: str):
+        return str(getattr(n, campo)) if n is not None else None
+
+    fila = db.execute(
+        """
+        UPDATE cfdi SET
+            regimen_emisor = %s, condiciones_pago = %s, no_certificado = %s,
+            periodicidad = %s, meses = %s, anio_global = %s,
+            nomina_percepciones = %s, nomina_deducciones = %s, nomina_otros_pagos = %s,
+            nomina_gravado = %s, nomina_exento = %s, nomina_isr_retenido = %s
+        WHERE uuid = %s AND empresa_id = %s
+        RETURNING id
+        """,
+        (
+            resultado.regimen_emisor, resultado.condiciones_pago, resultado.no_certificado,
+            resultado.periodicidad, resultado.meses, resultado.anio_global,
+            _nomina("total_percepciones"), _nomina("total_deducciones"), _nomina("total_otros_pagos"),
+            _nomina("total_gravado"), _nomina("total_exento"), _nomina("isr_retenido"),
+            resultado.uuid, empresa_id,
+        ),
+        returning=True,
+    )
+    if not fila:
+        return False
+    cfdi_id = str(fila["id"])
+    _reemplazar_impuestos("cfdi_impuestos", "cfdi_id", cfdi_id, resultado.resumen_impuestos)
+    _reemplazar_conceptos(cfdi_id, resultado.conceptos)
+    db.execute("UPDATE cfdi SET detalle_version = %s WHERE id = %s", (DETALLE_VERSION, cfdi_id))
+    return True
+
 
 def recalcular_cobrado(empresa_id: str, uuid: str) -> None:
     """Recalcula monto_cobrado y estado_pago de un CFDI a partir de los pagos
@@ -86,6 +175,7 @@ def persistir_complemento_pago(empresa_id: str, resultado) -> None:
         if not pago_row:
             continue
         pago_db_id = str(pago_row["id"])
+        db.execute("UPDATE pagos_cfdi SET version_pago = %s WHERE id = %s", (pago.version, pago_db_id))
 
         for docto in pago.doctos_relacionados:
             if not docto.uuid:
@@ -102,6 +192,19 @@ def persistir_complemento_pago(empresa_id: str, resultado) -> None:
                     str(docto.imp_pagado), str(docto.imp_saldo_ant), str(docto.imp_saldo_insoluto),
                 ),
             )
+            relacion = db.query_one(
+                """SELECT id FROM pagos_relaciones
+                   WHERE pago_id = %s AND cfdi_uuid = %s
+                     AND COALESCE(parcialidad, 0) = COALESCE(%s, 0)""",
+                (pago_db_id, docto_uuid, docto.num_parcialidad),
+            )
+            if relacion:
+                relacion_id = str(relacion["id"])
+                db.execute(
+                    "UPDATE pagos_relaciones SET moneda_dr = %s, equivalencia_dr = %s WHERE id = %s",
+                    (docto.moneda_dr, str(docto.equivalencia_dr), relacion_id),
+                )
+                _reemplazar_impuestos("pagos_relaciones_impuestos", "relacion_id", relacion_id, docto.impuestos)
             if docto_uuid not in uuids_afectados:
                 uuids_afectados.append(docto_uuid)
 
@@ -156,6 +259,8 @@ def insertar_cfdi(empresa_id: str, resultado, xml_bytes: bytes) -> None:
             resultado.es_anticipo_sat,
         ),
     )
+
+    guardar_detalle(empresa_id, resultado)
 
     if resultado.tipo_comprobante == "P":
         if resultado.pagos:
