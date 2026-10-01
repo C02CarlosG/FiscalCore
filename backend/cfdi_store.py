@@ -23,6 +23,7 @@ DETALLE_VERSION = 1
 
 
 def _tasa(valor):
+    """Decimal opcional a texto para la base (None se conserva como NULL)."""
     return None if valor is None else str(valor)
 
 
@@ -202,7 +203,7 @@ def persistir_complemento_pago(empresa_id: str, resultado) -> None:
                 relacion_id = str(relacion["id"])
                 db.execute(
                     "UPDATE pagos_relaciones SET moneda_dr = %s, equivalencia_dr = %s WHERE id = %s",
-                    (docto.moneda_dr, str(docto.equivalencia_dr), relacion_id),
+                    (docto.moneda_dr, _tasa(docto.equivalencia_dr), relacion_id),
                 )
                 _reemplazar_impuestos("pagos_relaciones_impuestos", "relacion_id", relacion_id, docto.impuestos)
             if docto_uuid not in uuids_afectados:

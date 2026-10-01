@@ -55,3 +55,16 @@ def test_028_columnas_de_texto_del_xml_toleran_valores_fuera_de_catalogo():
     assert len(filas) == 11
     justas = [(f["table_name"], f["column_name"], f["largo"]) for f in filas if f["largo"] is not None and f["largo"] < 20]
     assert justas == []
+
+
+def test_028_impuestos_de_pagos_guardan_seis_decimales():
+    """BaseDR/ImporteDR admiten 6 decimales y están en la moneda del documento:
+    redondearlos a centavos antes de convertir a pesos acumula error."""
+    from backend import db
+
+    db.init_db()
+    filas = db.query_all(
+        """SELECT column_name, numeric_scale FROM information_schema.columns
+           WHERE table_name = 'pagos_relaciones_impuestos' AND column_name IN ('base', 'importe')"""
+    )
+    assert sorted((f["column_name"], f["numeric_scale"]) for f in filas) == [("base", 6), ("importe", 6)]

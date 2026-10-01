@@ -81,8 +81,10 @@ CREATE TABLE IF NOT EXISTS pagos_relaciones_impuestos (
     impuesto      VARCHAR(20) NOT NULL,
     tipo_factor   VARCHAR(20) NOT NULL,
     tasa_o_cuota  NUMERIC(10,6),
-    base          NUMERIC(18,2) NOT NULL DEFAULT 0,
-    importe       NUMERIC(18,2) NOT NULL DEFAULT 0
+    -- Seis decimales: BaseDR/ImporteDR están en la moneda del documento y se
+    -- convierten a pesos al calcular; redondear antes acumula error.
+    base          NUMERIC(18,6) NOT NULL DEFAULT 0,
+    importe       NUMERIC(18,6) NOT NULL DEFAULT 0
 );
 CREATE UNIQUE INDEX IF NOT EXISTS uq_pagos_rel_impuestos
     ON pagos_relaciones_impuestos (relacion_id, ambito, impuesto, tipo_factor, COALESCE(tasa_o_cuota, -1));

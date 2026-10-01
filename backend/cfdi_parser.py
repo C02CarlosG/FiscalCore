@@ -7,7 +7,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Optional
 from defusedxml import ElementTree as ET
 
@@ -47,8 +47,11 @@ class ImpuestoResumen:
     importe: Decimal
 
 
-def _agrupar_impuestos(filas: list[ImpuestoResumen]) -> list[ImpuestoResumen]:
-    """Suma base e importe de las filas con la misma clave y redondea a centavos."""
+def _agrupar_impuestos(
+    filas: list[ImpuestoResumen], precision: Decimal = CENTAVOS
+) -> list[ImpuestoResumen]:
+    """Suma base e importe de las filas con la misma clave y redondea al final
+    (medio hacia arriba, como el SAT; ``quantize`` por defecto usa el bancario)."""
     grupos: dict[tuple, list[Decimal]] = {}
     for f in filas:
         clave = (f.ambito, f.impuesto, f.tipo_factor, f.tasa_o_cuota)
@@ -56,7 +59,11 @@ def _agrupar_impuestos(filas: list[ImpuestoResumen]) -> list[ImpuestoResumen]:
         acumulado[0] += f.base
         acumulado[1] += f.importe
     return [
-        ImpuestoResumen(ambito, impuesto, factor, tasa, base.quantize(CENTAVOS), importe.quantize(CENTAVOS))
+        ImpuestoResumen(
+            ambito, impuesto, factor, tasa,
+            base.quantize(precision, rounding=ROUND_HALF_UP),
+            importe.quantize(precision, rounding=ROUND_HALF_UP),
+        )
         for (ambito, impuesto, factor, tasa), (base, importe) in grupos.items()
     ]
 
@@ -69,7 +76,8 @@ class DoctoRelacionado:
     imp_saldo_ant: Decimal
     imp_saldo_insoluto: Decimal
     moneda_dr: Optional[str] = None
-    equivalencia_dr: Decimal = Decimal("1")
+    # None: documento en otra moneda sin equivalencia en el XML (no se inventa 1).
+    equivalencia_dr: Optional[Decimal] = Decimal("1")
     # ImpuestosDR del REP 2.0 (vacío en Pagos 1.0).
     impuestos: list[ImpuestoResumen] = field(default_factory=list)
 
@@ -377,8 +385,8 @@ class CFDIParser:
         # Traslados
         for traslado in imp_node.findall(f".//{ns_cfdi}Traslado"):
             impuesto = traslado.get("Impuesto", "")
-            importe = Decimal(traslado.get("Importe", "0"))
-            tasa = Decimal(traslado.get("TasaOCuota", "0"))
+            importe = self._decimal(traslado, "Importe")
+            tasa = self._decimal(traslado, "TasaOCuota")
             factor = traslado.get("TipoFactor", "Tasa")
 
             det = ImpuestoDetalle(
@@ -396,7 +404,7 @@ class CFDIParser:
         # Retenciones
         for retencion in imp_node.findall(f".//{ns_cfdi}Retencion"):
             impuesto = retencion.get("Impuesto", "")
-            importe = Decimal(retencion.get("Importe", "0"))
+            importe = self._decimal(retencion, "Importe")
 
             det = ImpuestoDetalle(
                 tipo=impuesto,
@@ -630,8 +638,10 @@ class CFDIParser:
                         imp_saldo_ant=Decimal(docto.get("ImpSaldoAnt", "0")),
                         imp_saldo_insoluto=Decimal(docto.get("ImpSaldoInsoluto", "0")),
                         moneda_dr=docto.get("MonedaDR"),
-                        equivalencia_dr=self._decimal(docto, "EquivalenciaDR", "1"),
-                        impuestos=_agrupar_impuestos(impuestos_dr),
+                        equivalencia_dr=self._equivalencia_dr(docto, moneda),
+                        # Seis decimales: están en la moneda del documento y se
+                        # convierten a pesos después; redondear antes acumula error.
+                        impuestos=_agrupar_impuestos(impuestos_dr, SEIS_DECIMALES),
                     ))
                 except Exception:
                     continue
@@ -657,9 +667,27 @@ class CFDIParser:
     def _decimal(node, attr: str, default: str = "0") -> Decimal:
         val = node.get(attr, default) if node is not None else default
         try:
-            return Decimal(val or default)
+            valor = Decimal(val or default)
         except Exception:
             return Decimal(default)
+        # "NaN"/"Infinity" son Decimal válidos pero no importes: el XML subido
+        # es entrada externa y no debe llegar así a las sumas ni a la base.
+        return valor if valor.is_finite() else Decimal(default)
+
+    @staticmethod
+    def _equivalencia_dr(docto, moneda_pago: str) -> Optional[Decimal]:
+        """Equivalencia entre la moneda del documento y la del pago:
+        ``EquivalenciaDR`` en Pagos 2.0, ``TipoCambioDR`` en Pagos 1.0. Si no
+        viene, vale 1 solo cuando ambas monedas coinciden."""
+        valor = docto.get("EquivalenciaDR") or docto.get("TipoCambioDR")
+        if valor:
+            try:
+                equivalencia = Decimal(valor)
+            except Exception:
+                return None
+            return equivalencia if equivalencia.is_finite() and equivalencia > 0 else None
+        moneda_dr = docto.get("MonedaDR")
+        return Decimal("1") if not moneda_dr or moneda_dr == moneda_pago else None
 
     @staticmethod
     def _parse_fecha(fecha_str: str) -> Optional[datetime]:

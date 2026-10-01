@@ -211,6 +211,35 @@ reinicia, la descarga se pierde). F2 la vuelve desatendida.
 - Aplicabilidad por régimen (decisión D2): se determina en la spec de F7 con el
   catálogo de regímenes; el módulo por coeficiente de utilidad sigue disponible.
 
+### Pendientes de extracción detectados en la revisión fiscal de F1
+
+F1 guarda lo necesario para listar y desglosar; estos datos los necesitan los cálculos
+y se extraen en la spec de la fase indicada subiendo `cfdi_store.DETALLE_VERSION` (el
+reproceso vuelve a leer el `xml_raw`, sin descargar nada):
+
+| Dato | Para qué | Fase |
+|---|---|---|
+| `pago20:Totales` e `ImpuestosP` del REP | Cifra oficial en pesos del IVA cobrado por tasa y control de cuadre; `ImpuestosP` cuando un REP trae pagos de meses distintos | F5 |
+| `ObjetoImpDR` por documento pagado | Distinguir "no objeto" de "objeto sin desglose" y de un REP sin impuestos | F5 |
+| RFC de `ACuentaTerceros` por concepto | Excluir del ingreso y del IVA propios lo cobrado por cuenta de terceros | F5, F7 |
+| Nómina por percepción (`TipoPercepcion`, gravado/exento), `FechaPago`, `TipoNomina`, régimen del receptor, otros pagos por tipo (subsidio), separación y jubilación | Base correcta de la nómina exenta deducible (la PTU y los viáticos no entran) y mes de la deducción | F7 |
+
+Criterios que los cálculos deben respetar con lo ya guardado:
+
+- `cfdi_impuestos` no tiene fila para conceptos con `ObjetoImp` 01 o 03; hay que mirar
+  `cfdi_conceptos.objeto_imp`.
+- En IEPS de cuota la base son unidades (litros), no pesos: no se suma con bases monetarias.
+- Los impuestos locales (ISH, ISN) no están en `cfdi_impuestos`; la suma de traslados
+  del desglose no iguala el total de traslados del comprobante cuando existen.
+- En CFDI 3.3 el desglose sale de los conceptos y puede diferir centavos del total del
+  encabezado; manda el encabezado.
+- Los importes del desglose van sin signo y en la moneda del comprobante: restar las
+  notas de crédito y convertir a pesos le toca al cálculo.
+- Una retención leída solo del nodo raíz queda con tasa nula y base 0: no es "tasa 0 %".
+- Los impuestos de los pagos (`pagos_relaciones_impuestos`) están a 6 decimales en la
+  moneda del documento; a pesos se llega con `equivalencia_dr` y el tipo de cambio del
+  pago. `equivalencia_dr` nulo significa que el XML no trae el dato: no asumir 1.
+
 ## Riesgos
 
 | Riesgo | Mitigación |

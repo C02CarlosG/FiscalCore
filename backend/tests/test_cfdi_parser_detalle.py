@@ -2,6 +2,8 @@
 conceptos, encabezados, impuestos de cada pago y nómina. Lógica pura (sin DB)."""
 from decimal import Decimal
 
+import pytest
+
 from backend.cfdi_parser import CFDIParser
 
 D = Decimal
@@ -270,3 +272,66 @@ def test_nomina_extrae_gravado_exento_e_isr_retenido():
 
 def test_cfdi_sin_complemento_de_nomina_deja_nomina_en_none():
     assert CFDIParser().parse_xml(_cfdi(CUERPO_MIXTO)).nomina is None
+
+
+# ─── Hallazgos de la revisión fiscal ───────────────────────────────────────────
+
+def _pagos_10(atributos_docto):
+    return f'''<pago10:Pagos Version="1.0">
+  <pago10:Pago FechaPago="2021-03-20T12:00:00" FormaDePagoP="03" MonedaP="MXN" Monto="2000.00">
+    <pago10:DoctoRelacionado IdDocumento="33333333-3333-3333-3333-333333333333" {atributos_docto}
+        NumParcialidad="1" ImpSaldoAnt="100.00" ImpPagado="100.00" ImpSaldoInsoluto="0.00"/>
+  </pago10:Pago>
+</pago10:Pagos>'''
+
+
+def test_rep_10_usa_tipo_cambio_dr_como_equivalencia():
+    p = CFDIParser().parse_xml(_rep(_pagos_10('MonedaDR="USD" TipoCambioDR="0.050000"')))
+
+    assert p.pagos[0].doctos_relacionados[0].equivalencia_dr == D("0.050000")
+
+
+def test_rep_en_otra_moneda_sin_equivalencia_no_inventa_un_uno():
+    p = CFDIParser().parse_xml(_rep(_pagos_10('MonedaDR="USD"')))
+
+    assert p.pagos[0].doctos_relacionados[0].equivalencia_dr is None
+
+
+def test_impuestos_del_rep_conservan_seis_decimales():
+    pagos = PAGOS_20.replace('BaseDR="5000.00"', 'BaseDR="5.847953"').replace('ImporteDR="800.00"', 'ImporteDR="0.935672"')
+    p = CFDIParser().parse_xml(_rep(pagos))
+
+    mapa = _mapa(p.pagos[0].doctos_relacionados[0].impuestos)
+    assert mapa[("traslado", "002", "Tasa", D("0.160000"))] == (D("5.847953"), D("0.935672"))
+    assert str(mapa[("traslado", "002", "Tasa", D("0.160000"))][0]) == "5.847953"
+
+
+def _cuerpo_dos_conceptos(base, importe):
+    concepto = f'''<cfdi:Concepto ClaveProdServ="01010101" Cantidad="1" ClaveUnidad="ACT" Descripcion="X"
+      ValorUnitario="{base}" Importe="{base}">
+    <cfdi:Impuestos><cfdi:Traslados>
+      <cfdi:Traslado Base="{base}" Impuesto="002" TipoFactor="Tasa" TasaOCuota="0.160000" Importe="{importe}"/>
+    </cfdi:Traslados></cfdi:Impuestos>
+  </cfdi:Concepto>'''
+    return f"<cfdi:Conceptos>{concepto}{concepto}</cfdi:Conceptos>"
+
+
+def test_resumen_redondea_el_medio_centavo_hacia_arriba():
+    # 0.0625 + 0.0625 = 0.125 y 0.0125 + 0.0125 = 0.025: el redondeo bancario daría 0.12 y 0.02.
+    p = CFDIParser().parse_xml(_cfdi(_cuerpo_dos_conceptos("0.0625", "0.0125"), version="3.3"))
+
+    assert _mapa(p.resumen_impuestos) == {("traslado", "002", "Tasa", D("0.160000")): (D("0.13"), D("0.03"))}
+    assert [str(i.base) for i in p.resumen_impuestos] == ["0.13"]
+
+
+@pytest.mark.parametrize("valor", ["NaN", "Infinity", "-Infinity", "abc"])
+def test_importe_no_numerico_o_no_finito_se_lee_como_cero(valor):
+    cuerpo = f'''<cfdi:Conceptos><cfdi:Concepto ClaveProdServ="01010101" Cantidad="1" Descripcion="X"
+        ValorUnitario="100.00" Importe="100.00"/></cfdi:Conceptos>
+      <cfdi:Impuestos><cfdi:Traslados>
+        <cfdi:Traslado Base="{valor}" Impuesto="002" TipoFactor="Tasa" TasaOCuota="0.160000" Importe="{valor}"/>
+      </cfdi:Traslados></cfdi:Impuestos>'''
+    p = CFDIParser().parse_xml(_cfdi(cuerpo))
+
+    assert _mapa(p.resumen_impuestos) == {("traslado", "002", "Tasa", D("0.160000")): (D("0"), D("0"))}
+    assert p.iva_trasladado == D("0")
