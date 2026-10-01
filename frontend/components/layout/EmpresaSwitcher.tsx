@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useEmpresaContext } from "@/components/providers/EmpresaProvider";
 
-const SUB_RUTAS = ["dashboard", "cfdi", "ingesta", "conciliacion", "cedula-iva"];
+const SUB_RUTAS = ["dashboard", "cfdi", "ingesta", "conciliacion", "cedula-iva", "sat"];
 
 function resolverDestino(pathname: string, empresaId: string, nuevoId: string): string {
   const segmentos = pathname.split("/").filter(Boolean);
