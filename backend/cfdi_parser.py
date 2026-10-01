@@ -22,6 +22,7 @@ NS = {
 # Namespaces Complemento de Pago
 NS_PAGO20 = "{http://www.sat.gob.mx/Pagos20}"
 NS_PAGO10 = "{http://www.sat.gob.mx/Pagos}"
+NS_NOMINA12 = "{http://www.sat.gob.mx/nomina12}"
 
 CENTAVOS = Decimal("0.01")
 SEIS_DECIMALES = Decimal("0.000001")
@@ -110,6 +111,16 @@ class ConceptoCFDI:
 
 
 @dataclass
+class NominaResumen:
+    total_percepciones: Decimal
+    total_deducciones: Decimal
+    total_otros_pagos: Decimal
+    total_gravado: Decimal
+    total_exento: Decimal
+    isr_retenido: Decimal
+
+
+@dataclass
 class CFDIParsed:
     # Identificación
     uuid: str
@@ -191,6 +202,9 @@ class CFDIParsed:
     periodicidad: Optional[str] = None   # InformacionGlobal (factura global)
     meses: Optional[str] = None
     anio_global: Optional[int] = None
+
+    # Totales del complemento de nómina (solo CFDI tipo N).
+    nomina: Optional["NominaResumen"] = None
 
     @property
     def es_ingreso(self) -> bool:
@@ -300,6 +314,7 @@ class CFDIParser:
             parsed.meses = info_global.get("Meses")
             anio = info_global.get("Año", "")
             parsed.anio_global = int(anio) if anio.isdigit() else None
+        parsed.nomina = self._extraer_nomina(root)
 
         # Validaciones
         parsed.rfc_emisor_valido = validar_rfc(rfc_emisor)
@@ -477,6 +492,23 @@ class CFDIParser:
                 impuestos=impuestos,
             ))
         return conceptos
+
+    def _extraer_nomina(self, root) -> Optional[NominaResumen]:
+        """Suma los totales de todos los nodos nomina12:Nomina del comprobante."""
+        nodos = root.findall(f".//{NS_NOMINA12}Nomina")
+        if not nodos:
+            return None
+        resumen = NominaResumen(*([Decimal("0")] * 6))
+        for nodo in nodos:
+            percepciones = nodo.find(f"{NS_NOMINA12}Percepciones")
+            deducciones = nodo.find(f"{NS_NOMINA12}Deducciones")
+            resumen.total_percepciones += self._decimal(nodo, "TotalPercepciones")
+            resumen.total_deducciones += self._decimal(nodo, "TotalDeducciones")
+            resumen.total_otros_pagos += self._decimal(nodo, "TotalOtrosPagos")
+            resumen.total_gravado += self._decimal(percepciones, "TotalGravado")
+            resumen.total_exento += self._decimal(percepciones, "TotalExento")
+            resumen.isr_retenido += self._decimal(deducciones, "TotalImpuestosRetenidos")
+        return resumen
 
     def _validar(self, p: CFDIParsed) -> list[str]:
         errores = []

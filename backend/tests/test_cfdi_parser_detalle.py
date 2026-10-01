@@ -242,3 +242,31 @@ def test_rep_10_no_trae_impuestos_y_se_marca_como_version_1():
     assert pago.version == "1.0"
     assert pago.doctos_relacionados[0].impuestos == []
     assert pago.doctos_relacionados[0].equivalencia_dr == D("1")
+
+
+NOMINA = '''<nomina12:Nomina xmlns:nomina12="http://www.sat.gob.mx/nomina12" Version="1.2" TipoNomina="O"
+    FechaPago="2026-01-15" FechaInicialPago="2026-01-01" FechaFinalPago="2026-01-15" NumDiasPagados="15"
+    TotalPercepciones="10000.00" TotalDeducciones="1500.00" TotalOtrosPagos="200.00">
+  <nomina12:Percepciones TotalSueldos="10000.00" TotalGravado="9000.00" TotalExento="1000.00"/>
+  <nomina12:Deducciones TotalOtrasDeducciones="300.00" TotalImpuestosRetenidos="1200.00"/>
+</nomina12:Nomina>'''
+
+CUERPO_NOMINA = '''<cfdi:Conceptos>
+  <cfdi:Concepto ClaveProdServ="84111505" Cantidad="1" ClaveUnidad="ACT" Descripcion="Pago de nómina"
+      ValorUnitario="10200.00" Importe="10200.00" Descuento="1500.00" ObjetoImp="01"/>
+</cfdi:Conceptos>'''
+
+
+def test_nomina_extrae_gravado_exento_e_isr_retenido():
+    p = CFDIParser().parse_xml(_cfdi(
+        CUERPO_NOMINA, tipo="N", subtotal="10200.00", total="8700.00",
+        extra_attrs='Descuento="1500.00"', complemento=NOMINA))
+
+    n = p.nomina
+    assert (n.total_percepciones, n.total_deducciones, n.total_otros_pagos) == (
+        D("10000.00"), D("1500.00"), D("200.00"))
+    assert (n.total_gravado, n.total_exento, n.isr_retenido) == (D("9000.00"), D("1000.00"), D("1200.00"))
+
+
+def test_cfdi_sin_complemento_de_nomina_deja_nomina_en_none():
+    assert CFDIParser().parse_xml(_cfdi(CUERPO_MIXTO)).nomina is None
