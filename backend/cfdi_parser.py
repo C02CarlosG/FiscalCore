@@ -23,6 +23,9 @@ NS = {
 NS_PAGO20 = "{http://www.sat.gob.mx/Pagos20}"
 NS_PAGO10 = "{http://www.sat.gob.mx/Pagos}"
 
+CENTAVOS = Decimal("0.01")
+SEIS_DECIMALES = Decimal("0.000001")
+
 RFC_REGEX = re.compile(
     r'^([A-ZÑ&]{3,4})(\d{6})([A-Z\d]{3})$', re.IGNORECASE
 )
@@ -30,6 +33,31 @@ RFC_REGEX = re.compile(
 
 def validar_rfc(rfc: str) -> bool:
     return bool(RFC_REGEX.match(rfc.strip().upper())) if rfc else False
+
+
+@dataclass
+class ImpuestoResumen:
+    """Impuesto agrupado por ámbito, impuesto, factor y tasa, con su base."""
+    ambito: str                      # "traslado" | "retencion"
+    impuesto: str                    # 001 ISR, 002 IVA, 003 IEPS
+    tipo_factor: str                 # Tasa | Cuota | Exento
+    tasa_o_cuota: Optional[Decimal]  # None en Exento o si el XML no la trae
+    base: Decimal
+    importe: Decimal
+
+
+def _agrupar_impuestos(filas: list[ImpuestoResumen]) -> list[ImpuestoResumen]:
+    """Suma base e importe de las filas con la misma clave y redondea a centavos."""
+    grupos: dict[tuple, list[Decimal]] = {}
+    for f in filas:
+        clave = (f.ambito, f.impuesto, f.tipo_factor, f.tasa_o_cuota)
+        acumulado = grupos.setdefault(clave, [Decimal("0"), Decimal("0")])
+        acumulado[0] += f.base
+        acumulado[1] += f.importe
+    return [
+        ImpuestoResumen(ambito, impuesto, factor, tasa, base.quantize(CENTAVOS), importe.quantize(CENTAVOS))
+        for (ambito, impuesto, factor, tasa), (base, importe) in grupos.items()
+    ]
 
 
 @dataclass
@@ -132,6 +160,9 @@ class CFDIParsed:
     total_traslados: Decimal = Decimal("0")
     total_retenciones: Decimal = Decimal("0")
 
+    # Impuestos agrupados por tasa con su base (traslados y retenciones).
+    resumen_impuestos: list[ImpuestoResumen] = field(default_factory=list)
+
     @property
     def es_ingreso(self) -> bool:
         return self.tipo_comprobante == "I"
@@ -231,6 +262,7 @@ class CFDIParser:
             (i.importe for i in impuestos if not i.es_retencion), Decimal("0"))
         parsed.total_retenciones = loc_retenciones + sum(
             (i.importe for i in impuestos if i.es_retencion), Decimal("0"))
+        parsed.resumen_impuestos = self._resumen_impuestos(root, ns_cfdi)
 
         # Validaciones
         parsed.rfc_emisor_valido = validar_rfc(rfc_emisor)
@@ -336,6 +368,49 @@ class CFDIParser:
         if nodo is None:
             return Decimal("0"), Decimal("0")
         return self._decimal(nodo, "TotaldeTraslados"), self._decimal(nodo, "TotaldeRetenciones")
+
+    def _leer_impuesto(self, nodo, ambito: str, sufijo: str = "") -> ImpuestoResumen:
+        """Lee un nodo Traslado/Retencion. ``sufijo="DR"`` para los nodos del REP
+        (BaseDR, ImpuestoDR, TipoFactorDR, TasaOCuotaDR, ImporteDR)."""
+        factor = nodo.get(f"TipoFactor{sufijo}") or "Tasa"
+        tasa: Optional[Decimal] = None
+        tasa_str = nodo.get(f"TasaOCuota{sufijo}")
+        if factor != "Exento" and tasa_str:
+            try:
+                tasa = Decimal(tasa_str).quantize(SEIS_DECIMALES)
+            except Exception:
+                tasa = None
+        return ImpuestoResumen(
+            ambito=ambito,
+            impuesto=nodo.get(f"Impuesto{sufijo}", ""),
+            tipo_factor=factor,
+            tasa_o_cuota=tasa,
+            base=self._decimal(nodo, f"Base{sufijo}"),
+            importe=self._decimal(nodo, f"Importe{sufijo}"),
+        )
+
+    def _resumen_impuestos(self, root, ns_cfdi: str) -> list[ImpuestoResumen]:
+        """Impuestos por tasa con su base.
+
+        Traslados: del nodo raíz cuando todos traen Base (CFDI 4.0, cifra oficial
+        ya agrupada); si no (CFDI 3.3), de los conceptos. Retenciones: de los
+        conceptos (traen base y tasa); si no hay, del nodo raíz."""
+        raiz = root.find(f"{ns_cfdi}Impuestos")
+        t_raiz = raiz.findall(f"{ns_cfdi}Traslados/{ns_cfdi}Traslado") if raiz is not None else []
+        r_raiz = raiz.findall(f"{ns_cfdi}Retenciones/{ns_cfdi}Retencion") if raiz is not None else []
+
+        t_conceptos, r_conceptos = [], []
+        for concepto in root.findall(f"{ns_cfdi}Conceptos/{ns_cfdi}Concepto"):
+            t_conceptos += concepto.findall(f"{ns_cfdi}Impuestos/{ns_cfdi}Traslados/{ns_cfdi}Traslado")
+            r_conceptos += concepto.findall(f"{ns_cfdi}Impuestos/{ns_cfdi}Retenciones/{ns_cfdi}Retencion")
+
+        raiz_con_base = bool(t_raiz) and all(t.get("Base") for t in t_raiz)
+        traslados = t_raiz if (raiz_con_base or not t_conceptos) else t_conceptos
+        retenciones = r_conceptos or r_raiz
+
+        filas = [self._leer_impuesto(n, "traslado") for n in traslados]
+        filas += [self._leer_impuesto(n, "retencion") for n in retenciones]
+        return _agrupar_impuestos(filas)
 
     def _validar(self, p: CFDIParsed) -> list[str]:
         errores = []

@@ -1,0 +1,147 @@
+"""Detalle fiscal del CFDI en backend/cfdi_parser.py: impuestos por tasa,
+conceptos, encabezados, impuestos de cada pago y nómina. Lógica pura (sin DB)."""
+from decimal import Decimal
+
+from backend.cfdi_parser import CFDIParser
+
+D = Decimal
+
+
+def _cfdi(cuerpo, *, version="4.0", tipo="I", subtotal="1000.00", total="1128.00", extra_attrs="", complemento=""):
+    ns = "http://www.sat.gob.mx/cfd/4" if version == "4.0" else "http://www.sat.gob.mx/cfd/3"
+    return f'''<cfdi:Comprobante xmlns:cfdi="{ns}" xmlns:tfd="http://www.sat.gob.mx/TimbreFiscalDigital"
+        Version="{version}" Fecha="2026-01-15T12:00:00" TipoDeComprobante="{tipo}" SubTotal="{subtotal}"
+        Total="{total}" Moneda="MXN" MetodoPago="PUE" FormaPago="03" LugarExpedicion="01000"
+        Exportacion="01" {extra_attrs}>
+      <cfdi:Emisor Rfc="PROV010101AAA" Nombre="Proveedor SA" RegimenFiscal="601"/>
+      <cfdi:Receptor Rfc="EMP010101AAA" Nombre="Empresa SA" UsoCFDI="G03"
+          DomicilioFiscalReceptor="01000" RegimenFiscalReceptor="601"/>
+      {cuerpo}
+      <cfdi:Complemento>{complemento}<tfd:TimbreFiscalDigital
+          UUID="AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE" FechaTimbrado="2026-01-15T12:05:00"/></cfdi:Complemento>
+    </cfdi:Comprobante>'''
+
+
+# Tres conceptos: 16 %, 0 % y exento. SubTotal 1000, IVA 128, Total 1128.
+CUERPO_MIXTO = '''
+<cfdi:Conceptos>
+  <cfdi:Concepto ClaveProdServ="43211500" NoIdentificacion="SKU-1" Cantidad="2" ClaveUnidad="H87"
+      Unidad="Pieza" Descripcion="Laptop" ValorUnitario="400.00" Importe="800.00" Descuento="0.00" ObjetoImp="02">
+    <cfdi:Impuestos><cfdi:Traslados>
+      <cfdi:Traslado Base="800.00" Impuesto="002" TipoFactor="Tasa" TasaOCuota="0.160000" Importe="128.00"/>
+    </cfdi:Traslados></cfdi:Impuestos>
+  </cfdi:Concepto>
+  <cfdi:Concepto ClaveProdServ="50161500" Cantidad="1" ClaveUnidad="KGM" Descripcion="Alimento"
+      ValorUnitario="150.00" Importe="150.00" ObjetoImp="02">
+    <cfdi:Impuestos><cfdi:Traslados>
+      <cfdi:Traslado Base="150.00" Impuesto="002" TipoFactor="Tasa" TasaOCuota="0.000000" Importe="0.00"/>
+    </cfdi:Traslados></cfdi:Impuestos>
+  </cfdi:Concepto>
+  <cfdi:Concepto ClaveProdServ="85121600" Cantidad="1" ClaveUnidad="E48" Descripcion="Consulta"
+      ValorUnitario="50.00" Importe="50.00" ObjetoImp="02">
+    <cfdi:Impuestos><cfdi:Traslados>
+      <cfdi:Traslado Base="50.00" Impuesto="002" TipoFactor="Exento"/>
+    </cfdi:Traslados></cfdi:Impuestos>
+    <cfdi:CuentaPredial Numero="PRED-9"/>
+  </cfdi:Concepto>
+</cfdi:Conceptos>
+<cfdi:Impuestos TotalImpuestosTrasladados="128.00"><cfdi:Traslados>
+  <cfdi:Traslado Base="800.00" Impuesto="002" TipoFactor="Tasa" TasaOCuota="0.160000" Importe="128.00"/>
+  <cfdi:Traslado Base="150.00" Impuesto="002" TipoFactor="Tasa" TasaOCuota="0.000000" Importe="0.00"/>
+  <cfdi:Traslado Base="50.00" Impuesto="002" TipoFactor="Exento"/>
+</cfdi:Traslados></cfdi:Impuestos>'''
+
+# CFDI 3.3: el nodo raíz no trae Base; dos conceptos al 16 %.
+CUERPO_33 = '''
+<cfdi:Conceptos>
+  <cfdi:Concepto ClaveProdServ="01010101" Cantidad="1" ClaveUnidad="ACT" Descripcion="A" ValorUnitario="300.00" Importe="300.00">
+    <cfdi:Impuestos><cfdi:Traslados>
+      <cfdi:Traslado Base="300.00" Impuesto="002" TipoFactor="Tasa" TasaOCuota="0.160000" Importe="48.00"/>
+    </cfdi:Traslados></cfdi:Impuestos>
+  </cfdi:Concepto>
+  <cfdi:Concepto ClaveProdServ="01010101" Cantidad="1" ClaveUnidad="ACT" Descripcion="B" ValorUnitario="200.00" Importe="200.00">
+    <cfdi:Impuestos><cfdi:Traslados>
+      <cfdi:Traslado Base="200.00" Impuesto="002" TipoFactor="Tasa" TasaOCuota="0.160000" Importe="32.00"/>
+    </cfdi:Traslados></cfdi:Impuestos>
+  </cfdi:Concepto>
+</cfdi:Conceptos>
+<cfdi:Impuestos TotalImpuestosTrasladados="80.00"><cfdi:Traslados>
+  <cfdi:Traslado Impuesto="002" TipoFactor="Tasa" TasaOCuota="0.160000" Importe="80.00"/>
+</cfdi:Traslados></cfdi:Impuestos>'''
+
+# Honorarios: IVA 16 % trasladado, retención de ISR 10 % y de IVA 10.6667 %.
+CUERPO_HONORARIOS = '''
+<cfdi:Conceptos>
+  <cfdi:Concepto ClaveProdServ="80111600" Cantidad="1" ClaveUnidad="E48" Descripcion="Honorarios"
+      ValorUnitario="1000.00" Importe="1000.00" ObjetoImp="02">
+    <cfdi:Impuestos>
+      <cfdi:Traslados>
+        <cfdi:Traslado Base="1000.00" Impuesto="002" TipoFactor="Tasa" TasaOCuota="0.160000" Importe="160.00"/>
+      </cfdi:Traslados>
+      <cfdi:Retenciones>
+        <cfdi:Retencion Base="1000.00" Impuesto="001" TipoFactor="Tasa" TasaOCuota="0.100000" Importe="100.00"/>
+        <cfdi:Retencion Base="1000.00" Impuesto="002" TipoFactor="Tasa" TasaOCuota="0.106667" Importe="106.67"/>
+      </cfdi:Retenciones>
+    </cfdi:Impuestos>
+  </cfdi:Concepto>
+</cfdi:Conceptos>
+<cfdi:Impuestos TotalImpuestosTrasladados="160.00" TotalImpuestosRetenidos="206.67">
+  <cfdi:Retenciones>
+    <cfdi:Retencion Impuesto="001" Importe="100.00"/>
+    <cfdi:Retencion Impuesto="002" Importe="106.67"/>
+  </cfdi:Retenciones>
+  <cfdi:Traslados>
+    <cfdi:Traslado Base="1000.00" Impuesto="002" TipoFactor="Tasa" TasaOCuota="0.160000" Importe="160.00"/>
+  </cfdi:Traslados>
+</cfdi:Impuestos>'''
+
+# Retención declarada solo en el nodo raíz (sin impuestos por concepto).
+CUERPO_RETENCION_SOLO_RAIZ = '''
+<cfdi:Conceptos>
+  <cfdi:Concepto ClaveProdServ="80111600" Cantidad="1" ClaveUnidad="E48" Descripcion="Servicio"
+      ValorUnitario="1000.00" Importe="1000.00"/>
+</cfdi:Conceptos>
+<cfdi:Impuestos TotalImpuestosRetenidos="100.00">
+  <cfdi:Retenciones><cfdi:Retencion Impuesto="001" Importe="100.00"/></cfdi:Retenciones>
+</cfdi:Impuestos>'''
+
+
+def _mapa(impuestos):
+    return {(i.ambito, i.impuesto, i.tipo_factor, i.tasa_o_cuota): (i.base, i.importe) for i in impuestos}
+
+
+def test_resumen_separa_tasa_16_tasa_0_y_exento():
+    p = CFDIParser().parse_xml(_cfdi(CUERPO_MIXTO))
+
+    assert _mapa(p.resumen_impuestos) == {
+        ("traslado", "002", "Tasa", D("0.160000")): (D("800.00"), D("128.00")),
+        ("traslado", "002", "Tasa", D("0.000000")): (D("150.00"), D("0.00")),
+        ("traslado", "002", "Exento", None): (D("50.00"), D("0.00")),
+    }
+    assert p.iva_trasladado == D("128.00")  # el total de siempre no cambia
+
+
+def test_resumen_cfdi_33_toma_la_base_de_los_conceptos():
+    p = CFDIParser().parse_xml(_cfdi(CUERPO_33, version="3.3", subtotal="500.00", total="580.00"))
+
+    assert _mapa(p.resumen_impuestos) == {
+        ("traslado", "002", "Tasa", D("0.160000")): (D("500.00"), D("80.00")),
+    }
+
+
+def test_resumen_incluye_retenciones_con_base_y_tasa():
+    p = CFDIParser().parse_xml(_cfdi(CUERPO_HONORARIOS, total="953.33"))
+
+    mapa = _mapa(p.resumen_impuestos)
+    assert mapa[("retencion", "001", "Tasa", D("0.100000"))] == (D("1000.00"), D("100.00"))
+    assert mapa[("retencion", "002", "Tasa", D("0.106667"))] == (D("1000.00"), D("106.67"))
+    assert mapa[("traslado", "002", "Tasa", D("0.160000"))] == (D("1000.00"), D("160.00"))
+    assert len(mapa) == 3
+
+
+def test_retencion_solo_en_raiz_queda_sin_tasa_ni_base():
+    p = CFDIParser().parse_xml(_cfdi(CUERPO_RETENCION_SOLO_RAIZ, total="900.00"))
+
+    assert _mapa(p.resumen_impuestos) == {
+        ("retencion", "001", "Tasa", None): (D("0.00"), D("100.00")),
+    }
