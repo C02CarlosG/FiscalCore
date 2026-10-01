@@ -34,53 +34,81 @@ def _teardown():
 
 # ─── POST /constancia/parsear ──────────────────────────────────────────────────
 
-def test_parsear_constancia_exitoso(monkeypatch):
+def test_parsear_constancia_sin_token_da_401():
+    r = client.post(
+        "/api/v1/constancia/parsear",
+        files={"archivo": ("constancia.pdf", b"%PDF-1.4 contenido", "application/pdf")},
+    )
+    assert r.status_code == 401
+
+
+def test_parsear_constancia_exitoso_no_guarda_el_pdf(monkeypatch, tmp_path):
+    _auth(monkeypatch)
+    monkeypatch.chdir(tmp_path)  # cualquier escritura relativa caería aquí
     monkeypatch.setattr(constancia_parser, "parsear_constancia", lambda contenido: {
         "rfc": "TEST010101AAA", "razon_social": "Test SA de CV",
         "regimenes": ["612"], "obligaciones": [], "cp_fiscal": "01000", "curp": None,
         "texto_completo": "...",
     })
 
-    r = client.post(
-        "/api/v1/constancia/parsear",
-        files={"archivo": ("constancia.pdf", b"%PDF-1.4 contenido", "application/pdf")},
-    )
+    try:
+        r = client.post(
+            "/api/v1/constancia/parsear",
+            files={"archivo": ("constancia.pdf", b"%PDF-1.4 contenido", "application/pdf")},
+        )
+    finally:
+        _teardown()
 
     assert r.status_code == 200
     body = r.json()
     assert body["rfc"] == "TEST010101AAA"
-    assert "constancia_path" in body
+    assert "constancia_path" not in body
+    assert list(tmp_path.rglob("*.pdf")) == []
 
 
-def test_parsear_constancia_extension_invalida_da_400():
-    r = client.post(
-        "/api/v1/constancia/parsear",
-        files={"archivo": ("constancia.txt", b"no es un pdf", "text/plain")},
-    )
+def test_parsear_constancia_extension_invalida_da_400(monkeypatch):
+    _auth(monkeypatch)
+    try:
+        r = client.post(
+            "/api/v1/constancia/parsear",
+            files={"archivo": ("constancia.txt", b"no es un pdf", "text/plain")},
+        )
+    finally:
+        _teardown()
     assert r.status_code == 400
 
 
 def test_parsear_constancia_error_runtime_da_500(monkeypatch):
+    _auth(monkeypatch)
+
     def _raise(contenido):
         raise RuntimeError("pdfplumber no instalado")
     monkeypatch.setattr(constancia_parser, "parsear_constancia", _raise)
 
-    r = client.post(
-        "/api/v1/constancia/parsear",
-        files={"archivo": ("constancia.pdf", b"%PDF-1.4 contenido", "application/pdf")},
-    )
+    try:
+        r = client.post(
+            "/api/v1/constancia/parsear",
+            files={"archivo": ("constancia.pdf", b"%PDF-1.4 contenido", "application/pdf")},
+        )
+    finally:
+        _teardown()
     assert r.status_code == 500
 
 
 def test_parsear_constancia_pdf_corrupto_da_422(monkeypatch):
+    _auth(monkeypatch)
+
     def _raise(contenido):
         raise ValueError("No se pudo extraer texto")
     monkeypatch.setattr(constancia_parser, "parsear_constancia", _raise)
 
-    r = client.post(
-        "/api/v1/constancia/parsear",
-        files={"archivo": ("constancia.pdf", b"%PDF-1.4 contenido", "application/pdf")},
-    )
+    try:
+        r = client.post(
+            "/api/v1/constancia/parsear",
+            files={"archivo": ("constancia.pdf", b"%PDF-1.4 contenido", "application/pdf")},
+        )
+    finally:
+        _teardown()
     assert r.status_code == 422
 
 
@@ -169,7 +197,33 @@ def test_agregar_empresa_existente_ya_vinculada_no_reinserta(monkeypatch):
     assert execute_calls == []  # no crea empresa ni re-vincula
 
 
-def test_agregar_empresa_race_unique_violation_reutiliza_existente(monkeypatch):
+def test_agregar_empresa_existente_ajena_da_409_y_no_vincula(monkeypatch):
+    """Conocer el RFC de una empresa ya registrada no da acceso a sus datos."""
+    _auth(monkeypatch)
+
+    def _query_one(sql, params=()):
+        if "FROM empresas WHERE rfc" in sql:
+            return {"id": "emp-ajena", "rfc": "AJEN010101AAA", "razon_social": "Ajena SA"}
+        if "usuario_empresas" in sql:
+            return None  # el usuario NO está vinculado
+        return None
+
+    execute_calls = []
+    monkeypatch.setattr(db, "query_one", _query_one)
+    monkeypatch.setattr(db, "execute", lambda sql, params=(), returning=False: execute_calls.append(sql))
+
+    try:
+        r = client.post("/api/v1/mis-empresas", json={"rfc": "ajen010101aaa", "razon_social": "Ajena SA"})
+    finally:
+        _teardown()
+
+    assert r.status_code == 409
+    assert execute_calls == []  # ni crea empresa ni inserta el vínculo
+
+
+def test_agregar_empresa_race_unique_violation_da_409(monkeypatch):
+    """Si otra petición creó la empresa entre el SELECT y el INSERT, ya no es
+    del usuario actual: se trata igual que una empresa existente ajena."""
     _auth(monkeypatch)
     llamadas_query_one = []
 
@@ -196,8 +250,7 @@ def test_agregar_empresa_race_unique_violation_reutiliza_existente(monkeypatch):
     finally:
         _teardown()
 
-    assert r.status_code == 201
-    assert r.json()["empresa_id"] == "emp-1"
+    assert r.status_code == 409
 
 
 # ─── GET /empresas/{id} ──────────────────────────────────────────────────────────

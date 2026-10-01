@@ -240,9 +240,8 @@ paths:
         y extrae los datos fiscales estructurados: RFC, razon social, regimen fiscal,
         codigo postal, CURP, obligaciones, etc.
 
-        El archivo PDF es guardado en el servidor y se retorna su nombre para
-        referencia posterior al crear la empresa.
-      security: []
+        Requiere autenticacion. El PDF se procesa en memoria y no se conserva
+        en el servidor.
       requestBody:
         required: true
         content:
@@ -271,7 +270,6 @@ paths:
                 obligaciones: ["IVA mensual", "ISR mensual"]
                 representante_legal: "Juan Perez Lopez"
                 rfc_representante: "PELJ800101ABC"
-                constancia_path: "3fa85f64-5717-4562-b3fc-2c963f66afa6.pdf"
         '400':
           description: El archivo no es PDF
           content:
@@ -280,6 +278,8 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
               example:
                 detail: "El archivo debe ser PDF"
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
         '422':
           $ref: '#/components/responses/UnprocessableError'
         '500':
@@ -322,9 +322,12 @@ paths:
       tags: [Empresas]
       summary: Agregar empresa al contador
       description: |
-        Crea una nueva empresa (o reutiliza una existente por RFC) y la vincula
-        al contador autenticado. La operacion es idempotente: si la empresa ya
-        esta vinculada, no se crea un duplicado.
+        Crea una nueva empresa y la vincula al contador autenticado. La operacion
+        es idempotente: si el contador ya esta vinculado a la empresa con ese RFC,
+        responde con exito sin crear un duplicado.
+
+        Si el RFC ya pertenece a una empresa a la que el contador no esta
+        vinculado, se rechaza con 409: conocer un RFC no da acceso a sus datos.
       requestBody:
         required: true
         content:
@@ -354,6 +357,14 @@ paths:
                 razon_social: "Empresa Ejemplo SA de CV"
         '401':
           $ref: '#/components/responses/UnauthorizedError'
+        '409':
+          description: El RFC ya pertenece a una empresa a la que el contador no esta vinculado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                detail: "Ya existe una empresa registrada con ese RFC. Solicita acceso a quien la administra."
 
   /api/v1/empresas/{empresa_id}:
     get:
@@ -650,6 +661,8 @@ paths:
                 estado: resuelto
         '401':
           $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
         '404':
           $ref: '#/components/responses/NotFoundError'
 
@@ -712,6 +725,8 @@ paths:
                 detail: "Tipo de accion desconocido: accion_invalida"
         '401':
           $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
         '404':
           $ref: '#/components/responses/NotFoundError'
 
@@ -2563,9 +2578,6 @@ components:
         rfc_representante:
           type: string
           nullable: true
-        constancia_path:
-          type: string
-          description: Nombre del archivo PDF guardado en el servidor
 
     IngestaResponse:
       type: object
