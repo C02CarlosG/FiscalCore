@@ -88,6 +88,23 @@ class ImpuestoDetalle:
 
 
 @dataclass
+class ConceptoCFDI:
+    linea: int
+    clave_prod_serv: Optional[str]
+    no_identificacion: Optional[str]
+    cantidad: Decimal
+    clave_unidad: Optional[str]
+    unidad: Optional[str]
+    descripcion: Optional[str]
+    valor_unitario: Decimal
+    importe: Decimal
+    descuento: Decimal
+    objeto_imp: Optional[str]
+    cuenta_predial: Optional[str]
+    impuestos: list[ImpuestoResumen] = field(default_factory=list)
+
+
+@dataclass
 class CFDIParsed:
     # Identificación
     uuid: str
@@ -162,6 +179,13 @@ class CFDIParsed:
 
     # Impuestos agrupados por tasa con su base (traslados y retenciones).
     resumen_impuestos: list[ImpuestoResumen] = field(default_factory=list)
+    conceptos: list["ConceptoCFDI"] = field(default_factory=list)
+
+    # Encabezados adicionales
+    no_certificado: Optional[str] = None
+    periodicidad: Optional[str] = None   # InformacionGlobal (factura global)
+    meses: Optional[str] = None
+    anio_global: Optional[int] = None
 
     @property
     def es_ingreso(self) -> bool:
@@ -263,6 +287,14 @@ class CFDIParser:
         parsed.total_retenciones = loc_retenciones + sum(
             (i.importe for i in impuestos if i.es_retencion), Decimal("0"))
         parsed.resumen_impuestos = self._resumen_impuestos(root, ns_cfdi)
+        parsed.conceptos = self._extraer_conceptos(root, ns_cfdi)
+        parsed.no_certificado = self._attr(root, "NoCertificado")
+        info_global = root.find(f"{ns_cfdi}InformacionGlobal")
+        if info_global is not None:
+            parsed.periodicidad = info_global.get("Periodicidad")
+            parsed.meses = info_global.get("Meses")
+            anio = info_global.get("Año", "")
+            parsed.anio_global = int(anio) if anio.isdigit() else None
 
         # Validaciones
         parsed.rfc_emisor_valido = validar_rfc(rfc_emisor)
@@ -411,6 +443,35 @@ class CFDIParser:
         filas = [self._leer_impuesto(n, "traslado") for n in traslados]
         filas += [self._leer_impuesto(n, "retencion") for n in retenciones]
         return _agrupar_impuestos(filas)
+
+    def _extraer_conceptos(self, root, ns_cfdi: str) -> list[ConceptoCFDI]:
+        conceptos: list[ConceptoCFDI] = []
+        nodos = root.findall(f"{ns_cfdi}Conceptos/{ns_cfdi}Concepto")
+        for linea, nodo in enumerate(nodos, start=1):
+            predial = nodo.find(f"{ns_cfdi}CuentaPredial")
+            impuestos = [
+                self._leer_impuesto(n, "traslado")
+                for n in nodo.findall(f"{ns_cfdi}Impuestos/{ns_cfdi}Traslados/{ns_cfdi}Traslado")
+            ] + [
+                self._leer_impuesto(n, "retencion")
+                for n in nodo.findall(f"{ns_cfdi}Impuestos/{ns_cfdi}Retenciones/{ns_cfdi}Retencion")
+            ]
+            conceptos.append(ConceptoCFDI(
+                linea=linea,
+                clave_prod_serv=nodo.get("ClaveProdServ"),
+                no_identificacion=nodo.get("NoIdentificacion"),
+                cantidad=self._decimal(nodo, "Cantidad"),
+                clave_unidad=nodo.get("ClaveUnidad"),
+                unidad=nodo.get("Unidad"),
+                descripcion=nodo.get("Descripcion"),
+                valor_unitario=self._decimal(nodo, "ValorUnitario"),
+                importe=self._decimal(nodo, "Importe"),
+                descuento=self._decimal(nodo, "Descuento"),
+                objeto_imp=nodo.get("ObjetoImp"),
+                cuenta_predial=predial.get("Numero") if predial is not None else None,
+                impuestos=impuestos,
+            ))
+        return conceptos
 
     def _validar(self, p: CFDIParsed) -> list[str]:
         errores = []

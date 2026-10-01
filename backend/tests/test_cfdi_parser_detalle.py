@@ -145,3 +145,35 @@ def test_retencion_solo_en_raiz_queda_sin_tasa_ni_base():
     assert _mapa(p.resumen_impuestos) == {
         ("retencion", "001", "Tasa", None): (D("0.00"), D("100.00")),
     }
+
+
+def test_conceptos_se_extraen_en_orden_con_sus_impuestos():
+    p = CFDIParser().parse_xml(_cfdi(CUERPO_MIXTO))
+
+    assert [c.linea for c in p.conceptos] == [1, 2, 3]
+    primero = p.conceptos[0]
+    assert (primero.clave_prod_serv, primero.no_identificacion, primero.clave_unidad, primero.unidad) == (
+        "43211500", "SKU-1", "H87", "Pieza")
+    assert (primero.cantidad, primero.valor_unitario, primero.importe, primero.descuento) == (
+        D("2"), D("400.00"), D("800.00"), D("0.00"))
+    assert (primero.descripcion, primero.objeto_imp) == ("Laptop", "02")
+    assert _mapa(primero.impuestos) == {("traslado", "002", "Tasa", D("0.160000")): (D("800.00"), D("128.00"))}
+    assert p.conceptos[1].no_identificacion is None
+    assert p.conceptos[2].cuenta_predial == "PRED-9"
+
+
+def test_encabezados_certificado_e_informacion_global():
+    cuerpo = '<cfdi:InformacionGlobal Periodicidad="04" Meses="09" Año="2026"/>' + CUERPO_MIXTO
+    p = CFDIParser().parse_xml(_cfdi(
+        cuerpo, extra_attrs='NoCertificado="00001000000504465028" CondicionesDePago="30 días"'))
+
+    assert p.no_certificado == "00001000000504465028"
+    assert p.condiciones_pago == "30 días"
+    assert (p.periodicidad, p.meses, p.anio_global) == ("04", "09", 2026)
+    assert p.regimen_emisor == "601"
+
+
+def test_sin_informacion_global_los_campos_quedan_vacios():
+    p = CFDIParser().parse_xml(_cfdi(CUERPO_MIXTO))
+
+    assert (p.no_certificado, p.periodicidad, p.meses, p.anio_global) == (None, None, None, None)
