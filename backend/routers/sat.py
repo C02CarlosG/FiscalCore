@@ -519,8 +519,9 @@ def _avanzar_solicitud(creds, solicitud: dict) -> str:
     id_paquetes = resultado.get("id_paquetes", [])
     num_cfdi    = resultado.get("num_cfdi", 0)
     _log.info(
-        "Solicitud %s: el SAT reporta '%s' (%s CFDI, %d paquetes)",
-        sol_id, estado_str, num_cfdi, len(id_paquetes),
+        "Solicitud %s: el SAT reporta '%s' (estado=%r, código=%s, %s CFDI, %d paquetes) %s",
+        sol_id, estado_str, resultado.get("estado"), resultado.get("codigo_estado"),
+        num_cfdi, len(id_paquetes), resultado.get("mensaje") or "",
     )
 
     if estado_str in ("terminada", "terminado"):
