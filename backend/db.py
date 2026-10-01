@@ -210,6 +210,11 @@ def init_db() -> None:
         # recálculo de monto_cobrado derivado de los pagos (REP re-ingeridos)
         _run_sql_file("027_pagos_idempotentes.sql")
 
+        # 028 es idempotente — detalle fiscal del CFDI: impuestos por tasa, conceptos,
+        # encabezados, impuestos de cada pago (REP) y totales de nómina
+        _run_sql_file("028_cfdi_detalle_fiscal.sql")
+
+
         # Seed inicial: usuario admin si la base aún no tiene usuarios
         _seed_admin()
 
