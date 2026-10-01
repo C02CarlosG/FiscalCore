@@ -17,6 +17,7 @@ import { apiFetch } from "@/lib/api-client";
 const ESTADO_URL = "/api/v1/sat/empresas/e1/fiel/estado";
 const SOLICITUDES_URL = "/api/v1/sat/solicitudes?empresa_id=e1";
 const SYNC_URL = "/api/v1/sat/empresas/e1/fiel/sync";
+const AVANZAR_URL = "/api/v1/sat/empresas/e1/fiel/sync/avanzar";
 
 const solicitud: SatSolicitud = {
   id: "s1",
@@ -36,6 +37,7 @@ function mockApi(estado: FielEstado, solicitudes: SatSolicitud[] = []) {
     if (path === ESTADO_URL) return estado;
     if (path === SOLICITUDES_URL) return solicitudes;
     if (path === SYNC_URL) return { mensaje: "Sync iniciado", solicitudes: [], periodo: "2026-09", tipos: [] };
+    if (path === AVANZAR_URL) return { avanzadas: [] };
     throw new Error(`llamada inesperada: ${path}`);
   });
 }
@@ -111,5 +113,24 @@ describe("DescargaSatCard", () => {
     renderCard();
 
     expect(await screen.findByText("SAT reportó estado: rechazada")).toBeInTheDocument();
+  });
+
+  it("asks the backend to advance downloads that are still in progress", async () => {
+    mockApi({ tiene_fiel: true, vencida: false }, [{ ...solicitud, estado: "solicitado" }]);
+    renderCard();
+
+    await waitFor(() => {
+      expect(vi.mocked(apiFetch).mock.calls.some(([path]) => path === AVANZAR_URL)).toBe(true);
+    });
+    const [, options] = vi.mocked(apiFetch).mock.calls.find(([path]) => path === AVANZAR_URL)!;
+    expect(options!.method).toBe("POST");
+  });
+
+  it("does not call the SAT when no download is in progress", async () => {
+    mockApi({ tiene_fiel: true, vencida: false }, [solicitud]);
+    renderCard();
+
+    expect(await screen.findByText("Descargado")).toBeInTheDocument();
+    expect(vi.mocked(apiFetch).mock.calls.some(([path]) => path === AVANZAR_URL)).toBe(false);
   });
 });

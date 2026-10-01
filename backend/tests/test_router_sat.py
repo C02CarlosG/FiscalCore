@@ -647,3 +647,158 @@ def test_sync_completo_exitoso_ambos_tipos_agenda_background(monkeypatch):
     assert {"emitidos", "recibidos"} == set(body["tipos"])
     assert len(llamadas_bg) == 1
     assert len(llamadas_bg[0]["solicitudes"]) == 2
+
+
+# ─── POST /sat/empresas/{id}/fiel/sync/avanzar ──────────────────────────────────
+
+_AVANZAR_URL = f"/api/v1/sat/empresas/{EMPRESA}/fiel/sync/avanzar"
+
+
+def _solicitud_pendiente(estado="solicitado"):
+    return {
+        "id": "sol-1", "empresa_id": EMPRESA, "id_solicitud_sat": "id-sat-1",
+        "estado": estado, "periodo_inicio": "2026-09",
+    }
+
+
+def _preparar_avanzar(monkeypatch, pendientes, verificacion, tomada=True):
+    """Mockea DB, FIEL y SAT para una pasada; devuelve los SQL ejecutados y las importaciones."""
+    _auth(monkeypatch)
+    monkeypatch.setattr(db, "query_all", lambda *a, **k: pendientes)
+    monkeypatch.setattr(fiel_store, "obtener_signer", lambda db_, eid: _FakeSigner())
+    monkeypatch.setattr(sat, "verificar_solicitud", lambda *a, **k: verificacion)
+
+    sqls = []
+
+    def _execute(sql, params=(), returning=False):
+        sqls.append(sql)
+        return ({"id": "sol-1"} if tomada else None) if returning else None
+    monkeypatch.setattr(db, "execute", _execute)
+
+    importaciones = []
+
+    def _importar(**kw):
+        importaciones.append(kw)
+        return "descargado"
+    monkeypatch.setattr(sat, "_importar_paquetes_bg", _importar)
+    return sqls, importaciones
+
+
+def test_avanzar_sin_descargas_en_curso_no_toca_la_fiel(monkeypatch):
+    _auth(monkeypatch)
+    monkeypatch.setattr(db, "query_all", lambda *a, **k: [])
+
+    def _no_debe_llamarse(*a, **k):
+        raise AssertionError("no debe cargar la FIEL si no hay nada pendiente")
+    monkeypatch.setattr(fiel_store, "obtener_signer", _no_debe_llamarse)
+
+    try:
+        r = client.post(_AVANZAR_URL)
+    finally:
+        _teardown()
+
+    assert r.status_code == 200
+    assert r.json() == {"avanzadas": []}
+
+
+def test_avanzar_solicitud_terminada_descarga_e_importa(monkeypatch):
+    _, importaciones = _preparar_avanzar(
+        monkeypatch, [_solicitud_pendiente()],
+        {"estado": "Terminada", "id_paquetes": ["pkg1"], "num_cfdi": 10},
+    )
+
+    try:
+        r = client.post(_AVANZAR_URL)
+    finally:
+        _teardown()
+
+    assert r.status_code == 200
+    assert r.json() == {"avanzadas": [{"id": "sol-1", "estado": "descargado"}]}
+    assert len(importaciones) == 1
+    assert importaciones[0]["paquetes"] == ["pkg1"]
+    assert importaciones[0]["periodo"] == "2026-09"
+    assert importaciones[0]["empresa_id"] == EMPRESA
+
+
+def test_avanzar_solicitud_ya_tomada_por_otra_pasada_no_descarga_dos_veces(monkeypatch):
+    _, importaciones = _preparar_avanzar(
+        monkeypatch, [_solicitud_pendiente()],
+        {"estado": "Terminada", "id_paquetes": ["pkg1"], "num_cfdi": 10},
+        tomada=False,
+    )
+
+    try:
+        r = client.post(_AVANZAR_URL)
+    finally:
+        _teardown()
+
+    assert r.json() == {"avanzadas": [{"id": "sol-1", "estado": "terminado"}]}
+    assert importaciones == []
+
+
+def test_avanzar_solicitud_en_proceso_sigue_esperando(monkeypatch):
+    sqls, importaciones = _preparar_avanzar(
+        monkeypatch, [_solicitud_pendiente()],
+        {"estado": "En proceso", "id_paquetes": [], "num_cfdi": 0},
+    )
+
+    try:
+        r = client.post(_AVANZAR_URL)
+    finally:
+        _teardown()
+
+    assert r.json() == {"avanzadas": [{"id": "sol-1", "estado": "en_proceso"}]}
+    assert importaciones == []
+    assert "estado='en_proceso'" in sqls[0]
+
+
+def test_avanzar_solicitud_rechazada_por_el_sat_queda_en_fallo(monkeypatch):
+    sqls, importaciones = _preparar_avanzar(
+        monkeypatch, [_solicitud_pendiente("en_proceso")],
+        {"estado": "Rechazada", "id_paquetes": [], "num_cfdi": 0},
+    )
+
+    try:
+        r = client.post(_AVANZAR_URL)
+    finally:
+        _teardown()
+
+    assert r.json() == {"avanzadas": [{"id": "sol-1", "estado": "fallo"}]}
+    assert importaciones == []
+    assert "estado='fallo'" in sqls[0]
+
+
+def test_avanzar_error_al_verificar_conserva_el_estado(monkeypatch):
+    sqls, _ = _preparar_avanzar(monkeypatch, [_solicitud_pendiente("en_proceso")], {})
+
+    def _raise(*a, **k):
+        raise FIELError("timeout SAT")
+    monkeypatch.setattr(sat, "verificar_solicitud", _raise)
+
+    try:
+        r = client.post(_AVANZAR_URL)
+    finally:
+        _teardown()
+
+    assert r.json() == {"avanzadas": [{"id": "sol-1", "estado": "en_proceso"}]}
+    assert sqls == []
+
+
+def test_avanzar_sin_fiel_guardada_da_422(monkeypatch):
+    _preparar_avanzar(monkeypatch, [_solicitud_pendiente()], {})
+
+    def _raise(db_, eid):
+        raise ValueError("No hay FIEL guardada para esta empresa")
+    monkeypatch.setattr(fiel_store, "obtener_signer", _raise)
+
+    try:
+        r = client.post(_AVANZAR_URL)
+    finally:
+        _teardown()
+
+    assert r.status_code == 422
+
+
+def test_avanzar_sin_auth_da_401():
+    r = client.post(_AVANZAR_URL)
+    assert r.status_code == 401

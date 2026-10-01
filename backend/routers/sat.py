@@ -260,11 +260,11 @@ def _importar_paquetes_bg(
     empresa_id: str,
     periodo: str,
     paquetes: list[str],
-) -> None:
+) -> str:
     """Descarga paquetes ZIP del SAT, parsea XMLs e importa a la DB.
 
-    Se ejecuta en background — no bloquea la respuesta HTTP.
     Al finalizar, corre el pipeline de conciliación/riesgos/scoring.
+    Devuelve el estado en que queda la solicitud ('descargado' o 'fallo').
     """
     from ..cfdi_parser import CFDIParser
 
@@ -315,6 +315,7 @@ def _importar_paquetes_bg(
                 _log.error("Error en pipeline post-descarga FIEL: %s", e)
 
     _log.info("Solicitud %s: %d CFDIs importados de %d paquetes", solicitud_id, total_importados, len(paquetes))
+    return estado_final
 
 
 def _insertar_cfdi(empresa_id: str, resultado, periodo: str, xml_raw_bytes: bytes) -> None:
@@ -483,6 +484,129 @@ async def sync_completo_fiel(
     }
 
 
+# Estados en los que el SAT todavía está preparando la solicitud.
+_ESTADOS_EN_SAT = ("solicitado", "en_proceso")
+_ESTADOS_FALLO_SAT = ("error", "rechazada", "fallo", "falla", "vencida")
+
+
+def _avanzar_solicitud(creds, solicitud: dict) -> str:
+    """Da un paso a una solicitud: la verifica en el SAT y, si ya está lista,
+    descarga e importa sus paquetes. Devuelve el estado en que queda.
+
+    Es segura ante pasadas concurrentes (loop en background y /fiel/sync/avanzar):
+    solo quien logra el UPDATE condicional hace la descarga.
+    """
+    sol_id = str(solicitud["id"])
+    try:
+        resultado = verificar_solicitud(creds, solicitud["id_solicitud_sat"])
+    except FIELError as exc:
+        _log.warning("Error verificando %s: %s", sol_id, exc)
+        return solicitud["estado"]
+
+    estado_raw = resultado.get("estado")
+    estado_str = (
+        str(estado_raw.value).lower().strip()
+        if hasattr(estado_raw, "value")
+        else str(estado_raw or "").lower().strip()
+    )
+    id_paquetes = resultado.get("id_paquetes", [])
+    num_cfdi    = resultado.get("num_cfdi", 0)
+
+    if estado_str in ("terminada", "terminado"):
+        if solicitud["estado"] == "terminado":
+            # Importación interrumpida (el proceso murió a media descarga): se retoma.
+            tomada = db.execute(
+                """UPDATE sat_solicitudes SET paquetes_descargados=0, updated_at=NOW()
+                   WHERE id=%s AND estado='terminado'
+                     AND updated_at < NOW() - INTERVAL '10 minutes'
+                   RETURNING id""",
+                (sol_id,), returning=True,
+            )
+        else:
+            tomada = db.execute(
+                """UPDATE sat_solicitudes
+                   SET estado='terminado', num_cfdi=%s, num_paquetes=%s, updated_at=NOW()
+                   WHERE id=%s AND estado IN ('solicitado', 'en_proceso')
+                   RETURNING id""",
+                (num_cfdi, len(id_paquetes), sol_id), returning=True,
+            )
+        if not tomada:
+            return "terminado"  # otra pasada ya la está importando
+        if not id_paquetes:
+            db.execute(
+                "UPDATE sat_solicitudes SET estado='descargado', cfdi_importados=0, updated_at=NOW() WHERE id=%s",
+                (sol_id,),
+            )
+            return "descargado"
+        return _importar_paquetes_bg(
+            creds=creds,
+            solicitud_id=sol_id,
+            empresa_id=str(solicitud["empresa_id"]),
+            periodo=solicitud["periodo_inicio"],
+            paquetes=id_paquetes,
+        ) or "terminado"
+
+    if estado_str in _ESTADOS_FALLO_SAT:
+        db.execute(
+            "UPDATE sat_solicitudes SET estado='fallo', error_msg=%s, updated_at=NOW() WHERE id=%s",
+            (f"SAT reportó estado: {estado_str}", sol_id),
+        )
+        return "fallo"
+
+    # En proceso — actualizar contadores y seguir esperando
+    db.execute(
+        """UPDATE sat_solicitudes SET estado='en_proceso', num_cfdi=%s, updated_at=NOW()
+           WHERE id=%s AND estado IN ('solicitado', 'en_proceso')""",
+        (num_cfdi, sol_id),
+    )
+    return "en_proceso"
+
+
+@router.post("/empresas/{empresa_id}/fiel/sync/avanzar")
+@limiter.limit("30/minute")
+def avanzar_sync_fiel(
+    request: Request,
+    empresa_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Da una pasada a las descargas en curso de la empresa usando la FIEL guardada:
+    verifica cada solicitud en el SAT y, si ya está lista, la descarga e importa.
+
+    Existe para los entornos donde el proceso no sobrevive al request
+    (serverless) y el loop de /fiel/sync se corta: el frontend lo llama
+    mientras haya descargas en curso. Cada solicitud se verifica en el SAT como
+    mucho una vez cada 20 segundos, sin importar cuántas veces se llame.
+    """
+    validar_acceso_empresa(empresa_id, current_user)
+
+    pendientes = db.query_all(
+        """SELECT * FROM sat_solicitudes
+           WHERE empresa_id=%s AND id_solicitud_sat IS NOT NULL
+             AND ((estado IN ('solicitado', 'en_proceso')
+                   AND updated_at < NOW() - INTERVAL '20 seconds')
+               OR (estado = 'terminado'
+                   AND updated_at < NOW() - INTERVAL '10 minutes'))
+           ORDER BY created_at""",
+        (empresa_id,),
+    )
+    if not pendientes:
+        return {"avanzadas": []}
+
+    from ..fiel_store import obtener_signer
+    try:
+        creds = obtener_signer(db, empresa_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+    return {
+        "avanzadas": [
+            {"id": str(s["id"]), "estado": _avanzar_solicitud(creds, s)}
+            for s in pendientes
+        ]
+    }
+
+
 def _sync_completo_bg(empresa_id: str, periodo: str, solicitudes: list[dict]) -> None:
     """
     Background task: verifica en loop y descarga automáticamente.
@@ -519,56 +643,18 @@ def _sync_completo_bg(empresa_id: str, periodo: str, solicitudes: list[dict]) ->
         _log.info("sync_completo_bg intento %d/%d, %d solicitudes pendientes", intento+1, MAX_INTENTOS, len(pendientes))
 
         for sol_id in list(pendientes.keys()):
-            row = db.query_one("SELECT id_solicitud_sat, estado FROM sat_solicitudes WHERE id = %s", (sol_id,))
+            row = db.query_one("SELECT * FROM sat_solicitudes WHERE id = %s", (sol_id,))
             if not row or not row.get("id_solicitud_sat"):
                 continue
-
-            try:
-                resultado = verificar_solicitud(creds, row["id_solicitud_sat"])
-            except FIELError as exc:
-                _log.warning("Error verificando %s: %s", sol_id, exc)
-                continue
-
-            estado_raw = resultado.get("estado")
-            estado_str = (
-                str(estado_raw.value).lower().strip()
-                if hasattr(estado_raw, "value")
-                else str(estado_raw or "").lower().strip()
-            )
-            id_paquetes = resultado.get("id_paquetes", [])
-            num_cfdi    = resultado.get("num_cfdi", 0)
-
-            if estado_str in ("terminada", "terminado"):
-                db.execute(
-                    "UPDATE sat_solicitudes SET estado='terminado', num_cfdi=%s, num_paquetes=%s, updated_at=NOW() WHERE id=%s",
-                    (num_cfdi, len(id_paquetes), sol_id),
-                )
-                if id_paquetes:
-                    _importar_paquetes_bg(
-                        creds=creds,
-                        solicitud_id=sol_id,
-                        empresa_id=empresa_id,
-                        periodo=periodo,
-                        paquetes=id_paquetes,
-                    )
+            # Otra pasada (p. ej. /fiel/sync/avanzar) pudo haberla resuelto ya.
+            if row["estado"] not in _ESTADOS_EN_SAT or _avanzar_solicitud(creds, row) not in _ESTADOS_EN_SAT:
                 del pendientes[sol_id]
-
-            elif estado_str in ("error", "rechazada", "fallo", "falla", "vencida"):
-                db.execute(
-                    "UPDATE sat_solicitudes SET estado='fallo', error_msg=%s, updated_at=NOW() WHERE id=%s",
-                    (f"SAT reportó estado: {estado_str}", sol_id),
-                )
-                del pendientes[sol_id]
-            else:
-                # En proceso — actualizar contadores y seguir esperando
-                db.execute(
-                    "UPDATE sat_solicitudes SET estado='en_proceso', num_cfdi=%s, updated_at=NOW() WHERE id=%s",
-                    (num_cfdi, sol_id),
-                )
 
     # Marcar como fallo las que no terminaron a tiempo
     for sol_id in pendientes:
         db.execute(
-            "UPDATE sat_solicitudes SET estado='fallo', error_msg='Timeout: el SAT tardó más de 30 minutos', updated_at=NOW() WHERE id=%s",
+            """UPDATE sat_solicitudes
+               SET estado='fallo', error_msg='Timeout: el SAT tardó más de 30 minutos', updated_at=NOW()
+               WHERE id=%s AND estado IN ('solicitado', 'en_proceso')""",
             (sol_id,),
         )

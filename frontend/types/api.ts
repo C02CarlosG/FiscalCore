@@ -330,6 +330,10 @@ export interface SatSolicitud {
   updated_at: string;
 }
 
+export interface SatAvanzarResponse {
+  avanzadas: { id: string; estado: string }[];
+}
+
 export interface SatSyncResponse {
   mensaje: string;
   solicitudes: { id: string; tipo: string }[];

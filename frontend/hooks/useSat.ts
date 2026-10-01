@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api-client";
 import type {
   FielEstado,
+  SatAvanzarResponse,
   SatSolicitud,
   SatSyncResponse,
   SatTipoDescarga,
@@ -73,6 +74,31 @@ export function useSolicitudesSat(empresaId: string) {
     // Mientras haya una descarga en curso se consulta de nuevo cada 10 s.
     refetchInterval: (query) =>
       query.state.data?.some(solicitudEnCurso) ? INTERVALO_SEGUIMIENTO_MS : false,
+  });
+}
+
+const INTERVALO_AVANCE_MS = 15_000;
+
+// Mientras `activo`, pide al backend una pasada a las descargas en curso:
+// verificarlas en el SAT e importarlas si ya están listas. Hace falta donde el
+// backend no puede seguirlas por su cuenta (serverless). La pasada que importa
+// puede tardar minutos; React Query no lanza otra mientras esa siga en vuelo.
+export function useAvanzarDescargasSat(empresaId: string, activo: boolean) {
+  const queryClient = useQueryClient();
+  return useQuery({
+    queryKey: ["sat-avanzar", empresaId],
+    queryFn: async () => {
+      const resultado = await apiFetch<SatAvanzarResponse>(
+        `/api/v1/sat/empresas/${empresaId}/fiel/sync/avanzar`,
+        { method: "POST" },
+      );
+      queryClient.invalidateQueries({ queryKey: ["sat-solicitudes", empresaId] });
+      return resultado;
+    },
+    enabled: Boolean(empresaId) && activo,
+    refetchInterval: INTERVALO_AVANCE_MS,
+    retry: false,
+    gcTime: 0,
   });
 }
 

@@ -11,6 +11,7 @@
       "entrypoint": "backend.main_api:app",
       "functions": {
         "backend/main_api.py": {
+          "maxDuration": 300,
           "excludeFiles": "{frontend/**,docs/**,backend/tests/**,uploads/**,.claude/**,.opencode/**,.kilo/**,.github/**}"
         }
       }

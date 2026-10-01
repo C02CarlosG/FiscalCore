@@ -17,6 +17,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import {
   solicitudEnCurso,
+  useAvanzarDescargasSat,
   useFielEstado,
   useSincronizarSat,
   useSolicitudesSat,
@@ -105,6 +106,7 @@ export function DescargaSatCard({ empresaId }: { empresaId: string }) {
   const fiel = useFielEstado(empresaId);
   const solicitudes = useSolicitudesSat(empresaId);
   const sincronizar = useSincronizarSat(empresaId);
+  useAvanzarDescargasSat(empresaId, solicitudes.data?.some(solicitudEnCurso) ?? false);
 
   const [periodo, setPeriodo] = useState("");
   const [tipo, setTipo] = useState<SatTipoDescarga>("ambos");
