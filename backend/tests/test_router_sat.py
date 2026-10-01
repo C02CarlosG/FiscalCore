@@ -880,3 +880,21 @@ def test_avanzar_estado_cero_del_sat_deja_de_esperar_y_guarda_el_motivo(monkeypa
 
     assert r.json() == {"avanzadas": [{"id": "sol-1", "estado": "fallo"}]}
     assert params_vistos[0][0] == "El SAT respondió: No se encontro la informacion"
+
+
+def test_avanzar_error_no_controlado_del_sat_se_reintenta(monkeypatch):
+    """CodEstatus 404 es un error transitorio del SAT: la solicitud sigue en curso."""
+    sqls, importaciones = _preparar_avanzar(
+        monkeypatch, [_solicitud_pendiente()],
+        {"estado": 0, "cod_estatus": "404", "id_paquetes": [], "num_cfdi": 0,
+         "mensaje": "Error no controlado."},
+    )
+
+    try:
+        r = client.post(_AVANZAR_URL)
+    finally:
+        _teardown()
+
+    assert r.json() == {"avanzadas": [{"id": "sol-1", "estado": "en_proceso"}]}
+    assert importaciones == []
+    assert "estado='fallo'" not in sqls[0]
