@@ -1,16 +1,13 @@
 -- ============================================================
 -- Migración 006: Matching 1:N y N:1 en conciliaciones
--- Idempotente: DROP + ADD CONSTRAINT
+-- Idempotente: no modifica el esquema (ver nota).
 -- ============================================================
 
-ALTER TABLE conciliaciones DROP CONSTRAINT IF EXISTS conciliaciones_tipo_match_check;
-ALTER TABLE conciliaciones ADD CONSTRAINT conciliaciones_tipo_match_check
-    CHECK (tipo_match IN (
-        'exacto',
-        'parcial',
-        'sin_cfdi',
-        'sin_movimiento',
-        'complemento_pago',
-        'agrupado',
-        'parcial_multiple'
-    ));
+-- NOTA: este archivo se re-ejecuta en cada arranque (db.init_db). Aquí se
+-- redefinía conciliaciones_tipo_match_check con la lista de valores vigente en
+-- su momento, más corta que la actual. Con filas que ya usan valores posteriores
+-- (pendiente_rep, heuristico, complemento_pago_total, ...) el ADD CONSTRAINT
+-- fallaba con CheckViolation y la app no podía reiniciar. La lista completa
+-- vive únicamente en 010_complemento_tipos.sql; no volver a declararla aquí.
+
+SELECT 1;  -- psycopg2 rechaza ejecutar un archivo sin sentencias

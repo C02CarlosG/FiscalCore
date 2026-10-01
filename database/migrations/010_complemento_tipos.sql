@@ -5,6 +5,10 @@
 
 -- 1. Extender tipo_match con complemento_pago_total y complemento_pago_parcial
 --    Se conserva complemento_pago (legacy) para registros históricos.
+--    ESTA es la única definición vigente de conciliaciones_tipo_match_check:
+--    las migraciones se re-ejecutan en cada arranque, así que para admitir un
+--    valor nuevo hay que agregarlo a ESTA lista (una migración posterior que
+--    la redeclare volvería a romper el reinicio en cuanto esta se re-ejecute).
 ALTER TABLE conciliaciones DROP CONSTRAINT IF EXISTS conciliaciones_tipo_match_check;
 ALTER TABLE conciliaciones ADD CONSTRAINT conciliaciones_tipo_match_check
     CHECK (tipo_match IN (
