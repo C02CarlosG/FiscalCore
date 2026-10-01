@@ -199,3 +199,49 @@ def test_subir_rep_guarda_impuestos_del_documento_y_resubirlo_no_duplica(entorno
         (UUID_FACTURA,),
     )
     assert (rel["moneda_dr"], rel["equivalencia_dr"], rel["version_pago"]) == ("MXN", D("1"), "2.0")
+
+
+def test_reproceso_reconstruye_el_detalle_de_cfdis_anteriores(entorno):
+    db, client, headers, empresa_id = entorno
+    from backend import reproceso
+
+    _subir(client, headers, empresa_id, "factura.xml", _xml_factura())
+    _subir(client, headers, empresa_id, "rep.xml", _xml_rep())
+    # Simular CFDI guardados antes de la migración 028: sin detalle.
+    db.execute("DELETE FROM cfdi_impuestos WHERE cfdi_id IN (SELECT id FROM cfdi WHERE empresa_id = %s)", (empresa_id,))
+    db.execute("DELETE FROM cfdi_conceptos WHERE cfdi_id IN (SELECT id FROM cfdi WHERE empresa_id = %s)", (empresa_id,))
+    db.execute(
+        """DELETE FROM pagos_relaciones_impuestos WHERE relacion_id IN (
+               SELECT pr.id FROM pagos_relaciones pr JOIN pagos_cfdi pc ON pc.id = pr.pago_id
+               WHERE pc.empresa_id = %s)""",
+        (empresa_id,),
+    )
+    db.execute("UPDATE cfdi SET detalle_version = 0, regimen_emisor = NULL WHERE empresa_id = %s", (empresa_id,))
+
+    resultado = reproceso.reprocesar_detalle(empresa_id=empresa_id)
+
+    assert resultado == {"procesados": 2, "errores": [], "pendientes": 0}
+    assert _impuestos_cfdi(db) == IMPUESTOS_FACTURA
+    assert db.query_one("SELECT regimen_emisor FROM cfdi WHERE uuid = %s", (UUID_FACTURA,))["regimen_emisor"] == "601"
+    n = db.query_one(
+        """SELECT COUNT(*) AS n FROM pagos_relaciones_impuestos i
+           JOIN pagos_relaciones pr ON pr.id = i.relacion_id WHERE pr.cfdi_uuid = %s""",
+        (UUID_FACTURA,))["n"]
+    assert n == 3
+
+
+def test_reproceso_marca_el_xml_ilegible_y_no_lo_reintenta(entorno):
+    db, client, headers, empresa_id = entorno
+    from backend import reproceso
+
+    _subir(client, headers, empresa_id, "factura.xml", _xml_factura())
+    db.execute("UPDATE cfdi SET detalle_version = 0, xml_raw = '<roto' WHERE uuid = %s", (UUID_FACTURA,))
+
+    primero = reproceso.reprocesar_detalle(empresa_id=empresa_id)
+    segundo = reproceso.reprocesar_detalle(empresa_id=empresa_id)
+
+    assert primero["procesados"] == 0
+    assert [e["uuid"] for e in primero["errores"]] == [UUID_FACTURA]
+    assert primero["pendientes"] == 0
+    assert segundo == {"procesados": 0, "errores": [], "pendientes": 0}
+    assert db.query_one("SELECT detalle_version FROM cfdi WHERE uuid = %s", (UUID_FACTURA,))["detalle_version"] == -1

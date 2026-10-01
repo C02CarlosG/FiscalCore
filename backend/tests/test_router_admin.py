@@ -168,3 +168,39 @@ def test_metricas_globales(monkeypatch):
 
     assert r.status_code == 200
     assert r.json()["riesgos_criticos"] == 2
+
+
+# ─── POST /admin/reprocesar-cfdi ───────────────────────────────────────────────
+
+def test_reprocesar_cfdi_devuelve_el_resumen(monkeypatch):
+    from backend import reproceso
+    from backend.routers import admin as admin_router
+
+    _auth_admin()
+    llamadas = []
+    monkeypatch.setattr(reproceso, "reprocesar_detalle",
+                        lambda limite=500: llamadas.append(limite) or {"procesados": 7, "errores": [], "pendientes": 3})
+    monkeypatch.setattr(admin_router, "registrar_evento", lambda *a, **k: None)
+
+    try:
+        r = client.post("/api/v1/admin/reprocesar-cfdi?limite=50")
+    finally:
+        _teardown()
+
+    assert r.status_code == 200
+    assert r.json() == {"procesados": 7, "errores": [], "pendientes": 3}
+    assert llamadas == [50]
+
+
+def test_reprocesar_cfdi_rechaza_limite_fuera_de_rango():
+    _auth_admin()
+    try:
+        r = client.post("/api/v1/admin/reprocesar-cfdi?limite=0")
+    finally:
+        _teardown()
+
+    assert r.status_code == 422
+
+
+def test_reprocesar_cfdi_sin_token_da_401():
+    assert client.post("/api/v1/admin/reprocesar-cfdi").status_code == 401
