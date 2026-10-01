@@ -33,3 +33,25 @@ def test_028_crea_tablas_y_columnas_y_se_puede_repetir():
     assert {"relacion_id", "ambito", "impuesto", "tipo_factor", "tasa_o_cuota", "base", "importe"} <= _columnas(db, "pagos_relaciones_impuestos")
     assert {"moneda_dr", "equivalencia_dr"} <= _columnas(db, "pagos_relaciones")
     assert "version_pago" in _columnas(db, "pagos_cfdi")
+
+
+def test_028_columnas_de_texto_del_xml_toleran_valores_fuera_de_catalogo():
+    """Lo que llega crudo del XML no debe tronar el guardado por un VARCHAR justo
+    (el reproceso marcaría ese CFDI como error y no lo reintentaría)."""
+    from backend import db
+
+    db.init_db()
+    filas = db.query_all(
+        """SELECT table_name, column_name, character_maximum_length AS largo
+           FROM information_schema.columns
+           WHERE table_schema = 'public'
+             AND (table_name, column_name) IN (
+                 ('cfdi_impuestos', 'impuesto'), ('cfdi_impuestos', 'tipo_factor'),
+                 ('pagos_relaciones_impuestos', 'impuesto'), ('pagos_relaciones_impuestos', 'tipo_factor'),
+                 ('cfdi_conceptos', 'clave_prod_serv'), ('cfdi_conceptos', 'clave_unidad'),
+                 ('cfdi_conceptos', 'objeto_imp'), ('pagos_relaciones', 'moneda_dr'),
+                 ('cfdi', 'regimen_emisor'), ('cfdi', 'periodicidad'), ('cfdi', 'meses'))"""
+    )
+    assert len(filas) == 11
+    justas = [(f["table_name"], f["column_name"], f["largo"]) for f in filas if f["largo"] is not None and f["largo"] < 20]
+    assert justas == []
