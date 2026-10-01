@@ -177,3 +177,68 @@ def test_sin_informacion_global_los_campos_quedan_vacios():
     p = CFDIParser().parse_xml(_cfdi(CUERPO_MIXTO))
 
     assert (p.no_certificado, p.periodicidad, p.meses, p.anio_global) == (None, None, None, None)
+
+
+def _rep(nodo_pagos):
+    return f'''<cfdi:Comprobante xmlns:cfdi="http://www.sat.gob.mx/cfd/4"
+        xmlns:pago20="http://www.sat.gob.mx/Pagos20" xmlns:pago10="http://www.sat.gob.mx/Pagos"
+        xmlns:tfd="http://www.sat.gob.mx/TimbreFiscalDigital"
+        Version="4.0" Fecha="2026-01-20T10:00:00" TipoDeComprobante="P" SubTotal="0" Total="0"
+        Moneda="XXX" LugarExpedicion="01000" Exportacion="01">
+      <cfdi:Emisor Rfc="PROV010101AAA" Nombre="Proveedor SA" RegimenFiscal="601"/>
+      <cfdi:Receptor Rfc="EMP010101AAA" Nombre="Empresa SA" UsoCFDI="CP01"/>
+      <cfdi:Complemento>{nodo_pagos}<tfd:TimbreFiscalDigital
+          UUID="99999999-8888-7777-6666-555555555555" FechaTimbrado="2026-01-20T10:05:00"/></cfdi:Complemento>
+    </cfdi:Comprobante>'''
+
+
+PAGOS_20 = '''<pago20:Pagos Version="2.0">
+  <pago20:Totales MontoTotalPagos="6150.00"/>
+  <pago20:Pago FechaPago="2026-01-20T12:00:00" FormaDePagoP="03" MonedaP="MXN" TipoCambioP="1" Monto="6150.00">
+    <pago20:DoctoRelacionado IdDocumento="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee" MonedaDR="MXN"
+        EquivalenciaDR="1" NumParcialidad="1" ImpSaldoAnt="12300.00" ImpPagado="6150.00"
+        ImpSaldoInsoluto="6150.00" ObjetoImpDR="02">
+      <pago20:ImpuestosDR>
+        <pago20:RetencionesDR>
+          <pago20:RetencionDR BaseDR="5000.00" ImpuestoDR="001" TipoFactorDR="Tasa" TasaOCuotaDR="0.100000" ImporteDR="500.00"/>
+        </pago20:RetencionesDR>
+        <pago20:TrasladosDR>
+          <pago20:TrasladoDR BaseDR="5000.00" ImpuestoDR="002" TipoFactorDR="Tasa" TasaOCuotaDR="0.160000" ImporteDR="800.00"/>
+          <pago20:TrasladoDR BaseDR="250.00" ImpuestoDR="002" TipoFactorDR="Tasa" TasaOCuotaDR="0.000000" ImporteDR="0.00"/>
+          <pago20:TrasladoDR BaseDR="100.00" ImpuestoDR="002" TipoFactorDR="Exento"/>
+        </pago20:TrasladosDR>
+      </pago20:ImpuestosDR>
+    </pago20:DoctoRelacionado>
+  </pago20:Pago>
+</pago20:Pagos>'''
+
+PAGOS_10 = '''<pago10:Pagos Version="1.0">
+  <pago10:Pago FechaPago="2021-03-20T12:00:00" FormaDePagoP="03" MonedaP="MXN" Monto="580.00">
+    <pago10:DoctoRelacionado IdDocumento="33333333-3333-3333-3333-333333333333" MonedaDR="MXN"
+        NumParcialidad="1" ImpSaldoAnt="580.00" ImpPagado="580.00" ImpSaldoInsoluto="0.00"/>
+  </pago10:Pago>
+</pago10:Pagos>'''
+
+
+def test_rep_20_trae_los_impuestos_de_cada_documento():
+    p = CFDIParser().parse_xml(_rep(PAGOS_20))
+
+    pago = p.pagos[0]
+    docto = pago.doctos_relacionados[0]
+    assert pago.version == "2.0"
+    assert (docto.moneda_dr, docto.equivalencia_dr) == ("MXN", D("1"))
+    assert _mapa(docto.impuestos) == {
+        ("retencion", "001", "Tasa", D("0.100000")): (D("5000.00"), D("500.00")),
+        ("traslado", "002", "Tasa", D("0.160000")): (D("5000.00"), D("800.00")),
+        ("traslado", "002", "Tasa", D("0.000000")): (D("250.00"), D("0.00")),
+        ("traslado", "002", "Exento", None): (D("100.00"), D("0.00")),
+    }
+
+
+def test_rep_10_no_trae_impuestos_y_se_marca_como_version_1():
+    p = CFDIParser().parse_xml(_rep(PAGOS_10))
+
+    pago = p.pagos[0]
+    assert pago.version == "1.0"
+    assert pago.doctos_relacionados[0].impuestos == []
+    assert pago.doctos_relacionados[0].equivalencia_dr == D("1")

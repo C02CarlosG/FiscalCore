@@ -67,6 +67,10 @@ class DoctoRelacionado:
     imp_pagado: Decimal
     imp_saldo_ant: Decimal
     imp_saldo_insoluto: Decimal
+    moneda_dr: Optional[str] = None
+    equivalencia_dr: Decimal = Decimal("1")
+    # ImpuestosDR del REP 2.0 (vacío en Pagos 1.0).
+    impuestos: list[ImpuestoResumen] = field(default_factory=list)
 
 
 @dataclass
@@ -76,6 +80,7 @@ class PagoCFDI:
     moneda: str
     tipo_cambio: Decimal
     doctos_relacionados: list["DoctoRelacionado"] = field(default_factory=list)
+    version: str = "2.0"   # "1.0" cuando el complemento es Pagos 1.0
 
 
 @dataclass
@@ -579,12 +584,22 @@ class CFDIParser:
             for docto in pago_node.findall(f"{ns_pago}DoctoRelacionado"):
                 parcialidad_str = docto.get("NumParcialidad")
                 try:
+                    impuestos_dr = [
+                        self._leer_impuesto(n, "traslado", "DR")
+                        for n in docto.findall(f"{ns_pago}ImpuestosDR/{ns_pago}TrasladosDR/{ns_pago}TrasladoDR")
+                    ] + [
+                        self._leer_impuesto(n, "retencion", "DR")
+                        for n in docto.findall(f"{ns_pago}ImpuestosDR/{ns_pago}RetencionesDR/{ns_pago}RetencionDR")
+                    ]
                     doctos.append(DoctoRelacionado(
                         uuid=docto.get("IdDocumento", "").strip().upper(),
                         num_parcialidad=int(parcialidad_str) if parcialidad_str else None,
                         imp_pagado=Decimal(docto.get("ImpPagado", "0")),
                         imp_saldo_ant=Decimal(docto.get("ImpSaldoAnt", "0")),
                         imp_saldo_insoluto=Decimal(docto.get("ImpSaldoInsoluto", "0")),
+                        moneda_dr=docto.get("MonedaDR"),
+                        equivalencia_dr=self._decimal(docto, "EquivalenciaDR", "1"),
+                        impuestos=_agrupar_impuestos(impuestos_dr),
                     ))
                 except Exception:
                     continue
@@ -595,6 +610,7 @@ class CFDIParser:
                 moneda=moneda,
                 tipo_cambio=tipo_cambio,
                 doctos_relacionados=doctos,
+                version="2.0" if ns_pago == NS_PAGO20 else "1.0",
             ))
 
         return pagos
