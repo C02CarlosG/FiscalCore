@@ -24,6 +24,25 @@ from ..sat_fiel import FIELError, cargar_fiel, descargar_paquete, solicitar_desc
 _log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/sat", tags=["SAT FIEL"])
 
+# EstadoSolicitud del servicio de Descarga Masiva, por su valor numérico.
+_ESTADOS_SAT = {
+    1: "aceptada", 2: "en proceso", 3: "terminada",
+    4: "error", 5: "rechazada", 6: "vencida",
+}
+
+
+def _estado_sat(resultado: dict) -> str:
+    """Nombre en minúsculas del EstadoSolicitud que devolvió el SAT.
+
+    satcfdi lo entrega como entero (1=Aceptada … 6=Vencida); se aceptan también
+    el enum y el nombre en texto.
+    """
+    raw = resultado.get("estado")
+    raw = getattr(raw, "value", raw)
+    if isinstance(raw, int) or (isinstance(raw, str) and raw.strip().isdigit()):
+        return _ESTADOS_SAT.get(int(raw), "")
+    return str(raw or "").lower().strip()
+
 
 # ---------------------------------------------------------------------------
 # POST /api/v1/sat/solicitar
@@ -156,14 +175,7 @@ async def verificar_solicitud_endpoint(
     except FIELError as e:
         raise HTTPException(status_code=502, detail=str(e))
 
-    # satcfdi puede devolver EstadoSolicitud como enum Python o como string.
-    # Normalizamos a minúsculas para hacer el match robusto.
-    estado_raw = resultado.get("estado")
-    estado_str = (
-        str(estado_raw.value).lower().strip()
-        if hasattr(estado_raw, "value")
-        else str(estado_raw or "").lower().strip()
-    )
+    estado_str = _estado_sat(resultado)
     ESTADO_MAP = {
         "aceptada":   "en_proceso",
         "en proceso": "en_proceso",
@@ -503,14 +515,13 @@ def _avanzar_solicitud(creds, solicitud: dict) -> str:
         _log.warning("Error verificando %s: %s", sol_id, exc)
         return solicitud["estado"]
 
-    estado_raw = resultado.get("estado")
-    estado_str = (
-        str(estado_raw.value).lower().strip()
-        if hasattr(estado_raw, "value")
-        else str(estado_raw or "").lower().strip()
-    )
+    estado_str = _estado_sat(resultado)
     id_paquetes = resultado.get("id_paquetes", [])
     num_cfdi    = resultado.get("num_cfdi", 0)
+    _log.info(
+        "Solicitud %s: el SAT reporta '%s' (%s CFDI, %d paquetes)",
+        sol_id, estado_str, num_cfdi, len(id_paquetes),
+    )
 
     if estado_str in ("terminada", "terminado"):
         if solicitud["estado"] == "terminado":
@@ -549,7 +560,7 @@ def _avanzar_solicitud(creds, solicitud: dict) -> str:
     if estado_str in _ESTADOS_FALLO_SAT:
         db.execute(
             "UPDATE sat_solicitudes SET estado='fallo', error_msg=%s, updated_at=NOW() WHERE id=%s",
-            (f"SAT reportó estado: {estado_str}", sol_id),
+            (f"SAT reportó estado: {estado_str}. {resultado.get('mensaje') or ''}".strip(), sol_id),
         )
         return "fallo"
 

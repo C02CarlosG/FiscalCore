@@ -802,3 +802,61 @@ def test_avanzar_sin_fiel_guardada_da_422(monkeypatch):
 def test_avanzar_sin_auth_da_401():
     r = client.post(_AVANZAR_URL)
     assert r.status_code == 401
+
+
+def test_avanzar_reconoce_el_estado_numerico_que_devuelve_satcfdi(monkeypatch):
+    """satcfdi entrega EstadoSolicitud como entero: 3 es Terminada."""
+    _, importaciones = _preparar_avanzar(
+        monkeypatch, [_solicitud_pendiente("en_proceso")],
+        {"estado": 3, "id_paquetes": ["pkg1"], "num_cfdi": 10},
+    )
+
+    try:
+        r = client.post(_AVANZAR_URL)
+    finally:
+        _teardown()
+
+    assert r.json() == {"avanzadas": [{"id": "sol-1", "estado": "descargado"}]}
+    assert len(importaciones) == 1
+
+
+def test_avanzar_estado_numerico_rechazada_guarda_el_mensaje_del_sat(monkeypatch):
+    _auth(monkeypatch)
+    monkeypatch.setattr(db, "query_all", lambda *a, **k: [_solicitud_pendiente()])
+    monkeypatch.setattr(fiel_store, "obtener_signer", lambda db_, eid: _FakeSigner())
+    monkeypatch.setattr(sat, "verificar_solicitud", lambda *a, **k: {
+        "estado": 5, "id_paquetes": [], "num_cfdi": 0, "mensaje": "No se encontró la información",
+    })
+    params_vistos = []
+    monkeypatch.setattr(db, "execute", lambda sql, params=(), returning=False: params_vistos.append(params))
+
+    try:
+        r = client.post(_AVANZAR_URL)
+    finally:
+        _teardown()
+
+    assert r.json() == {"avanzadas": [{"id": "sol-1", "estado": "fallo"}]}
+    assert params_vistos[0][0] == "SAT reportó estado: rechazada. No se encontró la información"
+
+
+def test_verificar_solicitud_estado_numerico_terminada(monkeypatch):
+    _auth(monkeypatch)
+    monkeypatch.setattr(db, "query_one", lambda *a, **k: {
+        "id": "sol-1", "empresa_id": EMPRESA, "id_solicitud_sat": "id-sat-1",
+    })
+    monkeypatch.setattr(db, "execute", lambda *a, **k: None)
+    monkeypatch.setattr(sat, "cargar_fiel", lambda *a, **k: _FakeSigner())
+    monkeypatch.setattr(sat, "verificar_solicitud", lambda *a, **k: {
+        "estado": 3, "id_paquetes": ["pkg1"], "num_cfdi": 10, "mensaje": "OK",
+    })
+
+    try:
+        r = client.post(
+            "/api/v1/sat/solicitudes/sol-1/verificar",
+            data={"password": "x"},
+            files={"cer_file": _CER, "key_file": _KEY},
+        )
+    finally:
+        _teardown()
+
+    assert r.json()["estado"] == "terminado"
