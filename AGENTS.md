@@ -5,7 +5,7 @@
 This repository contains the FastAPI backend for FiscalCore (`backend/`) and its Next.js frontend (`frontend/`: Next.js + TS + Tailwind + shadcn/ui + TanStack Query), the rewrite of the original React/Vite frontend, already merged into `main`; see `CLAUDE.md` and the spec at `docs/superpowers/specs/2026-07-10-reescritura-frontend-design.md`.
 
 - `backend/` contains the Python API. `backend/main_api.py` wires the FastAPI app, while endpoint modules live in `backend/routers/`.
-- `database/migrations/` contains ordered SQL migrations (`001_...` through `027_...`). Keep new migrations numeric, descriptive, and fully idempotent (`IF NOT EXISTS` / `IF EXISTS`), for example `028_nueva_tabla.sql`. Use `.opencode/agent/migration-validator.md` (or the `migration-validator` subagent) before committing new SQL.
+- `database/migrations/` contains ordered SQL migrations (`001_...` through `028_...`). Keep new migrations numeric, descriptive, and fully idempotent (`IF NOT EXISTS` / `IF EXISTS`), for example `028_nueva_tabla.sql`. Use `.opencode/agent/migration-validator.md` (or the `migration-validator` subagent) before committing new SQL.
 - `docs/openapi.yaml` stores API documentation. Deployment targets Railway only, via `Procfile` and `nixpacks.toml` at the root (alongside `Dockerfile` and `docker-compose.yml` for local/container use).
 
 ## Build, Test, and Development Commands

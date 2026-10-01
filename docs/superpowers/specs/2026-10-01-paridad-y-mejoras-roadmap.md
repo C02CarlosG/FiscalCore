@@ -259,7 +259,7 @@ Criterios que los cálculos deben respetar con lo ya guardado:
 | Fase | Estado | Spec | Plan |
 |---|---|---|---|
 | F0 | En revisión (PR abierto; falta cargar CFDI reales) | (no requiere) | (lista de verificación abajo) |
-| F1 | Plan escrito | este documento, sección "Fases" y "Reglas comunes" | `docs/superpowers/plans/2026-10-01-fase1-detalle-fiscal-cfdi.md` |
+| F1 | Implementada, en revisión (PR abierto). Falta el cierre con datos reales: reprocesar los CFDI de COPLASUR y cuadrar el IVA por tasa contra el encabezado | este documento, sección "Fases" y "Reglas comunes" | `docs/superpowers/plans/2026-10-01-fase1-detalle-fiscal-cfdi.md` |
 | F2–F8, M1–M7 | Pendiente | — | — |
 
 ### Lista de verificación de F0

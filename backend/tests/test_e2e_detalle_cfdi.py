@@ -245,3 +245,133 @@ def test_reproceso_marca_el_xml_ilegible_y_no_lo_reintenta(entorno):
     assert primero["pendientes"] == 0
     assert segundo == {"procesados": 0, "errores": [], "pendientes": 0}
     assert db.query_one("SELECT detalle_version FROM cfdi WHERE uuid = %s", (UUID_FACTURA,))["detalle_version"] == -1
+
+
+# ─── Fallas parciales (revisión final de la rama) ──────────────────────────────
+
+def _version(db, uuid):
+    return db.query_one("SELECT detalle_version FROM cfdi WHERE uuid = %s", (uuid,))["detalle_version"]
+
+
+def _cobrado(db):
+    return db.query_one("SELECT monto_cobrado FROM cfdi WHERE uuid = %s", (UUID_FACTURA,))["monto_cobrado"]
+
+
+def _num_conceptos(db):
+    return db.query_one(
+        "SELECT COUNT(*) AS n FROM cfdi_conceptos k JOIN cfdi c ON c.id = k.cfdi_id WHERE c.uuid = %s",
+        (UUID_FACTURA,))["n"]
+
+
+def _fallar(*_a, **_k):
+    raise RuntimeError("fallo simulado")
+
+
+def test_fallo_al_guardar_el_detalle_no_impide_aplicar_el_pago(entorno, monkeypatch):
+    """El detalle es accesorio: si falla, la subida y lo cobrado siguen como antes
+    y el CFDI queda pendiente para el reproceso."""
+    db, client, headers, empresa_id = entorno
+    from backend import cfdi_store, reproceso
+
+    with monkeypatch.context() as m:
+        m.setattr(cfdi_store, "guardar_detalle", _fallar)
+        _subir(client, headers, empresa_id, "rep.xml", _xml_rep())          # el REP llega primero
+        _subir(client, headers, empresa_id, "factura.xml", _xml_factura())
+
+    assert _cobrado(db) == D("6150.00")
+    assert (_version(db, UUID_FACTURA), _version(db, UUID_REP)) == (0, 0)
+
+    assert reproceso.reprocesar_detalle(empresa_id=empresa_id) == {"procesados": 2, "errores": [], "pendientes": 0}
+    assert _impuestos_cfdi(db) == IMPUESTOS_FACTURA
+
+
+def test_fallo_en_el_complemento_de_pago_deja_el_rep_pendiente(entorno, monkeypatch):
+    """Un REP cuyo complemento no terminó de guardarse no puede quedar marcado
+    como completo: el reproceso debe poder terminarlo."""
+    db, client, headers, empresa_id = entorno
+    from backend import cfdi_store, reproceso
+
+    _subir(client, headers, empresa_id, "factura.xml", _xml_factura())
+    with monkeypatch.context() as m:
+        m.setattr(cfdi_store, "recalcular_cobrado", _fallar)   # último paso del complemento
+        r = client.post(
+            f"/api/v1/empresas/{empresa_id}/cfdi/upload", headers=headers,
+            data={"periodo": PERIODO}, files=[("archivos", ("rep.xml", _xml_rep(), "text/xml"))],
+        )
+    assert r.status_code == 200 and r.json()["registros_procesados"] == 0, r.text
+    assert _version(db, UUID_REP) == 0
+
+    resultado = reproceso.reprocesar_detalle(empresa_id=empresa_id)
+
+    assert (resultado["procesados"], resultado["errores"], resultado["pendientes"]) == (1, [], 0)
+    assert _cobrado(db) == D("6150.00")
+    assert _version(db, UUID_REP) == 1
+
+
+def test_fallo_a_medias_no_borra_el_detalle_ya_guardado(entorno):
+    db, client, headers, empresa_id = entorno
+    from backend import cfdi_store
+    from backend.cfdi_parser import CFDIParser
+
+    _subir(client, headers, empresa_id, "factura.xml", _xml_factura())
+    parsed = CFDIParser().parse_xml(_xml_factura())
+    parsed.conceptos[1].linea = None   # viola NOT NULL: la inserción de conceptos falla
+
+    with pytest.raises(Exception):
+        cfdi_store.guardar_detalle(empresa_id, parsed)
+
+    assert _num_conceptos(db) == 3
+    assert _impuestos_cfdi(db) == IMPUESTOS_FACTURA
+    assert _version(db, UUID_FACTURA) == 1
+
+
+def test_resubir_el_mismo_uuid_con_otro_contenido_no_cambia_el_detalle(entorno):
+    """El registro (encabezado y xml_raw) es el de la primera subida; el detalle
+    no puede salir de un XML distinto."""
+    db, client, headers, empresa_id = entorno
+
+    _subir(client, headers, empresa_id, "factura.xml", _xml_factura())
+    _subir(client, headers, empresa_id, "factura.xml", _xml_factura().replace(b'Descripcion="Equipo"', b'Descripcion="Otro"'))
+
+    descripcion = db.query_one(
+        """SELECT k.descripcion FROM cfdi_conceptos k JOIN cfdi c ON c.id = k.cfdi_id
+           WHERE c.uuid = %s AND k.linea = 1""", (UUID_FACTURA,))["descripcion"]
+    assert descripcion == "Equipo"
+
+
+def test_reproceso_no_descarta_un_cfdi_por_un_error_transitorio_de_base(entorno, monkeypatch):
+    db, client, headers, empresa_id = entorno
+    import psycopg2
+
+    from backend import cfdi_store, reproceso
+
+    _subir(client, headers, empresa_id, "factura.xml", _xml_factura())
+    db.execute("UPDATE cfdi SET detalle_version = 0 WHERE uuid = %s", (UUID_FACTURA,))
+
+    def _sin_conexion(*_a, **_k):
+        raise psycopg2.OperationalError("deadlock detected")
+
+    with monkeypatch.context() as m:
+        m.setattr(cfdi_store, "guardar_detalle", _sin_conexion)
+        resultado = reproceso.reprocesar_detalle(empresa_id=empresa_id)
+
+    assert resultado["procesados"] == 0
+    assert [e["uuid"] for e in resultado["errores"]] == [UUID_FACTURA]
+    assert resultado["pendientes"] == 1
+    assert _version(db, UUID_FACTURA) == 0
+
+
+def test_reproceso_sigue_con_el_lote_despues_de_un_xml_ilegible(entorno):
+    db, client, headers, empresa_id = entorno
+    from backend import reproceso
+
+    _subir(client, headers, empresa_id, "factura.xml", _xml_factura())
+    _subir(client, headers, empresa_id, "rep.xml", _xml_rep())
+    db.execute("UPDATE cfdi SET detalle_version = 0 WHERE empresa_id = %s", (empresa_id,))
+    db.execute("UPDATE cfdi SET xml_raw = '<roto' WHERE uuid = %s", (UUID_FACTURA,))
+
+    resultado = reproceso.reprocesar_detalle(empresa_id=empresa_id)
+
+    assert resultado["procesados"] == 1
+    assert [e["uuid"] for e in resultado["errores"]] == [UUID_FACTURA]
+    assert (_version(db, UUID_FACTURA), _version(db, UUID_REP)) == (-1, 1)
