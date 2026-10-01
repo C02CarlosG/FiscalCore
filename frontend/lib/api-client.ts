@@ -17,7 +17,9 @@ function apiBaseUrl(): string {
   if (!url) {
     throw new Error("NEXT_PUBLIC_API_URL no está configurada");
   }
-  return url;
+  // Sin diagonal final: "/" queda en "" y las rutas salen relativas al mismo
+  // origen (despliegue en Vercel, donde frontend y API comparten dominio).
+  return url.replace(/\/+$/, "");
 }
 
 function parseFieldErrors(detail: unknown): Record<string, string> | undefined {

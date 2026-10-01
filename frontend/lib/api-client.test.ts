@@ -56,6 +56,16 @@ describe("apiFetch", () => {
     ).toBeUndefined();
   });
 
+  it("calls same-origin paths when NEXT_PUBLIC_API_URL is '/'", async () => {
+    process.env.NEXT_PUBLIC_API_URL = "/";
+    const fetchMock = vi.fn().mockResolvedValue(mockResponse(200, { ok: true }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await apiFetch("/api/v1/empresas");
+
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/v1/empresas");
+  });
+
   it("throws ApiError with the backend detail on a non-2xx response", async () => {
     const fetchMock = vi
       .fn()
