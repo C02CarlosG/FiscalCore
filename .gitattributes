@@ -1,0 +1,4 @@
+# Finales de línea LF en el código (varios archivos venían en CRLF de Windows).
+*.py  text eol=lf
+*.sql text eol=lf
+*.sh  text eol=lf
