@@ -7,6 +7,7 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     setupFiles: ["./vitest.setup.ts"],
+    exclude: ["e2e/**", "**/node_modules/**", "**/dist/**"],
     passWithNoTests: true,
     // Node 22+ ships an experimental global `localStorage`/`sessionStorage`
     // accessor that returns undefined unless --localstorage-file is passed.

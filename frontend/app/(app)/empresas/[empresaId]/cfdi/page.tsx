@@ -5,8 +5,9 @@ import { useState } from "react";
 import { useVisorSat } from "@/hooks/useCfdi";
 import { VisorSatPanel } from "@/components/cfdi/VisorSatPanel";
 import { ErrorState } from "@/components/shared/ErrorState";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { PageHeader } from "@/components/shared/PageHeader";
+import { PeriodFilter } from "@/components/shared/PeriodFilter";
+import { LoadingState } from "@/components/shared/LoadingState";
 
 export default function VisorSatPage() {
   const params = useParams<{ empresaId: string }>();
@@ -15,25 +16,19 @@ export default function VisorSatPage() {
   const visor = useVisorSat(params.empresaId, periodo);
 
   return (
-    <main className="mx-auto max-w-6xl space-y-6">
-      <h1 className="text-2xl font-semibold">Visor SAT</h1>
-
-      <div className="space-y-2">
-        <Label htmlFor="periodo">Periodo (YYYY-MM)</Label>
-        <Input
-          id="periodo"
-          placeholder="2026-07"
-          value={periodo}
-          onChange={(e) => setPeriodo(e.target.value)}
-          className="w-40"
-        />
-      </div>
+    <main className="space-y-7">
+      <PageHeader
+        eyebrow="Administración CFDI"
+        title="Visor SAT"
+        description="Comprobantes emitidos y recibidos, agrupados por estado y dirección."
+      />
+      <PeriodFilter id="visor-periodo" value={periodo} onChange={setPeriodo} />
 
       {!periodo && (
-        <p className="text-sm text-muted-foreground">Ingresa un periodo para ver los CFDI.</p>
+        <p className="text-sm text-muted-foreground">Selecciona un periodo para consultar los CFDI.</p>
       )}
 
-      {periodo && visor.isLoading && <p className="text-sm text-muted-foreground">Cargando CFDI...</p>}
+      {periodo && visor.isLoading && <LoadingState label="Cargando CFDI" />}
 
       {periodo && visor.isError && (
         <ErrorState message="No se pudieron cargar los CFDI." onRetry={() => visor.refetch()} />

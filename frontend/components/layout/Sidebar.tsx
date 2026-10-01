@@ -5,6 +5,7 @@ import { useRouter, usePathname } from "next/navigation";
 import { useState } from "react";
 import {
   ChevronDown,
+  Building2,
   FileSpreadsheet,
   FileText,
   GitBranch,
@@ -12,7 +13,7 @@ import {
   LogOut,
   Upload,
 } from "lucide-react";
-import { Sheet, SheetContent } from "@/components/ui/sheet";
+import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { EmpresaSwitcher } from "@/components/layout/EmpresaSwitcher";
 import { ThemeToggle } from "@/components/shared/ThemeToggle";
 import { useEmpresaContext } from "@/components/providers/EmpresaProvider";
@@ -56,7 +57,7 @@ function NavLink({
 }) {
   if (disabled) {
     return (
-      <span className="flex cursor-not-allowed items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-medium text-muted-foreground/40">
+      <span className="flex cursor-not-allowed items-center gap-2.5 rounded-md px-2.5 py-2 text-sm font-medium text-muted-foreground/40">
         <Icon className="h-4 w-4" />
         {label}
       </span>
@@ -66,10 +67,10 @@ function NavLink({
   return (
     <Link
       href={href}
-      className={`flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-medium transition-colors ${
+      className={`flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm transition-colors ${
         active
-          ? "bg-accent text-accent-foreground"
-          : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+          ? "bg-accent font-semibold text-accent-foreground shadow-sm"
+          : "font-medium text-muted-foreground hover:bg-accent/60 hover:text-foreground"
       }`}
     >
       <Icon className="h-4 w-4" />
@@ -156,9 +157,9 @@ function SidebarBody() {
     .toUpperCase();
 
   return (
-    <div className="flex h-full flex-col gap-5 p-3.5">
-      <div className="flex items-center gap-2 px-1.5 py-1 font-display text-[17px] font-bold">
-        <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+      <div className="flex h-full flex-col gap-6 p-4">
+      <div className="flex items-center gap-2.5 px-1 py-1 font-display text-[17px] font-bold">
+        <span className="flex h-8 w-8 items-center justify-center rounded-md bg-primary text-primary-foreground shadow-sm">
           <FileText className="h-4 w-4" />
         </span>
         FiscalCore
@@ -166,7 +167,26 @@ function SidebarBody() {
 
       <EmpresaSwitcher />
 
-      <nav className="flex flex-1 flex-col gap-0.5">
+      <nav aria-label="Navegación principal" className="flex flex-1 flex-col gap-1">
+        <span className="px-2.5 pb-1 text-[10px] font-bold uppercase text-muted-foreground">
+          Workspace
+        </span>
+        <Link
+          href="/empresas"
+          aria-current={pathname === "/empresas" ? "page" : undefined}
+          className={`flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm transition-colors ${
+            pathname === "/empresas"
+              ? "bg-accent font-semibold text-accent-foreground shadow-sm"
+              : "font-medium text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+          }`}
+        >
+          <Building2 className="h-4 w-4" />
+          Empresas
+        </Link>
+
+        <span className="px-2.5 pb-1 pt-4 text-[10px] font-bold uppercase text-muted-foreground">
+          Fiscal
+        </span>
         <NavLink
           href={`/empresas/${empresaId}/${NAV_ITEMS[0].slug}`}
           disabled={!empresaId}
@@ -189,7 +209,7 @@ function SidebarBody() {
         ))}
       </nav>
 
-      <div className="flex flex-col gap-2.5 border-t border-border pt-3.5">
+      <div className="flex flex-col gap-3 border-t border-border pt-4">
         <ThemeToggle />
         <div className="flex items-center gap-2.5 px-1">
           <span className="flex h-8 w-8 flex-none items-center justify-center rounded-full bg-gradient-to-br from-primary to-primary/60 text-xs font-bold text-primary-foreground">
@@ -225,11 +245,12 @@ interface SidebarProps {
 export function Sidebar({ mobileOpen, onMobileOpenChange }: SidebarProps) {
   return (
     <>
-      <aside className="hidden w-64 flex-none border-r border-border bg-card lg:flex">
+      <aside className="sticky top-0 hidden h-screen w-[17rem] flex-none border-r border-border bg-card lg:flex">
         <SidebarBody />
       </aside>
       <Sheet open={mobileOpen} onOpenChange={onMobileOpenChange}>
         <SheetContent side="left" className="w-64 p-0">
+          <SheetTitle className="sr-only">Menú principal</SheetTitle>
           <SidebarBody />
         </SheetContent>
       </Sheet>

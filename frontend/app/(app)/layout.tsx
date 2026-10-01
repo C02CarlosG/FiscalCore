@@ -16,13 +16,13 @@ export default function ProtectedLayout({
   return (
     <AuthGuard>
       <EmpresaProvider>
-        <div className="flex h-screen overflow-hidden bg-background">
+        <div className="flex min-h-screen bg-background">
           <Sidebar mobileOpen={mobileOpen} onMobileOpenChange={setMobileOpen} />
-          <div className="flex min-w-0 flex-1 flex-col">
+          <div className="flex min-h-screen min-w-0 flex-1 flex-col">
             <Header onMenuClick={() => setMobileOpen(true)} />
-            <main className="flex-1 overflow-y-auto p-4 lg:p-6">
-              {children}
-            </main>
+            <div className="flex-1 px-4 pb-8 pt-6 sm:px-6 lg:px-8 lg:pt-8">
+              <div className="mx-auto w-full max-w-[1480px]">{children}</div>
+            </div>
           </div>
         </div>
       </EmpresaProvider>

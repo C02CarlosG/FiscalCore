@@ -1,10 +1,12 @@
 "use client";
 
 import { FormEvent, useState } from "react";
+import { AlertCircle, Building2, FileUp, LoaderCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useSubirBanco } from "@/hooks/useIngesta";
 import { ApiError } from "@/lib/api-client";
 import { IngestaResultado } from "@/components/ingesta/IngestaResultado";
@@ -72,17 +74,25 @@ export function BancoUploadForm({ empresaId }: { empresaId: string }) {
   }
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Subir estado de cuenta</CardTitle>
+    <Card className="h-full overflow-hidden">
+      <CardHeader className="border-b bg-muted/30 px-5 py-5 sm:px-6">
+        <div className="flex items-start gap-3">
+          <span className="flex h-10 w-10 flex-none items-center justify-center rounded-md bg-accent text-accent-foreground">
+            <Building2 className="h-5 w-5" />
+          </span>
+          <div className="space-y-1">
+            <CardTitle className="font-display text-base">Subir estado de cuenta</CardTitle>
+            <CardDescription>Archivo XLSX o CSV del banco</CardDescription>
+          </div>
+        </div>
       </CardHeader>
-      <CardContent>
-        <form onSubmit={handleSubmit} className="space-y-4">
+      <CardContent className="p-5 sm:p-6">
+        <form onSubmit={handleSubmit} className="space-y-5">
           <div className="space-y-2">
             <Label htmlFor="banco-periodo">Periodo (YYYY-MM)</Label>
             <Input
               id="banco-periodo"
-              placeholder="2026-07"
+              type="month"
               value={periodo}
               onChange={(e) => setPeriodo(e.target.value)}
             />
@@ -90,19 +100,21 @@ export function BancoUploadForm({ empresaId }: { empresaId: string }) {
 
           <div className="space-y-2">
             <Label htmlFor="banco-select">Banco</Label>
-            <select
-              id="banco-select"
-              className="w-full rounded-md border border-input bg-background p-2 text-sm"
+            <Select
               value={bancoSeleccionado}
-              onChange={(e) => setBancoSeleccionado(e.target.value)}
+              onValueChange={setBancoSeleccionado}
             >
-              <option value="">Selecciona un banco</option>
-              {BANCOS_COMUNES.map((banco) => (
-                <option key={banco.value} value={banco.value}>
-                  {banco.label}
-                </option>
-              ))}
-            </select>
+              <SelectTrigger id="banco-select" aria-label="Banco">
+                <SelectValue placeholder="Selecciona un banco" />
+              </SelectTrigger>
+              <SelectContent>
+                {BANCOS_COMUNES.map((banco) => (
+                  <SelectItem key={banco.value} value={banco.value}>
+                    {banco.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
           {esOtro && (
@@ -122,17 +134,21 @@ export function BancoUploadForm({ empresaId }: { empresaId: string }) {
               id="banco-archivo"
               type="file"
               accept=".xlsx,.csv"
+              className="h-auto min-h-11 cursor-pointer py-2 file:mr-3 file:rounded file:border-0 file:bg-primary/10 file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-primary"
               onChange={(e) => setArchivo(e.target.files?.[0] ?? null)}
             />
+            <p className="text-xs text-muted-foreground">Formatos aceptados: .xlsx y .csv.</p>
           </div>
 
           {formError && (
-            <p role="alert" className="text-sm text-status-error">
+            <p role="alert" className="flex items-center gap-2 text-sm font-medium text-status-error">
+              <AlertCircle className="h-4 w-4 flex-none" />
               {formError}
             </p>
           )}
 
-          <Button type="submit" disabled={subirBanco.isPending}>
+          <Button type="submit" disabled={subirBanco.isPending} className="w-full sm:w-auto">
+            {subirBanco.isPending ? <LoaderCircle className="animate-spin" /> : <FileUp />}
             {subirBanco.isPending ? "Subiendo..." : "Subir estado de cuenta"}
           </Button>
 

@@ -16,6 +16,11 @@ Object.defineProperty(window, "matchMedia", {
   }),
 });
 
+HTMLElement.prototype.hasPointerCapture ??= () => false;
+HTMLElement.prototype.setPointerCapture ??= () => {};
+HTMLElement.prototype.releasePointerCapture ??= () => {};
+HTMLElement.prototype.scrollIntoView ??= () => {};
+
 afterEach(() => {
   cleanup();
 });

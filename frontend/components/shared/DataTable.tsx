@@ -2,6 +2,8 @@
 
 import { useMemo, useState } from "react";
 import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, Search } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   Table,
   TableBody,
@@ -104,29 +106,33 @@ export function DataTable<T>({
     });
   }
 
-  if (data.length === 0) {
-    return <p className="text-sm text-muted-foreground">{emptyMessage}</p>;
-  }
-
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
       {searchPlaceholder && columns.some((c) => c.searchable) && (
-        <div className="relative max-w-xs">
+        <div className="relative max-w-sm">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-          <input
+          <Input
             type="text"
+            aria-label={searchPlaceholder}
             placeholder={searchPlaceholder}
             value={search}
             onChange={(e) => {
               setSearch(e.target.value);
               setPage(0);
             }}
-            className="w-full rounded-lg border border-border bg-background py-1.5 pl-8 pr-3 text-sm outline-none focus:ring-1 focus:ring-ring"
+            className="h-9 bg-background pl-8"
           />
         </div>
       )}
 
-      <div className="overflow-x-auto rounded-xl border border-border">
+      {data.length === 0 ? (
+        <div className="flex min-h-40 flex-col items-center justify-center rounded-md border border-dashed bg-card px-6 py-10 text-center">
+          <Search className="mb-3 h-5 w-5 text-muted-foreground" />
+          <p className="text-sm font-medium">{emptyMessage}</p>
+          <p className="mt-1 text-xs text-muted-foreground">Los resultados aparecerán aquí al cargar información.</p>
+        </div>
+      ) : (
+      <div className="overflow-x-auto rounded-md border bg-card">
         <Table>
           <TableHeader>
             <TableRow>
@@ -144,20 +150,32 @@ export function DataTable<T>({
               {columns.map((column) => (
                 <TableHead
                   key={column.key}
-                  onClick={column.sortValue ? () => toggleSort(column.key) : undefined}
-                  className={`${column.sortValue ? "cursor-pointer select-none" : ""} ${
+                  aria-sort={
+                    sort?.key === column.key
+                      ? sort.dir === "asc" ? "ascending" : "descending"
+                      : column.sortValue ? "none" : undefined
+                  }
+                  className={`h-11 bg-muted/70 text-[11px] font-bold uppercase ${
                     column.align === "right" ? "text-right" : ""
                   }`}
                 >
-                  <span className="inline-flex items-center gap-1">
-                    {column.header}
-                    {sort?.key === column.key &&
-                      (sort.dir === "asc" ? (
-                        <ArrowUp className="h-3 w-3" />
-                      ) : (
-                        <ArrowDown className="h-3 w-3" />
-                      ))}
-                  </span>
+                  {column.sortValue ? (
+                    <button
+                      type="button"
+                      onClick={() => toggleSort(column.key)}
+                      className={`inline-flex items-center gap-1.5 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${column.align === "right" ? "ml-auto" : ""}`}
+                    >
+                      {column.header}
+                      {sort?.key === column.key &&
+                        (sort.dir === "asc" ? (
+                          <ArrowUp className="h-3 w-3" />
+                        ) : (
+                          <ArrowDown className="h-3 w-3" />
+                        ))}
+                    </button>
+                  ) : (
+                    column.header
+                  )}
                 </TableHead>
               ))}
             </TableRow>
@@ -189,11 +207,19 @@ export function DataTable<T>({
                 </TableRow>
               );
             })}
+            {sorted.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={columns.length + Number(selectable)} className="h-24 text-center text-sm text-muted-foreground">
+                  No hay coincidencias con la búsqueda.
+                </TableCell>
+              </TableRow>
+            )}
           </TableBody>
         </Table>
       </div>
+      )}
 
-      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+      {data.length > 0 && <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-muted-foreground">
         <span>
           {sorted.length === 0
             ? "0 resultados"
@@ -201,26 +227,31 @@ export function DataTable<T>({
           {selectable && selected.size > 0 && ` · ${selected.size} seleccionada${selected.size === 1 ? "" : "s"}`}
         </span>
         <div className="flex items-center gap-1">
-          <button
+          <Button
             type="button"
             onClick={() => setPage((p) => Math.max(0, p - 1))}
             disabled={pageSafe === 0}
             aria-label="Anterior"
-            className="rounded-md border border-border p-1 disabled:opacity-40"
+            variant="outline"
+            size="icon"
+            className="h-8 w-8"
           >
-            <ChevronLeft className="h-3.5 w-3.5" />
-          </button>
-          <button
+            <ChevronLeft className="h-4 w-4" />
+          </Button>
+          <span className="min-w-14 text-center font-medium text-foreground">{pageSafe + 1} / {totalPages}</span>
+          <Button
             type="button"
             onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
             disabled={pageSafe >= totalPages - 1}
             aria-label="Siguiente"
-            className="rounded-md border border-border p-1 disabled:opacity-40"
+            variant="outline"
+            size="icon"
+            className="h-8 w-8"
           >
-            <ChevronRight className="h-3.5 w-3.5" />
-          </button>
+            <ChevronRight className="h-4 w-4" />
+          </Button>
         </div>
-      </div>
+      </div>}
     </div>
   );
 }
