@@ -114,6 +114,27 @@ describe("BancoUploadForm", () => {
     expect((body.get("archivo") as File).name).toBe("estado.csv");
   });
 
+  it("does not report an error after a successful upload and clears the periodo", async () => {
+    vi.mocked(apiFetch).mockResolvedValue({
+      mensaje: "5 movimientos procesados",
+      registros_procesados: 5,
+      errores: [],
+      periodo: "2026-07",
+    });
+    const user = userEvent.setup();
+    renderForm();
+
+    await seleccionarBanco(user, "BBVA");
+    await user.type(screen.getByLabelText("Periodo (YYYY-MM)"), "2026-07");
+    const input = screen.getByLabelText("Estado de cuenta (.xlsx o .csv)");
+    await user.upload(input, new File(["a,b"], "estado.csv", { type: "text/csv" }));
+    await user.click(screen.getByRole("button", { name: /subir estado de cuenta/i }));
+
+    expect(await screen.findByText("5 movimientos procesados")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Periodo (YYYY-MM)")).toHaveValue("");
+  });
+
   it("shows the backend error message on failure", async () => {
     vi.mocked(apiFetch).mockRejectedValue(
       new ApiError(400, "No se pudo interpretar el archivo"),
