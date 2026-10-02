@@ -23,7 +23,7 @@
     --border: 245 30% 92%;
     --input: 245 30% 88%;
     --ring: 243 75% 59%;
-    --radius: 0.625rem;
+    --radius: 0.5rem;
 
     --severity-critico: #DC2626;
     --severity-critico-soft: #FDECEC;
@@ -80,10 +80,27 @@
 }
 
 @layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+
   * {
     @apply border-border;
   }
+
   body {
     @apply bg-background text-foreground;
+    font-feature-settings: "ss01" on;
+  }
+
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+  }
+
+  ::selection {
+    @apply bg-primary/15 text-foreground;
   }
 }

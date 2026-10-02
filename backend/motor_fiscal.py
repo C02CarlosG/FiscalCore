@@ -443,7 +443,7 @@ class MotorConciliacion:
         uuids_con_complemento: set[str] = set()
         for r in resultados:
             if r.tipo_match in _TIPOS_REP:
-                uuids_con_complemento.update(r.cfdis_relacionados)
+                uuids_con_complemento.update(u.upper() for u in r.cfdis_relacionados)
 
         todos_usados = (
             usados_cfdi | usados_cfdi_e
@@ -452,7 +452,7 @@ class MotorConciliacion:
         )
         for cfdi in cfdis:
             if (cfdi.id not in todos_usados
-                    and cfdi.uuid not in uuids_con_complemento
+                    and cfdi.uuid.upper() not in uuids_con_complemento
                     and cfdi.estado == "vigente"
                     and cfdi.tipo not in ("P",)):
 

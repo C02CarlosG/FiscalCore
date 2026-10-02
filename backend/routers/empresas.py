@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import json
 import logging
-import uuid as _uuid
-from pathlib import Path
 from typing import Optional
 
 import psycopg2
@@ -21,13 +19,17 @@ _log = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Empresas"])
 
-UPLOADS_DIR = Path("uploads/constancias")
-UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
-
 
 @router.post("/api/v1/constancia/parsear", tags=["Constancia"])
-async def parsear_constancia_pdf(archivo: UploadFile = File(...)):
-    """Extrae datos fiscales de la Constancia de Situación Fiscal (PDF SAT)."""
+async def parsear_constancia_pdf(
+    archivo: UploadFile = File(...),
+    current_user: dict = Depends(get_current_user),
+):
+    """Extrae datos fiscales de la Constancia de Situación Fiscal (PDF SAT).
+
+    El PDF se procesa en memoria y no se conserva: nada en la app lo consulta
+    después, y guardarlo dejaba datos fiscales de terceros en disco sin dueño.
+    """
     contenido = await archivo.read()
     validar_upload(archivo, contenido, _CONSTANCIA_EXTENSIONES, _CONSTANCIA_CONTENT_TYPES)
 
@@ -38,12 +40,6 @@ async def parsear_constancia_pdf(archivo: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=422, detail=f"No se pudo leer el PDF: {str(e)}")
-
-    # Guardar PDF
-    nombre_archivo = f"{_uuid.uuid4()}.pdf"
-    ruta = UPLOADS_DIR / nombre_archivo
-    ruta.write_bytes(contenido)
-    datos["constancia_path"] = nombre_archivo
 
     return datos
 
@@ -68,9 +64,14 @@ async def agregar_empresa(
     data: AgregarEmpresaRequest,
     current_user: dict = Depends(get_current_user),
 ):
-    """Crea (o encuentra por RFC) una empresa y la vincula al contador autenticado."""
-    # Si ya existe empresa con ese RFC, reutilizarla
+    """Crea una empresa y la vincula al contador autenticado.
+
+    Si el RFC ya está registrado solo responde con éxito cuando el usuario ya
+    estaba vinculado (idempotente). Conocer un RFC no da derecho a ver los datos
+    de esa empresa: vincularse a una empresa existente se rechaza con 409.
+    """
     empresa = db.query_one("SELECT * FROM empresas WHERE rfc = %s", (data.rfc,))
+    creada = False
 
     if not empresa:
         try:
@@ -92,15 +93,26 @@ async def agregar_empresa(
                 ),
                 returning=True,
             )
+            creada = True
         except psycopg2.errors.UniqueViolation:
+            # Otra petición la creó entre el SELECT y el INSERT: ya no es nuestra.
             empresa = db.query_one("SELECT * FROM empresas WHERE rfc = %s", (data.rfc,))
 
-    # Vincular al usuario (idempotente)
     ya_vinculada = db.query_one(
         "SELECT 1 FROM usuario_empresas WHERE usuario_id = %s AND empresa_id = %s",
         (current_user["user_id"], str(empresa["id"])),
     )
     if not ya_vinculada:
+        if not creada:
+            _log.warning(
+                "Intento de vincular empresa existente: usuario=%s rfc=%s",
+                current_user["user_id"], data.rfc,
+            )
+            raise HTTPException(
+                status_code=409,
+                detail="Ya existe una empresa registrada con ese RFC. "
+                       "Solicita acceso a quien la administra.",
+            )
         db.execute(
             "INSERT INTO usuario_empresas (usuario_id, empresa_id) VALUES (%s, %s)",
             (current_user["user_id"], str(empresa["id"])),

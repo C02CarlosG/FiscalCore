@@ -182,3 +182,36 @@ def test_parse_xlsx_basico():
     mov = resultado.movimientos[0]
     assert mov.tipo == "cargo"
     assert mov.monto == Decimal("-300.00")
+
+
+def test_parse_xlsx_con_celdas_de_fecha_reales():
+    """Un estado de cuenta exportado por el banco trae la fecha como celda de
+    fecha (datetime), no como texto. Antes str() la dejaba con hora
+    ('2026-01-15 00:00:00'), ningún formato la reconocía y la fila se
+    descartaba sin error: el archivo "se procesaba" con 0 movimientos."""
+    from datetime import datetime
+    from io import BytesIO
+
+    import openpyxl
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(["Fecha", "Concepto", "Deposito", "Cargo", "Saldo"])
+    ws.append([datetime(2026, 1, 15), "SPEI RECIBIDO", 1500.50, None, 10000])
+    ws.append([date(2026, 1, 16), "PAGO PROVEEDOR", None, 300, 9700])
+    buf = BytesIO()
+    wb.save(buf)
+
+    r = BancoParser().parse_xlsx(buf.getvalue(), banco="test")
+
+    assert r.filas_ignoradas == 0
+    assert [(m.fecha, m.monto, m.tipo) for m in r.movimientos] == [
+        (date(2026, 1, 15), Decimal("1500.5"), "deposito"),
+        (date(2026, 1, 16), Decimal("-300"), "cargo"),
+    ]
+
+
+def test_parse_fecha_con_hora_pegada():
+    assert BancoParser._parse_fecha("2026-01-15 00:00:00") == date(2026, 1, 15)
+    assert BancoParser._parse_fecha("15/01/2026 10:30") == date(2026, 1, 15)
+    assert BancoParser._parse_fecha("2026-01-15T08:05:09.123") == date(2026, 1, 15)

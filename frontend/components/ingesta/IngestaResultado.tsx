@@ -7,7 +7,7 @@ export function IngestaResultado({ resultado }: { resultado: IngestaResponse }) 
 
   return (
     <div
-      className={`space-y-2 rounded-lg border p-4 text-sm ${
+      className={`space-y-2 rounded-md border p-4 text-sm ${
         sinErrores
           ? "border-status-ok-soft bg-status-ok-soft"
           : "border-status-pendiente-soft bg-status-pendiente-soft"

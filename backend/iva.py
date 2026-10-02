@@ -25,6 +25,12 @@ def _dec(valor: Any) -> Decimal:
     return Decimal(str(valor))
 
 
+def _uuid_key(uuid: Any) -> str:
+    """Clave de cruce CFDI ↔ pago: el UUID en mayúsculas (los XML lo traen con
+    caja distinta según el emisor; el cruce no debe depender de eso)."""
+    return str(uuid or "").upper()
+
+
 def _mes(fecha: Any) -> str:
     """Devuelve 'YYYY-MM' de una fecha date/datetime o string ISO."""
     if isinstance(fecha, (date, datetime)):
@@ -59,7 +65,7 @@ def iva_trasladado(
     # Índice de pagos por UUID de CFDI
     pagos_por_uuid: dict[str, list[dict]] = {}
     for p in pagos:
-        pagos_por_uuid.setdefault(p["cfdi_uuid"], []).append(p)
+        pagos_por_uuid.setdefault(_uuid_key(p["cfdi_uuid"]), []).append(p)
 
     for c in cfdis:
         if c.get("rfc_emisor") != rfc_empresa:
@@ -88,7 +94,7 @@ def iva_trasladado(
         elif metodo == "PPD":
             total = _dec(c.get("total"))
             iva_cfdi = _dec(c.get("iva_trasladado"))
-            for p in pagos_por_uuid.get(c.get("uuid"), []):
+            for p in pagos_por_uuid.get(_uuid_key(c.get("uuid")), []):
                 if not _en_periodo(p.get("fecha_pago"), periodo):
                     continue
                 importe = _dec(p.get("importe_pagado"))
@@ -129,7 +135,7 @@ def iva_acreditable(
 
     pagos_por_uuid: dict[str, list[dict]] = {}
     for p in pagos:
-        pagos_por_uuid.setdefault(p["cfdi_uuid"], []).append(p)
+        pagos_por_uuid.setdefault(_uuid_key(p["cfdi_uuid"]), []).append(p)
 
     for c in cfdis:
         if c.get("rfc_receptor") != rfc_empresa:
@@ -160,7 +166,7 @@ def iva_acreditable(
                     pue_base += _dec(c.get("subtotal"))
                     pue_iva += iva_cfdi
         elif c.get("metodo_pago") == "PPD":
-            for p in pagos_por_uuid.get(c.get("uuid"), []):
+            for p in pagos_por_uuid.get(_uuid_key(c.get("uuid")), []):
                 if not _en_periodo(p.get("fecha_pago"), periodo):
                     continue
                 importe = _dec(p.get("importe_pagado"))

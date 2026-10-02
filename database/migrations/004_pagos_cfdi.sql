@@ -36,10 +36,13 @@ CREATE TABLE IF NOT EXISTS pagos_relaciones (
 CREATE INDEX IF NOT EXISTS idx_pagos_rel_pago ON pagos_relaciones (pago_id);
 CREATE INDEX IF NOT EXISTS idx_pagos_rel_uuid ON pagos_relaciones (cfdi_uuid);
 
--- 3. Ampliar tipo_match en conciliaciones para incluir complemento_pago
-ALTER TABLE conciliaciones DROP CONSTRAINT IF EXISTS conciliaciones_tipo_match_check;
-ALTER TABLE conciliaciones ADD CONSTRAINT conciliaciones_tipo_match_check
-    CHECK (tipo_match IN ('exacto','parcial','sin_cfdi','sin_movimiento','complemento_pago'));
+-- 3. (tipo_match: complemento_pago — ahora declarado en la 010)
+-- NOTA: este archivo se re-ejecuta en cada arranque (db.init_db). Aquí se
+-- redefinía conciliaciones_tipo_match_check con la lista de valores vigente en
+-- su momento, más corta que la actual. Con filas que ya usan valores posteriores
+-- (pendiente_rep, heuristico, complemento_pago_total, ...) el ADD CONSTRAINT
+-- fallaba con CheckViolation y la app no podía reiniciar. La lista completa
+-- vive únicamente en 010_complemento_tipos.sql; no volver a declararla aquí.
 
 -- 4. Estado de pago explícito en cfdi (derivado de monto_cobrado, pero consultable directo)
 ALTER TABLE cfdi ADD COLUMN IF NOT EXISTS estado_pago VARCHAR(20) DEFAULT 'pendiente'

@@ -5,7 +5,6 @@ Los fixtures construyen XML mínimo pero válido respetando los namespaces
 oficiales del SAT (cfdi 3.3/4.0, TimbreFiscalDigital, Pagos 2.0) para
 ejercitar el parser tal como lo haría un XML real.
 """
-import uuid as uuid_mod
 from decimal import Decimal
 
 import pytest
@@ -75,12 +74,15 @@ def _xml_pago():
       <cfdi:Emisor Rfc="PROV010101AAA" Nombre="Proveedor SA" RegimenFiscal="601"/>
       <cfdi:Receptor Rfc="EMP010101AAA" Nombre="Empresa SA" UsoCFDI="CP01"/>
       <cfdi:Complemento>
-        <pago20:Pagos>
-          <pago20:Pago FechaPago="2026-01-20T10:00:00" MontoTotal="1000.00" MonedaP="MXN" TipoCambioP="1">
+        <pago20:Pagos Version="2.0">
+          <pago20:Totales MontoTotalPagos="1000.00"/>
+          <pago20:Pago FechaPago="2026-01-20T10:00:00" FormaDePagoP="03" Monto="1000.00" MonedaP="MXN" TipoCambioP="1">
             <pago20:DoctoRelacionado IdDocumento="AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE" NumParcialidad="1"
                 ImpPagado="1000.00" ImpSaldoAnt="1000.00" ImpSaldoInsoluto="0.00"/>
           </pago20:Pago>
         </pago20:Pagos>
+        <tfd:TimbreFiscalDigital xmlns:tfd="http://www.sat.gob.mx/TimbreFiscalDigital"
+            UUID="99999999-8888-7777-6666-555555555555" FechaTimbrado="2026-01-20T10:05:00"/>
       </cfdi:Complemento>
     </cfdi:Comprobante>'''
 
@@ -98,6 +100,8 @@ def _xml_33_ppd():
           <cfdi:Traslado Impuesto="002" TasaOCuota="0.160000" TipoFactor="Tasa" Importe="80.00"/>
         </cfdi:Traslados>
       </cfdi:Impuestos>
+      <cfdi:Complemento><tfd:TimbreFiscalDigital
+          UUID="33333333-3333-3333-3333-333333333333" FechaTimbrado="2025-06-01T09:05:00"/></cfdi:Complemento>
     </cfdi:Comprobante>'''
 
 
@@ -139,10 +143,15 @@ def test_xml_vacio_levanta_cfdi_parse_error():
 # ─── Timbre fiscal ────────────────────────────────────────────────────────
 
 
-def test_sin_timbre_genera_uuid_aleatorio_y_fecha_none():
+def test_sin_timbre_es_error_bloqueante_y_no_inventa_uuid():
+    """Un XML sin Timbre Fiscal Digital no es un CFDI válido (borrador o
+    prefactura). Antes se le asignaba un UUID aleatorio y se ingería como si
+    estuviera timbrado; re-subirlo creaba además un registro nuevo cada vez."""
     p = _parser().parse_xml(_xml_ingreso(incluir_timbre=False))
-    assert uuid_mod.UUID(p.uuid)  # es un UUID válido, aunque no venga del SAT
+    assert p.uuid == ""
     assert p.fecha_timbrado is None
+    bloqueantes = [e for e in p.errores if not e.startswith("AVISO:")]
+    assert any("Timbre Fiscal Digital" in e for e in bloqueantes)
 
 
 # ─── Anticipo SAT (ClaveProdServ 84111506) ──────────────────────────────────
@@ -231,6 +240,27 @@ def test_complemento_de_pago_extrae_pagos_y_doctos_relacionados():
     assert docto.imp_saldo_insoluto == Decimal("0.00")
 
 
+def test_complemento_de_pago_lee_monto_del_nodo_pago_no_de_totales():
+    """Pagos20.xsd: el importe del pago es el atributo `Monto` del nodo Pago.
+    `MontoTotalPagos` (en pago20:Totales) es la suma de todos los pagos del REP.
+    Antes se leía un atributo inexistente (`MontoTotal`), el monto quedaba en 0
+    y la ingesta descartaba el pago."""
+    xml = _xml_pago().replace('MontoTotalPagos="1000.00"', 'MontoTotalPagos="9999.00"')
+    p = _parser().parse_xml(xml)
+    assert p.pagos[0].monto == Decimal("1000.00")
+
+
+def test_uuid_de_timbre_y_de_docto_relacionado_se_normalizan_a_mayusculas():
+    """El mismo UUID llega con distinta caja según el emisor; se guarda siempre
+    en mayúsculas para que el cruce REP ↔ factura no dependa de eso."""
+    factura = _parser().parse_xml(
+        _xml_ingreso().replace("AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE", "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"))
+    rep = _parser().parse_xml(
+        _xml_pago().replace("AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE", "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"))
+    assert factura.uuid == "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE"
+    assert rep.pagos[0].doctos_relacionados[0].uuid == factura.uuid
+
+
 def test_complemento_de_pago_no_genera_error_por_total_cero():
     """Un CFDI tipo P legítimamente tiene Total=0 — la validación de cuadre no debe aplicar."""
     p = _parser().parse_xml(_xml_pago())
@@ -240,6 +270,72 @@ def test_complemento_de_pago_no_genera_error_por_total_cero():
 def test_cfdi_no_pago_no_extrae_pagos():
     p = _parser().parse_xml(_xml_ingreso())
     assert p.pagos == []
+
+
+# ─── Cuadre fiscal con impuestos distintos de IVA/ISR ─────────────────────
+
+
+def _bloqueantes(p):
+    return [e for e in p.errores if not e.startswith("AVISO:")]
+
+
+def test_cuadre_acepta_cfdi_con_ieps_trasladado():
+    """Gasolina, bebidas, etc.: Total = SubTotal + IVA + IEPS. Antes el cuadre
+    solo sumaba IVA y rechazaba el CFDI como error bloqueante."""
+    impuestos = (
+        '<cfdi:Impuestos TotalImpuestosTrasladados="240.00"><cfdi:Traslados>'
+        '<cfdi:Traslado Impuesto="002" TasaOCuota="0.160000" TipoFactor="Tasa" Importe="160.00"/>'
+        '<cfdi:Traslado Impuesto="003" TasaOCuota="0.080000" TipoFactor="Tasa" Importe="80.00"/>'
+        '</cfdi:Traslados></cfdi:Impuestos>'
+    )
+    p = _parser().parse_xml(_xml_ingreso(comprobante_attrs={"Total": "1240.00"}, impuestos_xml=impuestos))
+    assert _bloqueantes(p) == []
+    assert p.iva_trasladado == Decimal("160.00")  # el IEPS no se mezcla con el IVA
+    assert p.total_traslados == Decimal("240.00")
+
+
+def test_cuadre_acepta_retenciones_de_iva_isr_e_ieps():
+    impuestos = (
+        '<cfdi:Impuestos TotalImpuestosTrasladados="160.00" TotalImpuestosRetenidos="216.67">'
+        '<cfdi:Retenciones>'
+        '<cfdi:Retencion Impuesto="001" Importe="100.00"/>'
+        '<cfdi:Retencion Impuesto="002" Importe="106.67"/>'
+        '<cfdi:Retencion Impuesto="003" Importe="10.00"/>'
+        '</cfdi:Retenciones><cfdi:Traslados>'
+        '<cfdi:Traslado Impuesto="002" TasaOCuota="0.160000" TipoFactor="Tasa" Importe="160.00"/>'
+        '</cfdi:Traslados></cfdi:Impuestos>'
+    )
+    p = _parser().parse_xml(_xml_ingreso(comprobante_attrs={"Total": "943.33"}, impuestos_xml=impuestos))
+    assert _bloqueantes(p) == []
+    assert p.isr_retenido == Decimal("100.00")
+    assert p.iva_retenido == Decimal("106.67")
+    assert p.total_retenciones == Decimal("216.67")
+
+
+def test_cuadre_acepta_impuestos_locales_del_complemento_implocal():
+    """Hospedaje (ISH): el impuesto local va en el complemento implocal y forma
+    parte del Total, pero no aparece en cfdi:Impuestos."""
+    xml = _xml_ingreso(comprobante_attrs={"Total": "1190.00"}).replace(
+        "<cfdi:Complemento>",
+        '<cfdi:Complemento><implocal:ImpuestosLocales xmlns:implocal="http://www.sat.gob.mx/implocal" '
+        'version="1.0" TotaldeRetenciones="0.00" TotaldeTraslados="30.00">'
+        '<implocal:TrasladosLocales ImpLocTrasladado="ISH" TasadeTraslado="3.00" Importe="30.00"/>'
+        '</implocal:ImpuestosLocales>',
+    )
+    p = _parser().parse_xml(xml)
+    assert _bloqueantes(p) == []
+    assert p.total_traslados == Decimal("190.00")
+
+
+def test_cuadre_sigue_detectando_total_que_no_cuadra():
+    impuestos = (
+        '<cfdi:Impuestos TotalImpuestosTrasladados="240.00"><cfdi:Traslados>'
+        '<cfdi:Traslado Impuesto="002" TasaOCuota="0.160000" TipoFactor="Tasa" Importe="160.00"/>'
+        '<cfdi:Traslado Impuesto="003" TasaOCuota="0.080000" TipoFactor="Tasa" Importe="80.00"/>'
+        '</cfdi:Traslados></cfdi:Impuestos>'
+    )
+    p = _parser().parse_xml(_xml_ingreso(comprobante_attrs={"Total": "1160.00"}, impuestos_xml=impuestos))
+    assert any("Cuadre fiscal" in e for e in _bloqueantes(p))
 
 
 # ─── CFDI 3.3 ────────────────────────────────────────────────────────────

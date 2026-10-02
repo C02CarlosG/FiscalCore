@@ -5,7 +5,6 @@ Soporta CFDI 3.3 y 4.0
 from __future__ import annotations
 
 import re
-import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
@@ -128,6 +127,11 @@ class CFDIParsed:
     #   tipo=I + MetodoPago=PUE + sin CfdiRelacionados + ClaveProdServ=84111506
     es_anticipo_sat: bool = False
 
+    # Suma de TODOS los impuestos del comprobante (IVA, ISR, IEPS y locales del
+    # complemento implocal). Se usan para el cuadre contra Total.
+    total_traslados: Decimal = Decimal("0")
+    total_retenciones: Decimal = Decimal("0")
+
     @property
     def es_ingreso(self) -> bool:
         return self.tipo_comprobante == "I"
@@ -222,6 +226,12 @@ class CFDIParser:
             regimen_fiscal_receptor=self._attr(receptor, "RegimenFiscalReceptor"),
         )
 
+        loc_traslados, loc_retenciones = self._extraer_impuestos_locales(root)
+        parsed.total_traslados = loc_traslados + sum(
+            (i.importe for i in impuestos if not i.es_retencion), Decimal("0"))
+        parsed.total_retenciones = loc_retenciones + sum(
+            (i.importe for i in impuestos if i.es_retencion), Decimal("0"))
+
         # Validaciones
         parsed.rfc_emisor_valido = validar_rfc(rfc_emisor)
         parsed.rfc_receptor_valido = validar_rfc(rfc_receptor)
@@ -258,8 +268,13 @@ class CFDIParser:
         ns_tfd = "{http://www.sat.gob.mx/TimbreFiscalDigital}"
         complemento = root.find(f".//{ns_tfd}TimbreFiscalDigital")
         if complemento is None:
-            return str(uuid.uuid4()), None  # Sin timbre (borrador)
-        uuid_cfdi = complemento.get("UUID", "")
+            # Sin timbre no es un CFDI válido ante el SAT (borrador o prefactura):
+            # _validar lo marca como error bloqueante. Antes se le inventaba un
+            # UUID aleatorio y entraba a la base como si estuviera timbrado.
+            return "", None
+        # Mayúsculas siempre: el mismo UUID llega con distinta caja según el
+        # emisor/PAC (timbre vs IdDocumento de un REP) y los cruces son exactos.
+        uuid_cfdi = complemento.get("UUID", "").strip().upper()
         fecha_str = complemento.get("FechaTimbrado", "")
         return uuid_cfdi, self._parse_fecha(fecha_str)
 
@@ -315,9 +330,18 @@ class CFDIParser:
 
         return impuestos, iva_t, iva_r, isr_r
 
+    def _extraer_impuestos_locales(self, root) -> tuple[Decimal, Decimal]:
+        """Totales del complemento de Impuestos Locales (implocal): (traslados, retenciones)."""
+        nodo = root.find(f".//{{{NS['implocal']}}}ImpuestosLocales")
+        if nodo is None:
+            return Decimal("0"), Decimal("0")
+        return self._decimal(nodo, "TotaldeTraslados"), self._decimal(nodo, "TotaldeRetenciones")
+
     def _validar(self, p: CFDIParsed) -> list[str]:
         errores = []
 
+        if not p.uuid:
+            errores.append("CFDI sin Timbre Fiscal Digital: no está timbrado ante el SAT")
         if not p.rfc_emisor_valido:
             errores.append(f"RFC emisor inválido: {p.rfc_emisor}")
         if not p.rfc_receptor_valido:
@@ -330,7 +354,10 @@ class CFDIParser:
         if p.tipo_comprobante != "P":
             if p.total <= 0:
                 errores.append("Total debe ser mayor a 0")
-            calculado = p.subtotal - p.descuento + p.iva_trasladado - p.iva_retenido - p.isr_retenido
+            # Todos los impuestos del comprobante, no solo IVA/ISR: un CFDI con
+            # IEPS (gasolina, bebidas) o impuestos locales (ISH de hoteles, ISN)
+            # es válido y su Total los incluye.
+            calculado = p.subtotal - p.descuento + p.total_traslados - p.total_retenciones
             if abs(calculado - p.total) > Decimal("0.02"):
                 errores.append(
                     f"Cuadre fiscal: calculado={calculado}, declarado={p.total}"
@@ -400,10 +427,10 @@ class CFDIParser:
 
         for pago_node in pagos_node.findall(f"{ns_pago}Pago"):
             fecha_str = pago_node.get("FechaPago", "")
-            # pago20 usa MontoTotal; pago10 usa Monto
-            monto_attr = "MontoTotal" if ns_pago == NS_PAGO20 else "Monto"
+            # El nodo Pago usa el atributo Monto tanto en Pagos 1.0 como en 2.0
+            # (Pagos20.xsd). MontoTotalPagos vive en pago20:Totales, no aquí.
             try:
-                monto = Decimal(pago_node.get(monto_attr, "0"))
+                monto = Decimal(pago_node.get("Monto", "0"))
             except Exception:
                 monto = Decimal("0")
             moneda = pago_node.get("MonedaP", "MXN")
@@ -417,7 +444,7 @@ class CFDIParser:
                 parcialidad_str = docto.get("NumParcialidad")
                 try:
                     doctos.append(DoctoRelacionado(
-                        uuid=docto.get("IdDocumento", ""),
+                        uuid=docto.get("IdDocumento", "").strip().upper(),
                         num_parcialidad=int(parcialidad_str) if parcialidad_str else None,
                         imp_pagado=Decimal(docto.get("ImpPagado", "0")),
                         imp_saldo_ant=Decimal(docto.get("ImpSaldoAnt", "0")),

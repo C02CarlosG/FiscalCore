@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Moon, Sun } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 const STORAGE_KEY = "fiscalcore-theme";
 
@@ -40,10 +41,12 @@ export function ThemeToggle() {
   }
 
   return (
-    <button
+    <Button
       type="button"
       onClick={toggle}
-      className="flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-xs font-medium text-muted-foreground hover:text-foreground"
+      variant="outline"
+      size="sm"
+      className="w-full justify-start text-xs font-medium text-muted-foreground"
     >
       {theme === "dark" ? (
         <Moon className="h-3.5 w-3.5" />
@@ -51,6 +54,6 @@ export function ThemeToggle() {
         <Sun className="h-3.5 w-3.5" />
       )}
       {theme === "dark" ? "Modo oscuro" : "Modo claro"}
-    </button>
+    </Button>
   );
 }

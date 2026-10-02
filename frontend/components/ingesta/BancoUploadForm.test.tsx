@@ -22,6 +22,11 @@ function renderForm() {
   );
 }
 
+async function seleccionarBanco(user: ReturnType<typeof userEvent.setup>, label: string) {
+  await user.click(screen.getByRole("combobox", { name: "Banco" }));
+  await user.click(await screen.findByRole("option", { name: label }));
+}
+
 describe("BancoUploadForm", () => {
   beforeEach(() => {
     vi.mocked(apiFetch).mockReset();
@@ -31,7 +36,7 @@ describe("BancoUploadForm", () => {
     const user = userEvent.setup();
     renderForm();
 
-    await user.selectOptions(screen.getByLabelText("Banco"), "bbva");
+      await seleccionarBanco(user, "BBVA");
     const file = new File(["a,b"], "estado.csv", { type: "text/csv" });
     await user.upload(screen.getByLabelText("Estado de cuenta (.xlsx o .csv)"), file);
     await user.click(
@@ -67,7 +72,7 @@ describe("BancoUploadForm", () => {
     const user = userEvent.setup();
     renderForm();
 
-    await user.selectOptions(screen.getByLabelText("Banco"), "otro");
+      await seleccionarBanco(user, "Otro");
     await user.type(screen.getByLabelText("Nombre del banco"), "Banco Azteca");
     await user.type(screen.getByLabelText("Periodo (YYYY-MM)"), "2026-07");
     const file = new File(["a,b"], "estado.csv", { type: "text/csv" });
@@ -92,7 +97,7 @@ describe("BancoUploadForm", () => {
     const user = userEvent.setup();
     renderForm();
 
-    await user.selectOptions(screen.getByLabelText("Banco"), "bbva");
+      await seleccionarBanco(user, "BBVA");
     await user.type(screen.getByLabelText("Periodo (YYYY-MM)"), "2026-07");
     const file = new File(["a,b"], "estado.csv", { type: "text/csv" });
     await user.upload(screen.getByLabelText("Estado de cuenta (.xlsx o .csv)"), file);
@@ -116,7 +121,7 @@ describe("BancoUploadForm", () => {
     const user = userEvent.setup();
     renderForm();
 
-    await user.selectOptions(screen.getByLabelText("Banco"), "bbva");
+      await seleccionarBanco(user, "BBVA");
     await user.type(screen.getByLabelText("Periodo (YYYY-MM)"), "2026-07");
     const file = new File(["a,b"], "estado.csv", { type: "text/csv" });
     await user.upload(screen.getByLabelText("Estado de cuenta (.xlsx o .csv)"), file);

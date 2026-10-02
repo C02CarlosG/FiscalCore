@@ -3,21 +3,13 @@
 -- Idempotente: DROP + ADD CONSTRAINT / ALTER COLUMN
 -- ============================================================
 
--- 1. Ampliar tipo_match para incluir flujo PPD con REP
-ALTER TABLE conciliaciones DROP CONSTRAINT IF EXISTS conciliaciones_tipo_match_check;
-ALTER TABLE conciliaciones ADD CONSTRAINT conciliaciones_tipo_match_check
-    CHECK (tipo_match IN (
-        'exacto',
-        'parcial',
-        'sin_cfdi',
-        'sin_movimiento',
-        'complemento_pago',
-        'agrupado',
-        'parcial_multiple',
-        'heuristico',
-        'pendiente_rep',   -- CFDI PPD aguarda REP (flujo normal, no es riesgo)
-        'pagado_parcial'   -- REP emitido pero saldo insoluto > $0.05
-    ));
+-- 1. (tipo_match: pendiente_rep / pagado_parcial — ahora declarado en la 010)
+-- NOTA: este archivo se re-ejecuta en cada arranque (db.init_db). Aquí se
+-- redefinía conciliaciones_tipo_match_check con la lista de valores vigente en
+-- su momento, más corta que la actual. Con filas que ya usan valores posteriores
+-- (pendiente_rep, heuristico, complemento_pago_total, ...) el ADD CONSTRAINT
+-- fallaba con CheckViolation y la app no podía reiniciar. La lista completa
+-- vive únicamente en 010_complemento_tipos.sql; no volver a declararla aquí.
 
 -- 2. Ampliar estado_pago en cfdi para incluir pendiente_rep
 --    (el valor 'pendiente' legacy se mantiene por compatibilidad)

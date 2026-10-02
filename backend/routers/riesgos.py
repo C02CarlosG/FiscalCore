@@ -64,8 +64,24 @@ async def listar_riesgos(
     return {"total": len(riesgos), "riesgos": riesgos}
 
 
+def _deteccion_con_acceso(deteccion_id: str, current_user: dict) -> dict:
+    """Carga la detección y valida que el usuario tenga acceso a su empresa."""
+    det = db.query_one(
+        "SELECT empresa_id, estado FROM detecciones WHERE id = %s", (deteccion_id,)
+    )
+    if not det:
+        raise HTTPException(status_code=404, detail="Detección no encontrada")
+    validar_acceso_empresa(str(det["empresa_id"]), current_user)
+    return det
+
+
 @router.patch("/api/v1/riesgos/{riesgo_id}/resolver")
-async def resolver_riesgo(riesgo_id: str, notas: str = ""):
+async def resolver_riesgo(
+    riesgo_id: str,
+    notas: str = "",
+    current_user: dict = Depends(get_current_user),
+):
+    _deteccion_con_acceso(riesgo_id, current_user)
     row = db.execute(
         """
         UPDATE detecciones
@@ -82,11 +98,13 @@ async def resolver_riesgo(riesgo_id: str, notas: str = ""):
 
 
 @router.post("/api/v1/acciones/{deteccion_id}/ejecutar", tags=["Acciones"])
-async def ejecutar_accion(deteccion_id: str, body: AccionRequest):
+async def ejecutar_accion(
+    deteccion_id: str,
+    body: AccionRequest,
+    current_user: dict = Depends(get_current_user),
+):
     """Ejecuta una acción sobre una detección y actualiza su estado."""
-    det = db.query_one("SELECT estado FROM detecciones WHERE id = %s", (deteccion_id,))
-    if not det:
-        raise HTTPException(status_code=404, detail="Detección no encontrada")
+    det = _deteccion_con_acceso(deteccion_id, current_user)
 
     nuevo_estado = ACCION_ESTADO.get(body.tipo)
     if not nuevo_estado:

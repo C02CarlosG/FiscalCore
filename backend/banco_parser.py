@@ -13,6 +13,9 @@ from typing import Optional
 
 RFC_RE = re.compile(r'\b([A-ZÑ&]{3,4}\d{6}[A-Z\d]{3})\b', re.IGNORECASE)
 
+# Hora al final de una fecha: " 10:30", "T10:30:00", " 10:30:00.000"
+_HORA_RE = re.compile(r'[ T]\d{1,2}:\d{2}(:\d{2})?(\.\d+)?$')
+
 COLUMN_ALIASES = {
     "fecha":     ["fecha", "date", "fec", "dia", "f.operacion", "fecha operacion"],
     "concepto":  ["concepto", "descripcion", "descripcion movimiento", "detalle", "referencia corta", "text"],
@@ -90,7 +93,7 @@ class BancoParser:
             ws = wb.worksheets[hoja]
             rows = []
             for row in ws.iter_rows(values_only=True):
-                rows.append([str(c) if c is not None else "" for c in row])
+                rows.append([self._celda_a_texto(c) for c in row])
             return self._procesar_filas(rows, banco)
         except ImportError:
             raise RuntimeError("openpyxl no instalado. Ejecuta: pip install openpyxl")
@@ -217,7 +220,20 @@ class BancoParser:
             mov.rfc_detectado = match.group(1).upper()
 
     @staticmethod
+    def _celda_a_texto(celda) -> str:
+        """Texto de una celda de Excel. Las celdas con formato de fecha llegan
+        como datetime; str() las dejaría como '2026-01-15 00:00:00', que ningún
+        formato de _parse_fecha reconocía, y la fila se descartaba en silencio."""
+        if celda is None:
+            return ""
+        if isinstance(celda, (datetime, date)):
+            return celda.strftime("%Y-%m-%d")
+        return str(celda)
+
+    @staticmethod
     def _parse_fecha(s: str) -> Optional[date]:
+        # Descartar la hora si viene pegada a la fecha ("15/01/2026 10:30:00").
+        s = _HORA_RE.sub("", s.strip())
         s = s.strip().replace("/", "-").replace(".", "-")
         formatos = [
             "%Y-%m-%d", "%d-%m-%Y", "%m-%d-%Y",

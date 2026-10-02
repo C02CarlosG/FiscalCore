@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
-import { Bell, Menu, Search } from "lucide-react";
+import { Bell, ChevronRight, Menu, Search } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -11,6 +11,9 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useEmpresaContext } from "@/components/providers/EmpresaProvider";
 import { clearSession, loadSession } from "@/lib/auth";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 
 const LABELS: Record<string, string> = {
   dashboard: "Dashboard",
@@ -104,27 +107,29 @@ export function Header({ onMenuClick }: { onMenuClick: () => void }) {
     .toUpperCase();
 
   return (
-    <header className="flex h-14 flex-none items-center gap-4 border-b border-border bg-card px-4 lg:px-6">
-      <button
+    <header className="sticky top-0 z-30 flex h-16 flex-none items-center gap-3 border-b border-border bg-background/95 px-4 backdrop-blur-sm sm:gap-5 sm:px-6 lg:px-8">
+      <Button
         type="button"
         onClick={onMenuClick}
         aria-label="Abrir menú"
-        className="text-muted-foreground lg:hidden"
+        variant="ghost"
+        size="icon"
+        className="shrink-0 lg:hidden"
       >
         <Menu className="h-5 w-5" />
-      </button>
+      </Button>
 
-      <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
-        <span>Panel</span>
-        <span>/</span>
-        <span className="font-medium text-foreground">
+      <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-1.5 text-sm">
+        <span className="hidden text-muted-foreground sm:inline">Panel</span>
+        <ChevronRight className="hidden h-3.5 w-3.5 text-muted-foreground sm:block" />
+        <span className="truncate font-semibold text-foreground">
           {breadcrumbLabel(pathname)}
         </span>
-      </div>
+      </nav>
 
-      <div ref={searchRef} className="relative ml-auto hidden max-w-xs flex-1 sm:block">
+      <div ref={searchRef} className="relative ml-auto hidden max-w-sm flex-1 md:block">
         <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-        <input
+        <Input
           type="text"
           role="combobox"
           aria-expanded={resultados.length > 0}
@@ -134,17 +139,17 @@ export function Header({ onMenuClick }: { onMenuClick: () => void }) {
               ? `empresa-option-${resultados[activeIndex].id}`
               : undefined
           }
-          placeholder="Buscar empresa, RFC…"
+          placeholder="Buscar empresa o RFC"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={handleSearchKeyDown}
-          className="w-full rounded-lg border border-border bg-background py-1.5 pl-8 pr-3 text-sm outline-none focus:ring-1 focus:ring-ring"
+          className="h-9 w-full border-transparent bg-muted/70 pl-8 pr-3 shadow-none focus-visible:border-ring focus-visible:bg-background"
         />
         {resultados.length > 0 && (
           <ul
             id="empresa-search-listbox"
             role="listbox"
-            className="absolute left-0 right-0 top-full z-20 mt-1 rounded-lg border border-border bg-popover p-1 shadow-md"
+            className="absolute left-0 right-0 top-full z-40 mt-2 rounded-md border border-border bg-popover p-1.5 shadow-lg"
           >
             {resultados.map((empresa, index) => (
               <li key={empresa.id} role="presentation">
@@ -154,7 +159,7 @@ export function Header({ onMenuClick }: { onMenuClick: () => void }) {
                   role="option"
                   aria-selected={index === activeIndex}
                   onClick={() => seleccionarEmpresa(empresa.id)}
-                  className={`w-full rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent ${
+                  className={`w-full rounded px-2.5 py-2 text-left text-sm hover:bg-accent ${
                     index === activeIndex ? "bg-accent" : ""
                   }`}
                 >
@@ -166,23 +171,28 @@ export function Header({ onMenuClick }: { onMenuClick: () => void }) {
         )}
       </div>
 
-      <button
+      <Button
         type="button"
         aria-label="Notificaciones"
-        className="relative text-muted-foreground hover:text-foreground"
+        variant="ghost"
+        size="icon"
+        className="hidden shrink-0 text-muted-foreground sm:inline-flex"
       >
         {/* Sin badge de conteo: no hay endpoint de notificaciones todavía. */}
-        <Bell className="h-4.5 w-4.5" />
-      </button>
+        <Bell className="h-4 w-4" />
+      </Button>
 
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <button
             type="button"
             aria-label={session?.nombre ?? "Cuenta"}
-            className="flex h-8 w-8 flex-none items-center justify-center rounded-full bg-gradient-to-br from-primary to-primary/60 text-xs font-bold text-primary-foreground"
           >
-            {iniciales}
+            <Avatar className="h-9 w-9 border border-border">
+              <AvatarFallback className="bg-accent text-xs font-bold text-accent-foreground">
+                {iniciales}
+              </AvatarFallback>
+            </Avatar>
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">

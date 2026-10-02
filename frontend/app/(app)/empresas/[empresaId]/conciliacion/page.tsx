@@ -9,8 +9,9 @@ import {
 import { ResumenConciliacion } from "@/components/conciliacion/ResumenConciliacion";
 import { ParesTable } from "@/components/conciliacion/ParesTable";
 import { ErrorState } from "@/components/shared/ErrorState";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { PageHeader } from "@/components/shared/PageHeader";
+import { PeriodFilter } from "@/components/shared/PeriodFilter";
+import { LoadingState } from "@/components/shared/LoadingState";
 
 export default function ConciliacionPage() {
   const params = useParams<{ empresaId: string }>();
@@ -20,20 +21,15 @@ export default function ConciliacionPage() {
   const accionables = useConciliacionesAccionables(params.empresaId, periodo);
 
   return (
-    <main className="mx-auto max-w-5xl space-y-6">
-      <h1 className="text-2xl font-semibold">Conciliación banco-CFDI</h1>
+    <main className="space-y-7">
+      <PageHeader
+        eyebrow="Conciliación bancaria"
+        title="Cruces banco-CFDI"
+        description="Movimientos bancarios comparados con comprobantes fiscales del periodo."
+      />
+      <PeriodFilter id="conciliacion-periodo" value={periodo} onChange={setPeriodo} />
 
-      <div className="space-y-2">
-        <Label htmlFor="periodo">Periodo (YYYY-MM)</Label>
-        <Input
-          id="periodo"
-          placeholder="2026-07"
-          value={periodo}
-          onChange={(e) => setPeriodo(e.target.value)}
-        />
-      </div>
-
-      {resumen.isLoading && <p>Cargando conciliación...</p>}
+      {resumen.isLoading && <LoadingState label="Cargando conciliación" />}
       {resumen.isError && (
         <ErrorState
           message="No se pudo cargar el resumen de conciliación."

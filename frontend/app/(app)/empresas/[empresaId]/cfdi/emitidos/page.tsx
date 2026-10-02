@@ -5,8 +5,9 @@ import { useState } from "react";
 import { useEmitidos } from "@/hooks/useCfdi";
 import { EmitidosPanel } from "@/components/cfdi/EmitidosPanel";
 import { ErrorState } from "@/components/shared/ErrorState";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { PageHeader } from "@/components/shared/PageHeader";
+import { PeriodFilter } from "@/components/shared/PeriodFilter";
+import { LoadingState } from "@/components/shared/LoadingState";
 
 export default function CfdiEmitidosPage() {
   const params = useParams<{ empresaId: string }>();
@@ -15,25 +16,19 @@ export default function CfdiEmitidosPage() {
   const emitidos = useEmitidos(params.empresaId, periodo);
 
   return (
-    <main className="mx-auto max-w-6xl space-y-6">
-      <h1 className="text-2xl font-semibold">CFDI Emitidos</h1>
-
-      <div className="space-y-2">
-        <Label htmlFor="periodo">Periodo (YYYY-MM)</Label>
-        <Input
-          id="periodo"
-          placeholder="2026-07"
-          value={periodo}
-          onChange={(e) => setPeriodo(e.target.value)}
-          className="w-40"
-        />
-      </div>
+    <main className="space-y-7">
+      <PageHeader
+        eyebrow="Administración CFDI"
+        title="CFDI emitidos"
+        description="Ingresos, anticipos y egresos documentados por la empresa."
+      />
+      <PeriodFilter id="emitidos-periodo" value={periodo} onChange={setPeriodo} />
 
       {!periodo && (
-        <p className="text-sm text-muted-foreground">Ingresa un periodo para ver los CFDI emitidos.</p>
+        <p className="text-sm text-muted-foreground">Selecciona un periodo para consultar los CFDI emitidos.</p>
       )}
 
-      {periodo && emitidos.isLoading && <p className="text-sm text-muted-foreground">Cargando CFDI...</p>}
+      {periodo && emitidos.isLoading && <LoadingState label="Cargando CFDI emitidos" />}
 
       {periodo && emitidos.isError && (
         <ErrorState

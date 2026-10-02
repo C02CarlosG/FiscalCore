@@ -1,17 +1,19 @@
 # CFDI Intelligence — Guía de proyecto
 
-Backend FastAPI (FiscalCore). El frontend original fue removido; su reescritura vive en la rama `feat/frontend-nextjs` (Next.js + TS + Tailwind + shadcn/ui + TanStack Query), en paralelo a este trabajo de backend — ver spec en `docs/superpowers/specs/2026-07-10-reescritura-frontend-design.md` en esa rama. Detalles completos en `AGENTS.md`.
+Backend FastAPI (FiscalCore) y frontend Next.js en `frontend/` (Next.js + TS + Tailwind + shadcn/ui + TanStack Query), reescritura del frontend original ya integrada a `main` — ver spec en `docs/superpowers/specs/2026-07-10-reescritura-frontend-design.md`. Detalles completos en `AGENTS.md`.
 
 ## Estructura
 
 - `backend/` — API Python. `backend/main_api.py` arma la app FastAPI; los routers viven en `backend/routers/`.
+- `frontend/` — app Next.js (App Router). Scripts en `frontend/package.json`.
 - `database/migrations/` — migraciones SQL ordenadas (`022_descripcion.sql`).
 - `docs/openapi.yaml` — documentación de la API.
 
 ## Comandos
 
-- `./dev.sh` (o `dev.bat` en Windows) — levanta el backend local en `:8000`.
+- `./dev.sh` — levanta el stack local completo: PostgreSQL (`docker compose`), backend en `:8000` y frontend en `:3000`; avisa qué servicio responde y Ctrl+C detiene todo. `dev.bat` (Windows) solo levanta el backend.
 - `python -m uvicorn backend.main_api:app --reload --port 8000` — arranca solo el backend.
+- `cd frontend && npm run dev` — arranca solo el frontend (`npm test` para vitest, `npm run test:e2e` para playwright).
 - `docker compose up -d db` — PostgreSQL para endpoints con datos.
 - `pip install -r requirements-dev.txt` — instala dependencias de la app + de test (pytest, httpx). `requirements.txt` solo trae las de producción.
 - `python -m pytest` — suite completa (`backend/tests/`, config en `pytest.ini`).

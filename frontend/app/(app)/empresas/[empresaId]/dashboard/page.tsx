@@ -8,8 +8,9 @@ import { ResumenRiesgos } from "@/components/dashboard/ResumenRiesgos";
 import { RiesgosTable } from "@/components/dashboard/RiesgosTable";
 import { ErrorState } from "@/components/shared/ErrorState";
 import { StatCard } from "@/components/shared/StatCard";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { PageHeader } from "@/components/shared/PageHeader";
+import { PeriodFilter } from "@/components/shared/PeriodFilter";
+import { LoadingState } from "@/components/shared/LoadingState";
 
 export default function DashboardPage() {
   const params = useParams<{ empresaId: string }>();
@@ -18,20 +19,16 @@ export default function DashboardPage() {
   const dashboard = useDashboard(params.empresaId, periodo);
 
   return (
-    <main className="mx-auto max-w-4xl space-y-6">
-      <h1 className="text-2xl font-semibold">Dashboard</h1>
+    <main className="space-y-7">
+      <PageHeader
+        eyebrow="Panel fiscal"
+        title="Dashboard"
+        description={dashboard.data?.empresa.razon_social ?? "Resumen de riesgo y cumplimiento fiscal."}
+      />
 
-      <div className="space-y-2">
-        <Label htmlFor="periodo">Periodo (YYYY-MM)</Label>
-        <Input
-          id="periodo"
-          placeholder="2026-07"
-          value={periodo}
-          onChange={(e) => setPeriodo(e.target.value)}
-        />
-      </div>
+      <PeriodFilter value={periodo} onChange={setPeriodo} />
 
-      {dashboard.isLoading && <p>Cargando dashboard...</p>}
+      {dashboard.isLoading && <LoadingState label="Cargando dashboard" />}
       {dashboard.isError && (
         <ErrorState
           message="No se pudo cargar el dashboard."
@@ -40,7 +37,7 @@ export default function DashboardPage() {
       )}
       {dashboard.data && (
         <>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <section aria-label="Indicadores principales" className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <StatCard
               label="Score fiscal actual"
               value={`${dashboard.data.tendencia_score.at(-1)?.score ?? "—"}/100`}
@@ -81,9 +78,21 @@ export default function DashboardPage() {
               icon={GitBranch}
               tone="ok"
             />
-          </div>
-          <ResumenRiesgos resumen={dashboard.data.resumen_riesgos} />
-          <RiesgosTable riesgos={dashboard.data.riesgos_abiertos} />
+          </section>
+          <section className="space-y-4">
+            <div>
+              <h2 className="font-display text-base font-semibold">Riesgos por severidad</h2>
+              <p className="mt-1 text-sm text-muted-foreground">Exposición fiscal abierta</p>
+            </div>
+            <ResumenRiesgos resumen={dashboard.data.resumen_riesgos} />
+          </section>
+          <section className="space-y-4">
+            <div>
+              <h2 className="font-display text-base font-semibold">Riesgos abiertos</h2>
+              <p className="mt-1 text-sm text-muted-foreground">Partidas que requieren atención</p>
+            </div>
+            <RiesgosTable riesgos={dashboard.data.riesgos_abiertos} />
+          </section>
         </>
       )}
     </main>

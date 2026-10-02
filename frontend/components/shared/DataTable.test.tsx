@@ -46,10 +46,10 @@ describe("DataTable", () => {
 
     expect(filasVisiblesEnOrden()).toEqual(["Fila 02", "Fila 01", "Fila 00"]);
 
-    await user.click(screen.getByRole("columnheader", { name: /Nombre/ }));
+    await user.click(screen.getByRole("button", { name: /Nombre/ }));
     expect(filasVisiblesEnOrden()).toEqual(["Fila 00", "Fila 01", "Fila 02"]);
 
-    await user.click(screen.getByRole("columnheader", { name: /Nombre/ }));
+    await user.click(screen.getByRole("button", { name: /Nombre/ }));
     expect(filasVisiblesEnOrden()).toEqual(["Fila 02", "Fila 01", "Fila 00"]);
   });
 

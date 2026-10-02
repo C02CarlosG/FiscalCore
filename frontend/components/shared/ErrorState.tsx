@@ -1,3 +1,6 @@
+import { AlertCircle } from "lucide-react";
+import { Button } from "@/components/ui/button";
+
 export function ErrorState({
   message,
   onRetry,
@@ -6,16 +9,16 @@ export function ErrorState({
   onRetry?: () => void;
 }) {
   return (
-    <div
-      role="alert"
-      className="rounded-md border border-red-300 bg-red-50 p-4 text-sm text-red-700"
-    >
-      <p>{message}</p>
+    <div role="alert" className="flex items-start gap-3 rounded-md border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
+      <AlertCircle className="mt-0.5 h-4 w-4 flex-none" />
+      <div className="space-y-2">
+        <p className="font-medium">{message}</p>
       {onRetry && (
-        <button type="button" onClick={onRetry} className="mt-2 font-medium underline">
+        <Button type="button" onClick={onRetry} variant="outline" size="sm" className="border-destructive/30 text-destructive hover:bg-destructive/10">
           Reintentar
-        </button>
+        </Button>
       )}
+      </div>
     </div>
   );
 }
