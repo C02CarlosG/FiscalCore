@@ -44,6 +44,16 @@ def _estado_sat(resultado: dict) -> str:
     return str(raw or "").lower().strip()
 
 
+# CodigoEstadoSolicitud 5004: la solicitud no generó paquetes por falta de
+# información, es decir, no hay CFDI en el periodo. No es un error.
+_SIN_INFORMACION = "5004"
+
+
+def _sin_informacion(resultado: dict) -> bool:
+    """True si el SAT dice que la solicitud no encontró CFDI que descargar."""
+    return str(resultado.get("codigo_estado") or "").strip() == _SIN_INFORMACION
+
+
 # ---------------------------------------------------------------------------
 # POST /api/v1/sat/solicitar
 # ---------------------------------------------------------------------------
@@ -187,9 +197,11 @@ async def verificar_solicitud_endpoint(
         "vencida":    "fallo",
     }
     nuevo_estado = ESTADO_MAP.get(estado_str, "en_proceso")
+    if _sin_informacion(resultado):
+        nuevo_estado = "descargado"
 
-    id_paquetes = resultado.get("id_paquetes", [])
-    num_cfdi = resultado.get("num_cfdi", 0)
+    id_paquetes = resultado.get("id_paquetes") or []
+    num_cfdi = resultado.get("num_cfdi") or 0
 
     db.execute(
         """UPDATE sat_solicitudes
@@ -246,6 +258,14 @@ async def descargar_cfdi_endpoint(
     except (ValueError, _json.JSONDecodeError):
         raise HTTPException(status_code=400, detail="id_paquetes debe ser un JSON array, ej: '[\"pkg1\",\"pkg2\"]'")
 
+    # La importación acumula el avance por paquete: se arranca de cero.
+    db.execute(
+        """UPDATE sat_solicitudes
+           SET paquetes_descargados=0, cfdi_importados=0, updated_at=NOW()
+           WHERE id=%s""",
+        (solicitud_id,),
+    )
+
     background_tasks.add_task(
         _importar_paquetes_bg,
         creds=creds,
@@ -272,48 +292,84 @@ def _importar_paquetes_bg(
     empresa_id: str,
     periodo: str,
     paquetes: list[str],
+    desde: int = 0,
 ) -> str:
     """Descarga paquetes ZIP del SAT, parsea XMLs e importa a la DB.
 
+    Empieza en el paquete ``desde`` (los anteriores ya se importaron en una
+    pasada que se cortó). El avance y los CFDI importados se guardan paquete
+    por paquete, así que una pasada interrumpida se retoma donde se quedó.
+
+    Si un paquete no se puede descargar, la solicitud se queda en 'terminado'
+    para reintentarlo después: saltarlo dejaría la descarga incompleta sin
+    que nadie se entere. Al terminar se cuadran los CFDI importados contra los
+    que reportó el SAT y la diferencia queda en ``error_msg``.
+
     Al finalizar, corre el pipeline de conciliación/riesgos/scoring.
-    Devuelve el estado en que queda la solicitud ('descargado' o 'fallo').
+    Devuelve el estado en que queda la solicitud ('descargado', 'fallo', o
+    'terminado' si falta reintentar un paquete).
     """
     from ..cfdi_parser import CFDIParser
 
     parser = CFDIParser()
-    total_importados = 0
 
-    for id_paq in paquetes:
+    for num_paq, id_paq in enumerate(paquetes[desde:], start=desde + 1):
         try:
             xmls = descargar_paquete(creds, id_paq)
-            for xml_bytes in xmls:
-                try:
-                    resultado = parser.parse_xml(xml_bytes)
-                    # Solo importar si no hay errores bloqueantes
-                    errores_bloqueantes = [e for e in resultado.errores if not e.startswith("AVISO:")]
-                    if errores_bloqueantes:
-                        _log.warning(
-                            "CFDI %s ignorado — errores: %s",
-                            resultado.uuid, errores_bloqueantes,
-                        )
-                        continue
-                    _insertar_cfdi(empresa_id, resultado, periodo, xml_bytes)
-                    total_importados += 1
-                except Exception as e:
-                    _log.warning("Error parseando XML del paquete %s: %s", id_paq, e)
-
-            db.execute(
-                "UPDATE sat_solicitudes SET paquetes_descargados = paquetes_descargados + 1, updated_at=NOW() WHERE id=%s",
-                (solicitud_id,),
-            )
         except FIELError as e:
             _log.error("Error descargando paquete %s: %s", id_paq, e)
+            db.execute(
+                "UPDATE sat_solicitudes SET error_msg=%s, updated_at=NOW() WHERE id=%s",
+                (f"No se pudo descargar el paquete {num_paq} de {len(paquetes)}: {e}. "
+                 "Se reintentará en unos minutos.", solicitud_id),
+            )
+            return "terminado"
 
-    estado_final = "descargado" if total_importados > 0 else "fallo"
-    error_final = None if total_importados > 0 else "Ningún CFDI pudo importarse correctamente"
+        importados_paq = 0
+        for xml_bytes in xmls:
+            try:
+                resultado = parser.parse_xml(xml_bytes)
+                # Solo importar si no hay errores bloqueantes
+                errores_bloqueantes = [e for e in resultado.errores if not e.startswith("AVISO:")]
+                if errores_bloqueantes:
+                    _log.warning(
+                        "CFDI %s ignorado — errores: %s",
+                        resultado.uuid, errores_bloqueantes,
+                    )
+                    continue
+                _insertar_cfdi(empresa_id, resultado, periodo, xml_bytes)
+                importados_paq += 1
+            except Exception as e:
+                _log.warning("Error parseando XML del paquete %s: %s", id_paq, e)
+
+        db.execute(
+            """UPDATE sat_solicitudes
+               SET paquetes_descargados=%s, cfdi_importados=COALESCE(cfdi_importados, 0) + %s,
+                   updated_at=NOW()
+               WHERE id=%s""",
+            (num_paq, importados_paq, solicitud_id),
+        )
+
+    fila = db.query_one(
+        "SELECT num_cfdi, cfdi_importados FROM sat_solicitudes WHERE id=%s", (solicitud_id,),
+    ) or {}
+    total_importados = fila.get("cfdi_importados") or 0
+    esperados = fila.get("num_cfdi") or 0
+
+    if total_importados == 0:
+        estado_final = "fallo"
+        error_final = "Ningún CFDI pudo importarse correctamente"
+    else:
+        estado_final = "descargado"
+        error_final = None
+        if total_importados < esperados:
+            error_final = (
+                f"Descarga incompleta: se importaron {total_importados} de los {esperados} CFDI "
+                f"que reportó el SAT; {esperados - total_importados} no se pudieron importar."
+            )
     db.execute(
-        "UPDATE sat_solicitudes SET cfdi_importados=%s, estado=%s, error_msg=%s, updated_at=NOW() WHERE id=%s",
-        (total_importados, estado_final, error_final, solicitud_id),
+        "UPDATE sat_solicitudes SET estado=%s, error_msg=%s, updated_at=NOW() WHERE id=%s",
+        (estado_final, error_final, solicitud_id),
     )
 
     # Correr pipeline conciliación/riesgos/scoring si se importaron CFDIs
@@ -498,6 +554,8 @@ async def sync_completo_fiel(
 
 # Estados en los que el SAT todavía está preparando la solicitud.
 _ESTADOS_EN_SAT = ("solicitado", "en_proceso")
+# Los anteriores más 'terminado' (lista en el SAT, importación sin terminar).
+_ESTADOS_PENDIENTES = _ESTADOS_EN_SAT + ("terminado",)
 _ESTADOS_FALLO_SAT = ("error", "rechazada", "fallo", "falla", "vencida")
 
 
@@ -516,8 +574,8 @@ def _avanzar_solicitud(creds, solicitud: dict) -> str:
         return solicitud["estado"]
 
     estado_str = _estado_sat(resultado)
-    id_paquetes = resultado.get("id_paquetes", [])
-    num_cfdi    = resultado.get("num_cfdi", 0)
+    id_paquetes = resultado.get("id_paquetes") or []
+    num_cfdi    = resultado.get("num_cfdi") or 0
     _log.info(
         "Solicitud %s (SAT %s): el SAT reporta '%s' (estado=%r, código=%s, estatus=%s, %s CFDI, %d paquetes) %s",
         sol_id, solicitud["id_solicitud_sat"], estado_str, resultado.get("estado"),
@@ -527,20 +585,29 @@ def _avanzar_solicitud(creds, solicitud: dict) -> str:
 
     if estado_str in ("terminada", "terminado"):
         if solicitud["estado"] == "terminado":
-            # Importación interrumpida (el proceso murió a media descarga): se retoma.
+            # Importación interrumpida (el proceso murió a media descarga, o un
+            # paquete falló): se retoma desde el primer paquete sin importar.
+            # Si el SAT cambió la lista de paquetes, el avance guardado no
+            # aplica y se empieza de cero (reimportar un CFDI es idempotente).
             tomada = db.execute(
-                """UPDATE sat_solicitudes SET paquetes_descargados=0, updated_at=NOW()
+                """UPDATE sat_solicitudes
+                   SET paquetes_descargados = CASE WHEN num_paquetes = %s
+                                                   THEN COALESCE(paquetes_descargados, 0) ELSE 0 END,
+                       cfdi_importados      = CASE WHEN num_paquetes = %s
+                                                   THEN COALESCE(cfdi_importados, 0) ELSE 0 END,
+                       num_paquetes=%s, updated_at=NOW()
                    WHERE id=%s AND estado='terminado'
                      AND updated_at < NOW() - INTERVAL '10 minutes'
-                   RETURNING id""",
-                (sol_id,), returning=True,
+                   RETURNING id, paquetes_descargados""",
+                (len(id_paquetes), len(id_paquetes), len(id_paquetes), sol_id), returning=True,
             )
         else:
             tomada = db.execute(
                 """UPDATE sat_solicitudes
-                   SET estado='terminado', num_cfdi=%s, num_paquetes=%s, updated_at=NOW()
+                   SET estado='terminado', num_cfdi=%s, num_paquetes=%s,
+                       paquetes_descargados=0, cfdi_importados=0, updated_at=NOW()
                    WHERE id=%s AND estado IN ('solicitado', 'en_proceso')
-                   RETURNING id""",
+                   RETURNING id, paquetes_descargados""",
                 (num_cfdi, len(id_paquetes), sol_id), returning=True,
             )
         if not tomada:
@@ -557,7 +624,20 @@ def _avanzar_solicitud(creds, solicitud: dict) -> str:
             empresa_id=str(solicitud["empresa_id"]),
             periodo=solicitud["periodo_inicio"],
             paquetes=id_paquetes,
+            desde=tomada.get("paquetes_descargados") or 0,
         ) or "terminado"
+
+    # El SAT procesó la solicitud y no encontró CFDI en el periodo: es una
+    # descarga terminada con cero comprobantes, no un fallo.
+    if _sin_informacion(resultado):
+        db.execute(
+            """UPDATE sat_solicitudes
+               SET estado='descargado', num_cfdi=0, num_paquetes=0, cfdi_importados=0,
+                   error_msg=NULL, updated_at=NOW()
+               WHERE id=%s AND estado IN ('solicitado', 'en_proceso')""",
+            (sol_id,),
+        )
+        return "descargado"
 
     # Sin un estado reconocible (el SAT manda 0 cuando rechaza la consulta, p. ej.
     # "No se encontró la información") tampoco hay nada que esperar.
@@ -665,7 +745,8 @@ def _sync_completo_bg(empresa_id: str, periodo: str, solicitudes: list[dict]) ->
             if not row or not row.get("id_solicitud_sat"):
                 continue
             # Otra pasada (p. ej. /fiel/sync/avanzar) pudo haberla resuelto ya.
-            if row["estado"] not in _ESTADOS_EN_SAT or _avanzar_solicitud(creds, row) not in _ESTADOS_EN_SAT:
+            # 'terminado' sigue pendiente: falta importar (o reintentar) paquetes.
+            if row["estado"] not in _ESTADOS_PENDIENTES or _avanzar_solicitud(creds, row) not in _ESTADOS_PENDIENTES:
                 del pendientes[sol_id]
 
     # Marcar como fallo las que no terminaron a tiempo

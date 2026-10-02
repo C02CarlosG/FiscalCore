@@ -1665,7 +1665,14 @@ paths:
         Es seguro llamarlo varias veces: cada solicitud se verifica en el SAT
         como mucho una vez cada 20 segundos y solo una pasada hace la descarga.
         Una importacion sin avance durante 10 minutos se considera interrumpida
-        y se retoma.
+        y se retoma desde el primer paquete sin importar. Si un paquete no se
+        puede descargar, la solicitud se queda en `terminado` (con el motivo en
+        `error_msg`) y se reintenta en la siguiente pasada.
+
+        Al terminar se cuadran los CFDI importados contra los que reporto el
+        SAT: si faltan, la solicitud queda `descargado` con el aviso de descarga
+        incompleta en `error_msg`. Si el SAT no encontro CFDI en el periodo
+        (CodigoEstadoSolicitud 5004), queda `descargado` con cero CFDI.
       parameters:
         - $ref: '#/components/parameters/EmpresaId'
       responses:

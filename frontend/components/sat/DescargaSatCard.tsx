@@ -40,6 +40,9 @@ const ESTADOS: Record<string, { label: string; className: string }> = {
   fallo: { label: "Falló", className: "bg-status-error-soft text-status-error" },
 };
 
+// Descargada, pero faltaron CFDI de los que reportó el SAT (el motivo viene en error_msg).
+const INCOMPLETA = { label: "Incompleta", className: "bg-status-pendiente-soft text-status-pendiente" };
+
 function fechaHora(iso: string): string {
   const fecha = new Date(iso);
   if (Number.isNaN(fecha.getTime())) return iso;
@@ -73,7 +76,10 @@ function Solicitudes({ solicitudes }: { solicitudes: SatSolicitud[] }) {
         </TableHeader>
         <TableBody>
           {solicitudes.map((s) => {
-            const estado = ESTADOS[s.estado] ?? { label: s.estado, className: "" };
+            const estado =
+              s.estado === "descargado" && s.error_msg
+                ? INCOMPLETA
+                : (ESTADOS[s.estado] ?? { label: s.estado, className: "" });
             return (
               <TableRow key={s.id}>
                 <TableCell className="whitespace-nowrap">{fechaHora(s.created_at)}</TableCell>

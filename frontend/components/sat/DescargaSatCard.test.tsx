@@ -115,6 +115,20 @@ describe("DescargaSatCard", () => {
     expect(await screen.findByText("SAT reportó estado: rechazada")).toBeInTheDocument();
   });
 
+  it("flags a download that is missing CFDI reported by the SAT", async () => {
+    const aviso =
+      "Descarga incompleta: se importaron 287 de los 289 CFDI que reportó el SAT; 2 no se pudieron importar.";
+    mockApi({ tiene_fiel: true, vencida: false }, [
+      { ...solicitud, cfdi_importados: 287, error_msg: aviso },
+    ]);
+    renderCard();
+
+    expect(await screen.findByText("Incompleta")).toBeInTheDocument();
+    expect(screen.queryByText("Descargado")).not.toBeInTheDocument();
+    expect(screen.getByText(aviso)).toBeInTheDocument();
+    expect(screen.getByText("287 de 289")).toBeInTheDocument();
+  });
+
   it("asks the backend to advance downloads that are still in progress", async () => {
     mockApi({ tiene_fiel: true, vencida: false }, [{ ...solicitud, estado: "solicitado" }]);
     renderCard();
