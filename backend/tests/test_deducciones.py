@@ -140,3 +140,26 @@ def test_caso_b_acumulado_ejercicio():
     assert res["gasto"] == Decimal("43000.00")
     assert res["costo_identificado"] == Decimal("120000.00")
     assert res["total_deducible"] == Decimal("43000.00")
+
+
+def test_gasto_con_descuento_deduce_el_neto():
+    cfdis = [_cfdi(subtotal=Decimal("20000"), descuento=Decimal("5000"), total=Decimal("17400"))]
+    res = deducciones_periodo(cfdis, [], RFC, *ENERO)
+    assert res["gasto"] == Decimal("15000.00")
+    assert res["total_deducible"] == Decimal("15000.00")
+
+
+def test_gasto_con_descuento_total_no_se_deduce():
+    # Antes se rechazaba al importar; con Total 0 ya entra y no debe deducir el SubTotal
+    cfdis = [_cfdi(subtotal=Decimal("1000"), descuento=Decimal("1000"), total=Decimal("0"))]
+    res = deducciones_periodo(cfdis, [], RFC, *ENERO)
+    assert res["total_deducible"] == Decimal("0.00")
+
+
+def test_gasto_ppd_con_descuento_deduce_el_neto_proporcional():
+    # Neto 8,000 (Total 9,280): un pago de la mitad del total deduce la mitad del neto
+    cfdis = [_cfdi(uuid="U9", metodo_pago="PPD", subtotal=Decimal("10000"),
+                   descuento=Decimal("2000"), total=Decimal("9280"))]
+    pagos = [_pago("U9", "4640", "2026-01-20")]
+    res = deducciones_periodo(cfdis, pagos, RFC, *ENERO)
+    assert res["gasto"] == Decimal("4000.00")

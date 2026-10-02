@@ -12,7 +12,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
-from .iva import UMBRAL_EFECTIVO, _uuid_key
+from .iva import UMBRAL_EFECTIVO, _base, _uuid_key
 
 CENTAVOS = Decimal("0.01")
 USOS_INVERSION = {f"I0{n}" for n in range(1, 9)}  # I01..I08 (catálogo SAT c_UsoCFDI)
@@ -94,28 +94,28 @@ def deducciones_periodo(
 
         if tipo == "E":  # nota de crédito recibida -> resta de su cubeta
             if _en_rango(c.get("fecha_emision"), desde, hasta):
-                buckets[cubeta] -= _dec(c.get("subtotal"))
+                buckets[cubeta] -= _base(c)
             continue
 
         if tipo != "I":
             continue
 
         total = _dec(c.get("total"))
-        subtotal = _dec(c.get("subtotal"))
+        base = _base(c)  # SubTotal - Descuento
         es_efectivo_no_deducible = c.get("forma_pago") == "01" and total > UMBRAL_EFECTIVO
 
         if c.get("metodo_pago") == "PUE":
             if _en_rango(c.get("fecha_emision"), desde, hasta):
                 if es_efectivo_no_deducible:
-                    excluido += subtotal
+                    excluido += base
                 else:
-                    buckets[cubeta] += subtotal
+                    buckets[cubeta] += base
         elif c.get("metodo_pago") == "PPD":
             for p in pagos_por_uuid.get(_uuid_key(c.get("uuid")), []):
                 if not _en_rango(p.get("fecha_pago"), desde, hasta):
                     continue
                 importe = _dec(p.get("importe_pagado"))
-                monto = subtotal * (importe / total) if total > 0 else Decimal("0")
+                monto = base * (importe / total) if total > 0 else Decimal("0")
                 if es_efectivo_no_deducible:
                     excluido += monto
                 else:

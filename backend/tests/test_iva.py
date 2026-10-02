@@ -206,3 +206,21 @@ def test_aplicar_prorrateo_reduce_por_factor():
 
 def test_aplicar_prorrateo_factor_uno_no_cambia():
     assert aplicar_prorrateo(Decimal("3056596"), Decimal("1")) == Decimal("3056596.00")
+
+
+def test_la_base_del_ingreso_descuenta_el_descuento():
+    # SubTotal 10,000 con descuento de 2,000: la base gravable es 8,000 (IVA 1,280)
+    cfdis = [_cfdi(subtotal=Decimal("10000"), descuento=Decimal("2000"),
+                   total=Decimal("9280"), iva_trasladado=Decimal("1280"))]
+    res = iva_trasladado(cfdis, [], "2026-01", RFC)
+    assert res["pue"]["base"] == Decimal("8000.00")
+    assert res["pue"]["iva"] == Decimal("1280.00")
+
+
+def test_cfdi_con_descuento_total_no_suma_base_acreditable():
+    # Descuento del 100 %: Total 0, no hay base ni IVA que acreditar
+    cfdis = [_cfdi(rfc_emisor=PROV, rfc_receptor=RFC, subtotal=Decimal("1000"),
+                   descuento=Decimal("1000"), total=Decimal("0"))]
+    res = iva_acreditable(cfdis, [], "2026-01", RFC)
+    assert res["pue"]["base"] == Decimal("0.00")
+    assert res["bruto"] == Decimal("0.00")

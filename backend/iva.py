@@ -25,6 +25,11 @@ def _dec(valor: Any) -> Decimal:
     return Decimal(str(valor))
 
 
+def _base(c: dict) -> Decimal:
+    """Base del CFDI: SubTotal menos Descuento (el descuento reduce la base gravable)."""
+    return _dec(c.get("subtotal")) - _dec(c.get("descuento"))
+
+
 def _uuid_key(uuid: Any) -> str:
     """Clave de cruce CFDI ↔ pago: el UUID en mayúsculas (los XML lo traen con
     caja distinta según el emisor; el cruce no debe depender de eso)."""
@@ -80,7 +85,7 @@ def iva_trasladado(
 
         if tipo == "E":  # nota de crédito emitida (PUE, en el periodo)
             if _en_periodo(c.get("fecha_emision"), periodo):
-                nc_base += _dec(c.get("subtotal"))
+                nc_base += _base(c)
                 nc_iva += _dec(c.get("iva_trasladado"))
             continue
 
@@ -89,7 +94,7 @@ def iva_trasladado(
 
         if metodo == "PUE":
             if _en_periodo(c.get("fecha_emision"), periodo):
-                pue_base += _dec(c.get("subtotal"))
+                pue_base += _base(c)
                 pue_iva += _dec(c.get("iva_trasladado"))
         elif metodo == "PPD":
             total = _dec(c.get("total"))
@@ -148,7 +153,7 @@ def iva_acreditable(
         tipo = c.get("tipo_comprobante")
         if tipo == "E":  # nota de crédito recibida -> reduce el IVA acreditable
             if _en_periodo(c.get("fecha_emision"), periodo):
-                nc_base += _dec(c.get("subtotal"))
+                nc_base += _base(c)
                 nc_iva += _dec(c.get("iva_trasladado"))
             continue
         if tipo != "I":
@@ -163,7 +168,7 @@ def iva_acreditable(
                 if es_efectivo_no_deducible:
                     exc_iva += iva_cfdi
                 else:
-                    pue_base += _dec(c.get("subtotal"))
+                    pue_base += _base(c)
                     pue_iva += iva_cfdi
         elif c.get("metodo_pago") == "PPD":
             for p in pagos_por_uuid.get(_uuid_key(c.get("uuid")), []):
