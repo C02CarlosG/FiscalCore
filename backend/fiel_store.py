@@ -67,8 +67,9 @@ def guardar_fiel(
     Guarda (o reemplaza) la FIEL de una empresa de forma cifrada.
 
     Si se pasa ``rfc_esperado`` (el RFC de la empresa) y el certificado es de
-    otro contribuyente, se rechaza: el SAT no entregaría los CFDI de la empresa
-    con una e.firma ajena, y la falla llegaría hasta el momento de descargar.
+    otro contribuyente, o no se le puede leer el RFC, se rechaza: el SAT no
+    entregaría los CFDI de la empresa con una e.firma ajena, y la falla
+    llegaría hasta el momento de descargar.
 
     Valida primero que los archivos sean una FIEL válida usando satcfdi.
     Si ya existía una FIEL para la empresa, la sobreescribe.
@@ -112,10 +113,14 @@ def guardar_fiel(
     except Exception as exc:
         _log.warning("No se pudo extraer metadatos del certificado: %s", exc)
 
+    # Sin RFC legible no se puede comprobar que la e.firma sea de la empresa: se
+    # rechaza, en vez de guardarla y que el error salga hasta descargar del SAT.
     if rfc_esperado and not rfc_cert:
-        _log.warning(
-            "empresa_id=%s: no se pudo leer el RFC del certificado; la e.firma se guarda "
-            "sin validar que sea del RFC %s", empresa_id, rfc_esperado,
+        _log.warning("empresa_id=%s: no se pudo leer el RFC del certificado", empresa_id)
+        raise ValueError(
+            "No se pudo leer el RFC del certificado (.cer), así que no se puede comprobar "
+            f"que la e.firma sea de la empresa ({rfc_esperado.strip().upper()}). "
+            "Verifica que el .cer sea el de la e.firma vigente que entregó el SAT."
         )
 
     if rfc_esperado and rfc_cert and rfc_cert.strip().upper() != rfc_esperado.strip().upper():
