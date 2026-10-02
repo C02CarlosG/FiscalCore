@@ -228,3 +228,182 @@ def condiciones(
         params += valores
 
     return " AND ".join(sql), params
+
+
+# ---------------------------------------------------------------------------
+# Consultas
+# ---------------------------------------------------------------------------
+
+# Importes del encabezado que se suman en los totales (clave → expresión).
+_SUMAS = {
+    "retencion_iva": "COALESCE(c.iva_retenido, 0)",
+    "retencion_isr": "COALESCE(c.isr_retenido, 0)",
+    "traslado_iva": "COALESCE(c.iva_trasladado, 0)",
+    "subtotal": "c.subtotal",
+    "descuento": "COALESCE(c.descuento, 0)",
+    "total": "c.total",
+}
+# Impuestos que solo viven en cfdi_impuestos (clave → (ámbito, impuesto)).
+_SUMAS_IMPUESTOS = {
+    "traslado_ieps": ("traslado", "003"),
+    "retencion_ieps": ("retencion", "003"),
+    "traslado_isr": ("traslado", "001"),
+}
+_ORDEN_TOTALES = (
+    "conteo", "retencion_iva", "retencion_ieps", "retencion_isr", "traslado_iva", "traslado_ieps",
+    "traslado_isr", "total_retenciones", "subtotal", "descuento", "neto", "total",
+)
+
+
+def _json(valor: Any) -> Any:
+    if isinstance(valor, Decimal):
+        return float(valor)
+    if isinstance(valor, (datetime, date)):
+        return valor.isoformat()
+    return valor
+
+
+def _item(fila: dict) -> dict:
+    item = {clave: _json(valor) for clave, valor in fila.items()}
+    for derivada, (origen, catalogo) in DESCRIPCIONES.items():
+        item[derivada] = catalogos_sat.descripcion(catalogo, fila.get(origen))
+    return item
+
+
+def listar(empresa_id: str, rfc: str, c: Consulta) -> dict:
+    """Una página del listado. Primero se recorta la página (orden + límite) y
+    solo sobre esas filas se calculan las columnas que dependen de subconsultas."""
+    cols = columnas(c.direccion, c.tipo)
+    desde, hasta = rango(c.periodo)
+    where, params = condiciones(c, empresa_id, rfc, desde=desde, hasta=hasta)
+
+    total = db.query_one(f"SELECT COUNT(*) AS n FROM cfdi c WHERE {where}", tuple(params))["n"]
+    orden = next(col.sql for col in cols if col.clave == c.orden)
+    direccion = "DESC" if c.dir == "desc" else "ASC"
+    seleccion = ", ".join(f'{col.sql} AS "{col.clave}"' for col in cols if col.sql)
+
+    filas = db.query_all(
+        f"""
+        WITH pagina AS (
+            SELECT c.id, ROW_NUMBER() OVER (ORDER BY {orden} {direccion} NULLS LAST, c.id) AS n
+            FROM cfdi c
+            WHERE {where}
+            ORDER BY n
+            LIMIT %s OFFSET %s
+        )
+        SELECT {seleccion}
+        FROM pagina p
+        JOIN cfdi c ON c.id = p.id
+        {LATERALES}
+        ORDER BY p.n
+        """,
+        (*params, c.por_pagina, (c.pagina - 1) * c.por_pagina),
+    )
+    return {
+        "items": [_item(f) for f in filas],
+        "total": int(total),
+        "pagina": c.pagina,
+        "por_pagina": c.por_pagina,
+    }
+
+
+def _bloque(prefijo: str, encabezado: dict, impuestos: dict) -> dict:
+    conteo = int(encabezado[f"{prefijo}_conteo"] or 0)
+    if conteo == 0:
+        return {clave: (0 if clave == "conteo" else None) for clave in _ORDEN_TOTALES}
+
+    def pesos(fila: dict, clave: str) -> Decimal:
+        return Decimal(str(fila.get(f"{prefijo}_{clave}") or 0))
+
+    t = {clave: pesos(encabezado, clave) for clave in _SUMAS}
+    t.update({clave: pesos(impuestos, clave) for clave in _SUMAS_IMPUESTOS})
+    t["neto"] = t["subtotal"] - t["descuento"]
+    t["total_retenciones"] = t["retencion_iva"] + t["retencion_isr"] + t["retencion_ieps"]
+    bloque = {clave: float(t[clave].quantize(CENTAVOS, rounding=ROUND_HALF_UP)) for clave in _ORDEN_TOTALES[1:]}
+    return {"conteo": conteo, **{clave: bloque[clave] for clave in _ORDEN_TOTALES[1:]}}
+
+
+def _advertencias(empresa_id: str, rfc: str, desde: date, hasta: date) -> list[dict]:
+    """Facturas que aplican un anticipo (TipoRelacion 07) sin su CFDI de egreso
+    con forma de pago 30 en el periodo."""
+    filas = db.query_all(
+        """
+        SELECT f.uuid
+        FROM cfdi f
+        WHERE f.empresa_id = %s AND f.rfc_emisor = %s AND f.tipo_comprobante = 'I'
+          AND f.fecha_emision >= %s AND f.fecha_emision < %s
+          AND COALESCE(f.cfdi_relacionados, '[]'::jsonb) @> '[{"tipo_relacion": "07"}]'::jsonb
+          AND NOT EXISTS (
+              SELECT 1
+              FROM cfdi e, jsonb_array_elements(COALESCE(e.cfdi_relacionados, '[]'::jsonb)) r
+              WHERE e.empresa_id = f.empresa_id AND e.rfc_emisor = f.rfc_emisor
+                AND e.tipo_comprobante = 'E' AND e.forma_pago = '30'
+                AND e.fecha_emision >= %s AND e.fecha_emision < %s
+                AND r->'uuids' @> to_jsonb(UPPER(f.uuid))
+          )
+        ORDER BY f.fecha_emision
+        """,
+        (empresa_id, rfc, desde, hasta, desde, hasta),
+    )
+    return [
+        {
+            "tipo": "sin_egreso_anticipo",
+            "uuid_factura": f["uuid"],
+            "mensaje": f"La factura {f['uuid'][:8]}... aplica anticipo (TipoRel=07) pero no se encontró "
+                       "CFDI Egreso con FormaPago=30 en el periodo",
+        }
+        for f in filas
+    ]
+
+
+def resumen(empresa_id: str, rfc: str, c: Consulta) -> dict:
+    """Conteos por tipo (para las pestañas) y totales en pesos del tipo activo:
+    del periodo y del acumulado del ejercicio (enero al mes del periodo)."""
+    desde, hasta = rango(c.periodo)
+    enero = date(desde.year, 1, 1)
+
+    where, params = condiciones(c, empresa_id, rfc, desde=desde, hasta=hasta, con_tipo=False)
+    conteos = {t: 0 for t in TIPOS}
+    for fila in db.query_all(
+        f"SELECT c.tipo_comprobante AS tipo, COUNT(*) AS n FROM cfdi c WHERE {where} GROUP BY c.tipo_comprobante",
+        tuple(params),
+    ):
+        if fila["tipo"] in conteos:
+            conteos[fila["tipo"]] = int(fila["n"])
+
+    where, params = condiciones(c, empresa_id, rfc, desde=enero, hasta=hasta)
+    base = f"""
+        WITH base AS (
+            SELECT c.id, (c.fecha_emision >= %s) AS en_periodo, {A_PESOS} AS tc,
+                   {", ".join(f"{expr} AS {clave}" for clave, expr in _SUMAS.items())}
+            FROM cfdi c
+            WHERE {where}
+        )
+    """
+    sumas = ", ".join(
+        f"SUM({clave} * tc) FILTER (WHERE en_periodo) AS p_{clave}, SUM({clave} * tc) AS a_{clave}"
+        for clave in _SUMAS
+    )
+    encabezado = db.query_one(
+        f"{base} SELECT COUNT(*) FILTER (WHERE en_periodo) AS p_conteo, COUNT(*) AS a_conteo, {sumas} FROM base",
+        (desde, *params),
+    )
+    sumas = ", ".join(
+        f"SUM(i.importe * b.tc) FILTER (WHERE b.en_periodo AND i.ambito = '{ambito}' AND i.impuesto = '{impuesto}')"
+        f" AS p_{clave}, "
+        f"SUM(i.importe * b.tc) FILTER (WHERE i.ambito = '{ambito}' AND i.impuesto = '{impuesto}') AS a_{clave}"
+        for clave, (ambito, impuesto) in _SUMAS_IMPUESTOS.items()
+    )
+    impuestos = db.query_one(
+        f"{base} SELECT {sumas} FROM base b JOIN cfdi_impuestos i ON i.cfdi_id = b.id AND i.impuesto <> '002'",
+        (desde, *params),
+    )
+
+    return {
+        "conteos": conteos,
+        "totales": {
+            "periodo": _bloque("p", encabezado, impuestos),
+            "acumulado": _bloque("a", encabezado, impuestos),
+        },
+        "advertencias": _advertencias(empresa_id, rfc, desde, hasta) if c.direccion == "emitidos" else [],
+    }
