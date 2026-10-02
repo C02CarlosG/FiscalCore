@@ -214,6 +214,19 @@ def test_advertencia_de_factura_con_anticipo_sin_egreso(entorno):
     assert _get(entorno, "/resumen", periodo="2026-04")["advertencias"] == []
 
 
+def test_las_fechas_salen_en_la_hora_del_comprobante_sin_zona(entorno):
+    """La fecha del CFDI es hora local del emisor: no debe convertirse a otra zona
+    (un CFDI del día 1 a las 00:30 no puede mostrarse como del día anterior)."""
+    db, _client, _headers, empresa_id = entorno
+    _cfdi(db, empresa_id, 970, fecha_emision="2026-05-01 00:30:00", fecha_timbrado="2026-05-01 00:31:05")
+
+    items = _get(entorno, periodo="2026-05")["items"]
+
+    assert [(i["folio"], i["fecha_emision"], i["fecha_timbrado"]) for i in items] == [
+        ("970", "2026-05-01T00:30:00", "2026-05-01T00:31:05")]
+    assert _get(entorno, periodo="2026-04", q=_uuid(970))["total"] == 0
+
+
 def test_columnas_publica_el_catalogo_sin_sql(entorno):
     r = _get(entorno, "/columnas")
 

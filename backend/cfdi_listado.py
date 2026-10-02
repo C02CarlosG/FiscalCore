@@ -23,9 +23,12 @@ POR_PAGINA = (30, 50, 100)
 MAX_FILTROS = 10
 MAX_TEXTO = 200
 MAX_BUSQUEDA = 100
+MAX_PAGINA = 100_000
+MAX_NUMERO = Decimal("1e15")   # holgado para cualquier importe; evita desbordar NUMERIC
 CENTAVOS = Decimal("0.01")
 
-_PERIODO_RE = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
+# Años 2000-2099: fuera de eso date() o Postgres fallan, y no hay CFDI.
+_PERIODO_RE = re.compile(r"20[0-9]{2}-(0[1-9]|1[0-2])")
 _COMPARACION = {"igual": "=", "mayor": ">", "menor": "<"}
 _NUMERICOS = ("igual", "mayor", "menor", "entre")
 OPERADORES = {
@@ -68,6 +71,17 @@ def _escapar_like(texto: str) -> str:
     return texto.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
+def _texto_seguro(texto: str, nombre: str) -> str:
+    """Rechaza texto que Postgres no puede recibir (NUL) o que no es UTF-8 válido."""
+    try:
+        texto.encode("utf-8")
+    except UnicodeEncodeError:
+        raise FiltroInvalido(f"Texto inválido en {nombre}")
+    if "\x00" in texto:
+        raise FiltroInvalido(f"Texto inválido en {nombre}")
+    return texto
+
+
 def _valor(col: Columna, valor: Any) -> Any:
     """Convierte y valida un valor de filtro según el tipo de dato de la columna."""
     if isinstance(valor, (dict, list)) or valor is None:
@@ -81,15 +95,15 @@ def _valor(col: Columna, valor: Any) -> Any:
             numero = Decimal(str(valor))
         except Exception:
             raise FiltroInvalido(f"{col.clave} espera un número")
-        if not numero.is_finite():
-            raise FiltroInvalido(f"{col.clave} espera un número")
+        if not numero.is_finite() or abs(numero) >= MAX_NUMERO or numero.as_tuple().exponent < -6:
+            raise FiltroInvalido(f"{col.clave} espera un número de hasta 15 enteros y 6 decimales")
         return numero
     if col.tipo_dato in ("fecha", "fecha_hora"):
         try:
             return date.fromisoformat(str(valor))
         except ValueError:
             raise FiltroInvalido(f"{col.clave} espera una fecha AAAA-MM-DD")
-    texto = str(valor)
+    texto = _texto_seguro(str(valor), col.clave)
     if len(texto) > MAX_TEXTO:
         raise FiltroInvalido(f"Valor demasiado largo para {col.clave}")
     if col.tipo_dato == "catalogo" and col.opciones and texto not in col.opciones:
@@ -103,7 +117,7 @@ def _validar_filtros(crudo: Any, por_clave: dict[str, Columna]) -> list[dict]:
     if isinstance(crudo, str):
         try:
             crudo = json.loads(crudo)
-        except ValueError:
+        except (ValueError, RecursionError):
             raise FiltroInvalido("filtros debe ser JSON válido")
     if not isinstance(crudo, list):
         raise FiltroInvalido("filtros debe ser una lista")
@@ -114,11 +128,11 @@ def _validar_filtros(crudo: Any, por_clave: dict[str, Columna]) -> list[dict]:
     for f in crudo:
         if not isinstance(f, dict) or "valor" not in f:
             raise FiltroInvalido("Cada filtro lleva campo, op y valor")
-        col = por_clave.get(f.get("campo"))
+        campo, op = f.get("campo"), f.get("op")
+        col = por_clave.get(campo) if isinstance(campo, str) else None
         if col is None or not col.filtrable:
-            raise FiltroInvalido(f"No se puede filtrar por {f.get('campo')!r}")
-        op = f.get("op")
-        if op not in OPERADORES.get(col.tipo_dato, ()):
+            raise FiltroInvalido(f"No se puede filtrar por {campo!r}")
+        if not isinstance(op, str) or op not in OPERADORES.get(col.tipo_dato, ()):
             raise FiltroInvalido(f"Operador {op!r} no aplica a {col.clave}")
         valor = f["valor"]
         if op in ("entre", "en"):
@@ -147,7 +161,7 @@ def validar(
 ) -> Consulta:
     """Valida todos los parámetros contra el catálogo. Lanza ``FiltroInvalido``."""
     _uno_de("direccion", direccion, DIRECCIONES)
-    if not isinstance(periodo, str) or not _PERIODO_RE.match(periodo):
+    if not isinstance(periodo, str) or not _PERIODO_RE.fullmatch(periodo):
         raise FiltroInvalido("periodo inválido; formato esperado YYYY-MM")
     _uno_de("tipo", tipo, TIPOS)
     _uno_de("estado", estado, ESTADOS)
@@ -155,9 +169,9 @@ def validar(
     _uno_de("pago", pago, PAGOS)
     _uno_de("dir", dir, ("asc", "desc"))
     _uno_de("por_pagina", por_pagina, POR_PAGINA)
-    if not isinstance(pagina, int) or pagina < 1:
-        raise FiltroInvalido("pagina debe ser un entero mayor o igual a 1")
-    q = (q or "").strip() or None
+    if not isinstance(pagina, int) or not 1 <= pagina <= MAX_PAGINA:
+        raise FiltroInvalido(f"pagina debe ser un entero entre 1 y {MAX_PAGINA}")
+    q = _texto_seguro(q or "", "la búsqueda").strip() or None
     if q and len(q) > MAX_BUSQUEDA:
         raise FiltroInvalido(f"La búsqueda admite hasta {MAX_BUSQUEDA} caracteres")
 
@@ -258,7 +272,11 @@ _ORDEN_TOTALES = (
 def _json(valor: Any) -> Any:
     if isinstance(valor, Decimal):
         return float(valor)
-    if isinstance(valor, (datetime, date)):
+    if isinstance(valor, datetime):
+        # La fecha del CFDI es hora local del emisor y se guardó sin convertir:
+        # se devuelve tal cual, sin zona, para que el navegador no la desplace.
+        return valor.replace(tzinfo=None).isoformat()
+    if isinstance(valor, date):
         return valor.isoformat()
     return valor
 

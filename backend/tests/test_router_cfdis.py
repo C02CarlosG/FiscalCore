@@ -60,6 +60,10 @@ def test_resumen_delega(con_acceso, monkeypatch):
     {"filtros": "no es json"},
     {"filtros": '[{"campo": "total", "op": "mayor; DROP TABLE cfdi", "valor": 1}]'},
     {"filtros": '[{"campo": "total) OR (1=1", "op": "igual", "valor": 1}]'},
+    {"periodo": "0000-01"},
+    {"pagina": 10 ** 30},
+    {"q": "a\x00b"},
+    {"filtros": "[" * 3000},
 ])
 def test_parametros_invalidos_responden_422_sin_tocar_la_base(con_acceso, monkeypatch, params):
     def _no_debe_consultar(*a, **k):

@@ -125,8 +125,10 @@ Cuando no hay CFDI, las cifras van en `null` (la pantalla muestra un guion, no c
 ### `GET /cfdis/columnas?direccion=&tipo=`
 
 Catálogo de columnas para ese tipo: `clave`, `etiqueta`, `tipo_dato` (`texto`, `fecha`,
-`fecha_hora`, `moneda`, `numero`, `booleano`, `catalogo`), `grupo` (`encabezado`,
-`concepto`), `visible_por_defecto`, `ordenable`, `filtrable`.
+`fecha_hora`, `moneda`, `numero`, `booleano`, `catalogo`, `lista`), `grupo`
+(`encabezado`, `concepto`), `visible_por_defecto`, `ordenable`, `filtrable` y `opciones`
+(valores válidos de una columna de catálogo). Las fechas viajan en ISO 8601 sin zona:
+son la hora local del comprobante.
 
 Columnas de encabezado para Ingreso y Egreso (★ = visible por defecto):
 

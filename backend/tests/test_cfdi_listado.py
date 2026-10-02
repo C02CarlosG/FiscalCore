@@ -40,6 +40,14 @@ def test_rango_del_periodo():
     {"orden": "fecha_emision; DROP TABLE cfdi"},
     {"orden": "pagos_relacionados"},          # existe, pero no es ordenable
     {"q": "x" * 101},
+    # Entradas que llegaban a la base o a Python y respondían 500 (revisión final):
+    {"periodo": "0000-01"},
+    {"periodo": "9999-12"},
+    {"periodo": "2026-03\n"},
+    {"pagina": 10 ** 30},
+    {"pagina": 100_001},
+    {"q": "a\x00b"},
+    {"q": "\ud800"},
 ])
 def test_parametros_fuera_de_catalogo_se_rechazan(kw):
     base = {"direccion": "emitidos", "periodo": "2026-09"}
@@ -65,6 +73,16 @@ def test_parametros_fuera_de_catalogo_se_rechazan(kw):
     '[{"campo": "serie", "op": "igual"}]',
     json.dumps([{"campo": "serie", "op": "igual", "valor": "A"}] * 11),
     json.dumps([{"campo": "serie", "op": "igual", "valor": "x" * 201}]),
+    # Entradas que respondían 500 (revisión final):
+    '[{"campo": ["total"], "op": "igual", "valor": 1}]',
+    '[{"campo": {"a": 1}, "op": "igual", "valor": 1}]',
+    '[{"campo": "total", "op": ["igual"], "valor": 1}]',
+    '[{"campo": "serie", "op": "igual", "valor": "a\\u0000b"}]',
+    '[{"campo": "serie", "op": "igual", "valor": "\\ud800"}]',
+    '[{"campo": "total", "op": "mayor", "valor": "1e999999"}]',
+    '[{"campo": "total", "op": "mayor", "valor": "1e-999999"}]',
+    '[{"campo": "total", "op": "mayor", "valor": 1e15}]',
+    "[" * 3000,
 ])
 def test_filtros_avanzados_invalidos_se_rechazan(filtros):
     with pytest.raises(cl.FiltroInvalido):
