@@ -140,6 +140,20 @@ describe("DescargaSatCard", () => {
     expect(options!.method).toBe("POST");
   });
 
+  it("stops advancing and shows the error when a pass fails", async () => {
+    mockApi({ tiene_fiel: true, vencida: false }, [{ ...solicitud, estado: "en_proceso" }]);
+    const base = vi.mocked(apiFetch).getMockImplementation()!;
+    vi.mocked(apiFetch).mockImplementation(async (path: string, options?: RequestInit) => {
+      if (path === AVANZAR_URL) throw new Error("No hay FIEL guardada para esta empresa");
+      return base(path, options);
+    });
+    renderCard();
+
+    const alerta = await screen.findByRole("alert");
+    expect(alerta).toHaveTextContent("No se pudo avanzar la descarga: No hay FIEL guardada para esta empresa");
+    expect(screen.getByRole("button", { name: "Reintentar" })).toBeInTheDocument();
+  });
+
   it("does not call the SAT when no download is in progress", async () => {
     mockApi({ tiene_fiel: true, vencida: false }, [solicitud]);
     renderCard();

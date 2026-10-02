@@ -658,7 +658,7 @@ def _avanzar_solicitud(creds, solicitud: dict) -> str:
             periodo=solicitud["periodo_inicio"],
             paquetes=id_paquetes,
             desde=tomada.get("paquetes_descargados") or 0,
-        ) or "terminado"
+        )
 
     # El SAT procesó la solicitud y no encontró CFDI en el periodo: es una
     # descarga terminada con cero comprobantes, no un fallo.
@@ -672,11 +672,14 @@ def _avanzar_solicitud(creds, solicitud: dict) -> str:
         )
         return "descargado"
 
-    # Sin un estado reconocible (el SAT manda 0 cuando rechaza la consulta, p. ej.
-    # "No se encontró la información") tampoco hay nada que esperar.
-    # Salvo el 404 ("Error no controlado"), que el SAT pide reintentar.
-    reintentable = not estado_str and resultado.get("cod_estatus") == "404"
-    if (estado_str in _ESTADOS_FALLO_SAT or not estado_str) and not reintentable:
+    # El SAT manda EstadoSolicitud=0 cuando rechaza la consulta (p. ej. "No se
+    # encontró la información"): no hay nada que esperar. Salvo el 404 ("Error
+    # no controlado"), que el SAT pide reintentar. Un estado que no se reconoce
+    # (otro número, o la respuesta sin estado) se sigue esperando: podría ser
+    # transitorio y marcarlo como fallo descartaría la descarga.
+    estado_raw = getattr(resultado.get("estado"), "value", resultado.get("estado"))
+    consulta_rechazada = str(estado_raw).strip() == "0" and resultado.get("cod_estatus") != "404"
+    if estado_str in _ESTADOS_FALLO_SAT or consulta_rechazada:
         motivo = f"SAT reportó estado: {estado_str}." if estado_str else "El SAT respondió:"
         db.execute(
             "UPDATE sat_solicitudes SET estado='fallo', error_msg=%s, updated_at=NOW() WHERE id=%s",

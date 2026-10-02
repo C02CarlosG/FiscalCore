@@ -1170,3 +1170,20 @@ def test_sync_en_background_reintenta_la_importacion_pendiente(monkeypatch):
     sat._sync_completo_bg(EMPRESA, "2026-09", [{"id": "sol-1"}])
 
     assert llamadas == ["en_proceso", "terminado"]
+
+
+def test_avanzar_estado_desconocido_del_sat_sigue_esperando(monkeypatch):
+    """Solo el 0 explícito es un rechazo: otro número o una respuesta sin estado se espera."""
+    for verificacion in (
+        {"estado": 9, "id_paquetes": [], "num_cfdi": 0},
+        {"id_paquetes": [], "num_cfdi": 0},
+    ):
+        sqls, importaciones = _preparar_avanzar(monkeypatch, [_solicitud_pendiente()], verificacion)
+
+        try:
+            r = client.post(_AVANZAR_URL)
+        finally:
+            _teardown()
+
+        assert r.json() == {"avanzadas": [{"id": "sol-1", "estado": "en_proceso"}]}
+        assert "estado='fallo'" not in sqls[0]

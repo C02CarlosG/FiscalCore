@@ -280,6 +280,25 @@ def test_guardar_fiel_sin_rfc_legible_en_el_certificado_no_bloquea(monkeypatch):
     assert resultado["guardada"] is True
 
 
+def test_guardar_fiel_valida_el_rfc_del_signer_aunque_el_cer_no_sea_der(monkeypatch):
+    """Un .cer que no se lee como DER no debe saltarse la validación del RFC."""
+    monkeypatch.setattr("backend.sat_fiel.cargar_fiel", lambda cer, key, pwd: SimpleNamespace(rfc="SIG010101AAA"))
+
+    db = FakeDB()
+    with pytest.raises(ValueError, match="SIG010101AAA.*OTR010101AAA"):
+        fiel_store.guardar_fiel(db, "emp-1", b"no-es-der", b"key", "pwd", rfc_esperado="OTR010101AAA")
+    assert db.execute_calls == []
+
+
+def test_guardar_fiel_sin_rfc_legible_deja_aviso_en_el_log(monkeypatch, caplog):
+    monkeypatch.setattr("backend.sat_fiel.cargar_fiel", lambda cer, key, pwd: SimpleNamespace(rfc=None))
+
+    with caplog.at_level("WARNING", logger=fiel_store._log.name):
+        fiel_store.guardar_fiel(FakeDB(), "emp-1", b"no-es-un-cert", b"key", "pwd", rfc_esperado="OTR010101AAA")
+
+    assert "sin validar que sea del RFC OTR010101AAA" in caplog.text
+
+
 # ─── cargar_fiel: mensaje de contraseña incorrecta ───────────────────────────
 
 def test_cargar_fiel_con_contrasena_incorrecta_lo_dice_en_espanol():
