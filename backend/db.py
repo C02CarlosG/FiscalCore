@@ -214,6 +214,9 @@ def init_db() -> None:
         # encabezados, impuestos de cada pago (REP) y totales de nómina
         _run_sql_file("028_cfdi_detalle_fiscal.sql")
 
+        # 029 es idempotente — amplía cfdi.serie a VARCHAR(25) (el Anexo 20 permite 25; no cabían en 10)
+        _run_sql_file("029_ampliar_serie_cfdi.sql")
+
 
         # Seed inicial: usuario admin si la base aún no tiene usuarios
         _seed_admin()

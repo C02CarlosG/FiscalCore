@@ -375,3 +375,14 @@ def test_reproceso_sigue_con_el_lote_despues_de_un_xml_ilegible(entorno):
     assert resultado["procesados"] == 1
     assert [e["uuid"] for e in resultado["errores"]] == [UUID_FACTURA]
     assert (_version(db, UUID_FACTURA), _version(db, UUID_REP)) == (-1, 1)
+
+
+def test_subir_factura_con_serie_de_25_caracteres(entorno):
+    # Anexo 20: Serie admite de 1 a 25 caracteres.
+    db, client, headers, empresa_id = entorno
+    serie = "ABCDEFGHIJKLMNOPQRSTUVWXY"
+
+    _subir(client, headers, empresa_id, "factura.xml",
+           _xml_factura().replace(b'Version="4.0"', f'Version="4.0" Serie="{serie}"'.encode(), 1))
+
+    assert db.query_one("SELECT serie FROM cfdi WHERE uuid = %s", (UUID_FACTURA,)) == {"serie": serie}

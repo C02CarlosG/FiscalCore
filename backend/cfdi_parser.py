@@ -533,8 +533,10 @@ class CFDIParser:
         # Para CFDI tipo P, total=0 y Moneda=XXX es correcto según el SAT
         # (los importes residen en pago20:Pago/MontoTotal, no en el nodo raíz)
         if p.tipo_comprobante != "P":
-            if p.total <= 0:
-                errores.append("Total debe ser mayor a 0")
+            # Total en cero es válido: siempre en tipo T, y en ingresos/egresos
+            # con descuento del 100 %. Solo un total negativo es un error.
+            if p.total < 0:
+                errores.append("Total no puede ser negativo")
             # Todos los impuestos del comprobante, no solo IVA/ISR: un CFDI con
             # IEPS (gasolina, bebidas) o impuestos locales (ISH de hoteles, ISN)
             # es válido y su Total los incluye.
