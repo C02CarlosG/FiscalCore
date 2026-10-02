@@ -1,5 +1,5 @@
 -- ============================================================
--- Migración 029: Listado de CFDI
+-- Migración 030: Listado de CFDI
 -- Idempotente: CREATE INDEX / CREATE TABLE IF NOT EXISTS.
 --
 -- El listado filtra siempre por empresa + RFC (emisor o receptor) + rango de

@@ -33,21 +33,21 @@
 
 ---
 
-### Task 1: Migración 029
+### Task 1: Migración 030
 
 **Files:**
-- Create: `database/migrations/029_listado_cfdi.sql`
+- Create: `database/migrations/030_listado_cfdi.sql`
 - Modify: `backend/db.py` (`init_db`, después de la 028)
-- Test: `backend/tests/test_migracion_029.py`
+- Test: `backend/tests/test_migracion_030.py`
 
 **Interfaces:**
 - Produces: tabla `preferencias_tabla (usuario_id, vista, config, updated_at)`; índices `idx_cfdi_emp_emisor_fecha`, `idx_cfdi_emp_receptor_fecha`, `idx_cfdi_impuestos_no_iva`.
 
 - [ ] **Step 1: Prueba que falla**
 
-<!-- T1:test crear backend/tests/test_migracion_029.py -->
+<!-- T1:test crear backend/tests/test_migracion_030.py -->
 ```python
-"""Migración 029: índices del listado de CFDI y preferencias de tabla. Requiere Postgres."""
+"""Migración 030: índices del listado de CFDI y preferencias de tabla. Requiere Postgres."""
 import pytest
 
 from backend.tests.conftest import db_disponible
@@ -55,7 +55,7 @@ from backend.tests.conftest import db_disponible
 pytestmark = [pytest.mark.db, pytest.mark.skipif(not db_disponible(), reason="Postgres no disponible (docker compose up -d db)")]
 
 
-def test_029_crea_indices_y_preferencias_y_se_puede_repetir():
+def test_030_crea_indices_y_preferencias_y_se_puede_repetir():
     from backend import db
 
     db.init_db()
@@ -70,14 +70,14 @@ def test_029_crea_indices_y_preferencias_y_se_puede_repetir():
     assert columnas == {"usuario_id", "vista", "config", "updated_at"}
 ```
 
-- [ ] **Step 2:** Run: `python -m pytest backend/tests/test_migracion_029.py -q` — Expected: FAIL (faltan los índices).
+- [ ] **Step 2:** Run: `python -m pytest backend/tests/test_migracion_030.py -q` — Expected: FAIL (faltan los índices).
 
 - [ ] **Step 3: Migración**
 
-<!-- T1:impl crear database/migrations/029_listado_cfdi.sql -->
+<!-- T1:impl crear database/migrations/030_listado_cfdi.sql -->
 ```sql
 -- ============================================================
--- Migración 029: Listado de CFDI
+-- Migración 030: Listado de CFDI
 -- Idempotente: CREATE INDEX / CREATE TABLE IF NOT EXISTS.
 --
 -- El listado filtra siempre por empresa + RFC (emisor o receptor) + rango de
@@ -105,16 +105,16 @@ CREATE TABLE IF NOT EXISTS preferencias_tabla (
 );
 ```
 
-<!-- T1:impl despues backend/db.py ::         _run_sql_file("028_cfdi_detalle_fiscal.sql") -->
+<!-- T1:impl despues backend/db.py ::         _run_sql_file("029_ampliar_serie_cfdi.sql") -->
 ```python
 
-        # 029 es idempotente — índices del listado de CFDI y preferencias de tabla por usuario
-        _run_sql_file("029_listado_cfdi.sql")
+        # 030 es idempotente — índices del listado de CFDI y preferencias de tabla por usuario
+        _run_sql_file("030_listado_cfdi.sql")
 ```
 
-- [ ] **Step 4:** Run: `python -m pytest backend/tests/test_migracion_029.py -q` — Expected: PASS (1 passed).
+- [ ] **Step 4:** Run: `python -m pytest backend/tests/test_migracion_030.py -q` — Expected: PASS (1 passed).
 
-- [ ] **Step 5:** Actualizar `AGENTS.md` ("through `029_...`") y commit: `feat: agregar migración 029 con índices del listado de CFDI y preferencias de tabla`.
+- [ ] **Step 5:** Actualizar `AGENTS.md` ("through `030_...`") y commit: `feat: agregar migración 030 con índices del listado de CFDI y preferencias de tabla`.
 
 ---
 
@@ -1928,6 +1928,6 @@ def test_el_resumen_del_anio_cuadra_con_lo_sembrado(entorno):
 
 ### Cierre
 
-- [ ] Revisión del agente `migration-validator` sobre la 029 y revisión final de toda la rama por un revisor independiente.
+- [ ] Revisión del agente `migration-validator` sobre la 030 y revisión final de toda la rama por un revisor independiente.
 - [ ] Anotar en el PR los tiempos medidos de la prueba de volumen.
 - [ ] PR de `feat/f3-1-api-listado-cfdi` y marcar F3.1 en el plan maestro.

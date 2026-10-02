@@ -181,7 +181,7 @@ leer (el catálogo puede cambiar entre versiones).
 
 ## Datos
 
-- **Migración 029**:
+- **Migración 030**:
   - Tabla `preferencias_tabla (usuario_id, vista, config JSONB, updated_at)`, llave
     primaria `(usuario_id, vista)`, borrado en cascada con el usuario.
   - Índices compuestos para el listado: `(empresa_id, rfc_emisor, fecha_emision)` y
@@ -308,7 +308,7 @@ Cada una con su plan, su rama y su PR; todas dejan la aplicación funcionando.
 
 | Entrega | Contenido | Depende de |
 |---|---|---|
-| F3.1 | Migración 029 (índices y preferencias), catálogo de columnas, `GET /cfdis`, `/cfdis/resumen`, `/cfdis/columnas`; prueba de volumen | F1 |
+| F3.1 | Migración 030 (índices y preferencias), catálogo de columnas, `GET /cfdis`, `/cfdis/resumen`, `/cfdis/columnas`; prueba de volumen | F1 |
 | F3.2 | Periodo global y estado en la URL; pantalla unificada con barra, pestañas, totales, tabla y paginación; retiro de Visor SAT y Nómina; correcciones chicas | F3.1 |
 | F3.3 | `GET /cfdis/{uuid}` y `/xml`; conceptos en la fila; visor del CFDI | F3.2 |
 | F3.4 | Preferencias de columnas y editor; filtro avanzado; exportación a Excel | F3.2 |
