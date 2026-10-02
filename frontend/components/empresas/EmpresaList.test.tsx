@@ -41,6 +41,29 @@ describe("EmpresaList", () => {
     expect(link).toHaveAttribute("href", "/empresas/e1/ingesta");
   });
 
+  it("lets the user open the empresa from the row", () => {
+    render(<EmpresaList empresas={[empresa]} />);
+
+    expect(screen.getByRole("link", { name: "Acme SA de CV" })).toHaveAttribute(
+      "href",
+      "/empresas/e1/dashboard",
+    );
+    expect(screen.getByRole("link", { name: "Abrir Acme SA de CV" })).toHaveAttribute(
+      "href",
+      "/empresas/e1/dashboard",
+    );
+  });
+
+  it("offers the SAT connection (e.firma) in the actions menu", async () => {
+    render(<EmpresaList empresas={[empresa]} />);
+    await abrirMenuAcciones();
+
+    expect(screen.getByRole("menuitem", { name: "Conexión SAT (e.firma)" })).toHaveAttribute(
+      "href",
+      "/empresas/e1/sat",
+    );
+  });
+
   it("still renders the Cédula de IVA and Conciliación links", async () => {
     render(<EmpresaList empresas={[empresa]} />);
     await abrirMenuAcciones();

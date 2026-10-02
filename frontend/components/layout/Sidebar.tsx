@@ -6,6 +6,7 @@ import { useState } from "react";
 import {
   ChevronDown,
   Building2,
+  CloudDownload,
   FileSpreadsheet,
   FileText,
   GitBranch,
@@ -24,6 +25,7 @@ const NAV_ITEMS = [
   { slug: "ingesta", label: "Ingesta", icon: Upload },
   { slug: "conciliacion", label: "Conciliación", icon: GitBranch },
   { slug: "cedula-iva", label: "Cédula de IVA", icon: FileText },
+  { slug: "sat", label: "Conexión SAT", icon: CloudDownload },
 ] as const;
 
 const CFDI_GROUP = {

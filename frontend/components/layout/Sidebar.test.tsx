@@ -57,6 +57,10 @@ describe("Sidebar", () => {
       "href",
       "/empresas/e1/cedula-iva",
     );
+    expect(screen.getByRole("link", { name: /Conexión SAT/ })).toHaveAttribute(
+      "href",
+      "/empresas/e1/sat",
+    );
   });
 
   it("expands the Gestión de CFDI submenu with its 4 options on click", async () => {

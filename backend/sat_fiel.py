@@ -14,7 +14,7 @@ import base64
 import io
 import logging
 import zipfile
-from datetime import date, datetime
+from datetime import date, datetime, time
 from typing import Optional
 
 _log = logging.getLogger(__name__)
@@ -80,6 +80,8 @@ def cargar_fiel(cer_bytes: bytes, key_bytes: bytes, password: str | bytes) -> "S
         )
         return signer
     except Exception as exc:
+        if "password" in str(exc).lower() or "decrypt" in str(exc).lower():
+            raise FIELError("la contraseña de la llave privada es incorrecta") from exc
         raise FIELError(f"No se pudo cargar la FIEL: {exc}") from exc
 
 
@@ -129,6 +131,13 @@ def solicitar_descarga(
 
     sat_client = SAT(signer=creds)
 
+    # El SAT filtra por fecha y hora de emisión. Una fecha sin hora se toma como
+    # las 00:00:00, lo que dejaba fuera todo el último día del periodo.
+    if not isinstance(fecha_inicio, datetime):
+        fecha_inicio = datetime.combine(fecha_inicio, time.min)
+    if not isinstance(fecha_fin, datetime):
+        fecha_fin = datetime.combine(fecha_fin, time(23, 59, 59))
+
     try:
         if tipo_lower == "emitidos":
             respuesta = sat_client.recover_comprobante_emitted_request(
@@ -150,12 +159,19 @@ def solicitar_descarga(
         raise FIELError(f"Error al solicitar descarga al SAT: {exc}") from exc
 
     id_solicitud = respuesta.get("IdSolicitud")
-    if not id_solicitud:
+    cod_estatus = respuesta.get("CodEstatus")
+    # 5000 = solicitud recibida con éxito; cualquier otro código es un rechazo
+    # (5002 solicitudes agotadas, 5005 duplicada, …) aunque venga un IdSolicitud.
+    if not id_solicitud or (cod_estatus and cod_estatus != "5000"):
         raise FIELError(
-            f"El SAT no devolvió IdSolicitud. Respuesta completa: {respuesta}"
+            f"El SAT rechazó la solicitud de {tipo_lower} "
+            f"(código {cod_estatus}): {respuesta.get('Mensaje') or respuesta}"
         )
 
-    _log.info("Solicitud de descarga registrada. IdSolicitud=%s", id_solicitud)
+    _log.info(
+        "Solicitud de descarga de %s registrada. IdSolicitud=%s CodEstatus=%s Mensaje=%s",
+        tipo_lower, id_solicitud, cod_estatus, respuesta.get("Mensaje"),
+    )
     return id_solicitud
 
 
@@ -176,7 +192,8 @@ def verificar_solicitud(creds: "Signer", id_solicitud: str) -> dict:
           (1=Aceptada, 2=EnProceso, 3=Terminada, 4=Error, 5=Rechazada, 6=Vencida).
         - ``num_cfdi``: cantidad de CFDIs encontrados (int).
         - ``id_paquetes``: lista de strings con los IDs de paquetes disponibles.
-        - ``codigo_estado``: código de estatus SAT (str, opcional).
+        - ``codigo_estado``: código de estado de la solicitud (str, opcional).
+        - ``cod_estatus``: código de estatus de la consulta misma (str, opcional).
         - ``mensaje``: descripción del estado (str, opcional).
 
     Raises:
@@ -196,6 +213,7 @@ def verificar_solicitud(creds: "Signer", id_solicitud: str) -> dict:
         "num_cfdi": respuesta.get("NumeroCFDIs", 0),         # int
         "id_paquetes": respuesta.get("IdsPaquetes", []),     # list[str]
         "codigo_estado": respuesta.get("CodigoEstadoSolicitud"),  # str | None
+        "cod_estatus": respuesta.get("CodEstatus"),          # str | None (estatus de la consulta)
         "mensaje": respuesta.get("Mensaje"),                 # str | None
     }
 

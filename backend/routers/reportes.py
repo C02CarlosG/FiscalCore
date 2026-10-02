@@ -169,7 +169,7 @@ async def generar_diot(
         """
         SELECT c.rfc_emisor   AS rfc_proveedor,
                c.nombre_emisor AS nombre,
-               SUM(c.subtotal)       AS monto_total,
+               SUM(c.subtotal - COALESCE(c.descuento, 0)) AS monto_total,
                SUM(c.iva_trasladado) AS iva_pagado,
                COUNT(*)              AS num_facturas
         FROM cfdi c
@@ -234,7 +234,7 @@ def _cargar_datos_cedula_iva(empresa_id: str, periodo: str):
         """
         SELECT uuid, tipo_comprobante, metodo_pago, estado, es_anticipo_sat,
                rfc_emisor, rfc_receptor, forma_pago, fecha_emision,
-               subtotal, total, iva_trasladado
+               subtotal, descuento, total, iva_trasladado
         FROM cfdi
         WHERE empresa_id = %s
           AND estado = 'vigente'
@@ -468,7 +468,7 @@ def _cargar_datos_deducciones(empresa_id: str, periodo: str):
     cfdis = db.query_all(
         """
         SELECT uuid, tipo_comprobante, metodo_pago, estado, es_anticipo_sat, uso_cfdi,
-               rfc_emisor, rfc_receptor, forma_pago, fecha_emision, subtotal, total
+               rfc_emisor, rfc_receptor, forma_pago, fecha_emision, subtotal, descuento, total
         FROM cfdi
         WHERE empresa_id = %s
           AND estado = 'vigente'

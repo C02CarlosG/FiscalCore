@@ -362,12 +362,32 @@ def test_cuadre_fiscal_incorrecto_genera_error():
     assert any("Cuadre fiscal" in e for e in p.errores)
 
 
-def test_total_cero_en_ingreso_genera_error():
+def test_total_cero_en_ingreso_no_bloquea():
+    # El SAT timbra ingresos en cero (descuento del 100 %, bonificaciones):
+    # descartarlos dejaba fuera CFDI recibidos válidos en la descarga masiva.
     p = _parser().parse_xml(_xml_ingreso(
         comprobante_attrs={"Total": "0", "SubTotal": "0"},
         impuestos_xml='<cfdi:Impuestos TotalImpuestosTrasladados="0"/>',
     ))
-    assert any("Total debe ser mayor a 0" in e for e in p.errores)
+    assert [e for e in p.errores if not e.startswith("AVISO:")] == []
+
+
+def test_traslado_con_total_cero_no_bloquea():
+    # Anexo 20: en un comprobante tipo T el Total siempre es cero.
+    p = _parser().parse_xml(_xml_ingreso(
+        comprobante_attrs={"TipoDeComprobante": "T", "Total": "0", "SubTotal": "0",
+                           "Moneda": "XXX", "MetodoPago": None, "FormaPago": None},
+        impuestos_xml="",
+    ))
+    assert [e for e in p.errores if not e.startswith("AVISO:")] == []
+
+
+def test_total_negativo_genera_error():
+    p = _parser().parse_xml(_xml_ingreso(
+        comprobante_attrs={"Total": "-1160.00", "SubTotal": "-1000.00"},
+        impuestos_xml='<cfdi:Impuestos TotalImpuestosTrasladados="-160.00"/>',
+    ))
+    assert any("Total no puede ser negativo" in e for e in p.errores)
 
 
 def test_cfdi_4_0_sin_campos_requeridos_genera_avisos():

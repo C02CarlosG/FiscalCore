@@ -25,6 +25,7 @@ const LABELS: Record<string, string> = {
   ingesta: "Ingesta",
   conciliacion: "Conciliación",
   "cedula-iva": "Cédula de IVA",
+  sat: "Conexión SAT",
 };
 
 function breadcrumbLabel(pathname: string): string {

@@ -52,3 +52,4 @@ uploads/
 .claude/worktrees/
 .claude/settings.json.bak-*
 .worktrees/
+.vercel

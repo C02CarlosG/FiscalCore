@@ -174,6 +174,11 @@ reinicia, la descarga se pierde). F2 la vuelve desatendida.
 - **Seguridad**: la e.firma sigue cifrada en reposo (`fiel_store`); el worker la
   descifra solo en memoria y solo para empresas con la automatización activada
   (decisión D8). Cada corrida queda en `auditoria` con origen "automático".
+- **Ya adelantado (2026-10-01)**: la pantalla "Conexión SAT" (`/empresas/{id}/sat`)
+  permite guardar, reemplazar y eliminar la e.firma, pedir la descarga manual por mes y
+  ver el historial; al guardar se valida que el certificado sea del RFC de la empresa.
+  F2 agrega sobre ella la automatización. El servidor necesita `FIEL_ENCRYPTION_KEY`
+  en su entorno; hoy no está documentada en `.env.example`.
 - **Cambios de datos previstos**: `sat_solicitudes.usuario_id` deja de ser obligatorio
   (las corridas automáticas no tienen usuario) y se agrega el origen de la solicitud;
   configuración de sincronización por empresa (activa, última corrida exitosa,

@@ -1648,6 +1648,74 @@ paths:
         '502':
           $ref: '#/components/responses/GatewayError'
 
+  /api/v1/sat/empresas/{empresa_id}/fiel/sync/avanzar:
+    post:
+      operationId: avanzarSyncFIEL
+      tags: [SAT FIEL]
+      summary: Dar una pasada a las descargas en curso
+      description: |
+        Verifica en el SAT cada solicitud en curso de la empresa usando la FIEL
+        guardada y, si ya esta lista, descarga sus paquetes e importa los CFDIs
+        dentro de la misma llamada.
+
+        Complementa a `/fiel/sync` en entornos donde el proceso no sobrevive al
+        request (serverless) y el loop en background se corta: el frontend lo
+        llama periodicamente mientras haya descargas en curso.
+
+        Es seguro llamarlo varias veces: cada solicitud se verifica en el SAT
+        como mucho una vez cada 20 segundos y solo una pasada hace la descarga.
+        Una importacion sin avance durante 10 minutos se considera interrumpida
+        y se retoma desde el primer paquete sin importar. Si un paquete no se
+        puede descargar, la solicitud se queda en `terminado` (con el motivo en
+        `error_msg`) y se reintenta en la siguiente pasada; tras 3 intentos
+        fallidos del mismo paquete la solicitud queda en `fallo`.
+
+        Al terminar se cuadran los CFDI importados contra los que reporto el
+        SAT: si faltan, la solicitud queda `descargado` con el aviso de descarga
+        incompleta en `error_msg`. Si el SAT no encontro CFDI en el periodo
+        (CodigoEstadoSolicitud 5004), queda `descargado` con cero CFDI.
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+      responses:
+        '200':
+          description: Estado en que quedo cada solicitud atendida en esta pasada
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [avanzadas]
+                properties:
+                  avanzadas:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, estado]
+                      properties:
+                        id:
+                          type: string
+                          format: uuid
+                        estado:
+                          type: string
+                          enum: [solicitado, en_proceso, terminado, descargado, fallo]
+              example:
+                avanzadas:
+                  - id: "sol-uuid-0001"
+                    estado: descargado
+                  - id: "sol-uuid-0002"
+                    estado: en_proceso
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '422':
+          description: Sin FIEL guardada o FIEL que no se pudo cargar
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                detail: "No hay FIEL guardada para esta empresa"
+
   # ============================================================
   # ADMIN
   # ============================================================

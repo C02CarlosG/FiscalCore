@@ -304,3 +304,39 @@ export interface NominaResponse {
   resumen: NominaResumen;
   recibos: CfdiNominaRow[];
 }
+
+export interface FielEstado {
+  tiene_fiel: boolean;
+  rfc_certificado?: string | null;
+  vigencia_fin?: string | null;
+  dias_restantes?: number | null;
+  vencida?: boolean;
+  por_vencer?: boolean;
+  guardada_el?: string | null;
+}
+
+export type SatTipoDescarga = "emitidos" | "recibidos" | "ambos";
+
+export interface SatSolicitud {
+  id: string;
+  tipo: "emitidos" | "recibidos";
+  periodo_inicio: string;
+  periodo_fin: string;
+  estado: string;
+  num_cfdi: number | null;
+  cfdi_importados: number | null;
+  error_msg: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SatAvanzarResponse {
+  avanzadas: { id: string; estado: string }[];
+}
+
+export interface SatSyncResponse {
+  mensaje: string;
+  solicitudes: { id: string; tipo: string }[];
+  periodo: string;
+  tipos: string[];
+}

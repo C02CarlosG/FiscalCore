@@ -61,9 +61,15 @@ def guardar_fiel(
     cer_bytes: bytes,
     key_bytes: bytes,
     password: str,
+    rfc_esperado: str | None = None,
 ) -> dict:
     """
     Guarda (o reemplaza) la FIEL de una empresa de forma cifrada.
+
+    Si se pasa ``rfc_esperado`` (el RFC de la empresa) y el certificado es de
+    otro contribuyente, o no se le puede leer el RFC, se rechaza: el SAT no
+    entregaría los CFDI de la empresa con una e.firma ajena, y la falla
+    llegaría hasta el momento de descargar.
 
     Valida primero que los archivos sean una FIEL válida usando satcfdi.
     Si ya existía una FIEL para la empresa, la sobreescribe.
@@ -78,8 +84,13 @@ def guardar_fiel(
     except FIELError as exc:
         raise ValueError(f"FIEL inválida: {exc}") from exc
 
-    # 2. Extraer metadatos del certificado directamente del .cer
-    rfc_cert = None
+    # 2. Extraer metadatos del certificado. El RFC se toma primero del signer
+    #    de satcfdi, fuera del parseo DER: si el .cer no se lee como DER, la
+    #    validación contra el RFC de la empresa no debe saltarse por eso.
+    try:
+        rfc_cert = getattr(signer, "rfc", None)
+    except Exception:
+        rfc_cert = None
     vigencia_fin = None
     try:
         from cryptography import x509
@@ -90,9 +101,8 @@ def guardar_fiel(
             vigencia_fin = cert.not_valid_after_utc.date()
         except AttributeError:
             vigencia_fin = cert.not_valid_after.date()  # fallback versiones anteriores
-        # Extraer RFC del Subject (OID 2.5.4.45 o del CN)
+        # Si el signer no expone el RFC, sacarlo del CN del Subject
         try:
-            rfc_cert = getattr(signer, "rfc", None)
             if not rfc_cert:
                 cn = cert.subject.get_attributes_for_oid(x509.NameOID.COMMON_NAME)
                 if cn:
@@ -102,6 +112,22 @@ def guardar_fiel(
             pass
     except Exception as exc:
         _log.warning("No se pudo extraer metadatos del certificado: %s", exc)
+
+    # Sin RFC legible no se puede comprobar que la e.firma sea de la empresa: se
+    # rechaza, en vez de guardarla y que el error salga hasta descargar del SAT.
+    if rfc_esperado and not rfc_cert:
+        _log.warning("empresa_id=%s: no se pudo leer el RFC del certificado", empresa_id)
+        raise ValueError(
+            "No se pudo leer el RFC del certificado (.cer), así que no se puede comprobar "
+            f"que la e.firma sea de la empresa ({rfc_esperado.strip().upper()}). "
+            "Verifica que el .cer sea el de la e.firma vigente que entregó el SAT."
+        )
+
+    if rfc_esperado and rfc_cert and rfc_cert.strip().upper() != rfc_esperado.strip().upper():
+        raise ValueError(
+            f"La e.firma corresponde al RFC {rfc_cert.strip().upper()}, "
+            f"no al de la empresa ({rfc_esperado.strip().upper()})"
+        )
 
     # 3. Cifrar credenciales
     cer_cifrado = _cifrar(cer_bytes)

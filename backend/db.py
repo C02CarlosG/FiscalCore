@@ -29,16 +29,21 @@ _SEED_ADMIN_EMAIL = os.getenv("SEED_ADMIN_EMAIL", "admin@fiscalcore.mx")
 _SEED_ADMIN_DEFAULT_PASSWORD = "Admin2024!"
 _SEED_ADMIN_PASSWORD = os.getenv("SEED_ADMIN_PASSWORD", _SEED_ADMIN_DEFAULT_PASSWORD)
 
-if DATABASE_URL == _LOCAL_DEFAULT and os.getenv("RAILWAY_ENVIRONMENT"):
-    log.warning("DB: usando credenciales locales en Railway — configura DATABASE_URL")
+# Desplegado (Railway o Vercel, incluidos los previews: también son públicos).
+_DESPLEGADO = "RAILWAY_ENVIRONMENT" if os.getenv("RAILWAY_ENVIRONMENT") else (
+    "VERCEL" if os.getenv("VERCEL") else None
+)
 
-# Mismo criterio que JWT_SECRET/FIEL_ENCRYPTION_KEY: en producción (Railway) no
-# se permite el default de desarrollo — falla explícito al importar en vez de
+if DATABASE_URL == _LOCAL_DEFAULT and _DESPLEGADO:
+    log.warning("DB: usando credenciales locales en un despliegue — configura DATABASE_URL")
+
+# Mismo criterio que JWT_SECRET/FIEL_ENCRYPTION_KEY: en producción no se
+# permite el default de desarrollo — falla explícito al importar en vez de
 # sembrar un admin con contraseña pública y conocida.
-if os.getenv("RAILWAY_ENVIRONMENT") and _SEED_ADMIN_PASSWORD == _SEED_ADMIN_DEFAULT_PASSWORD:
+if _DESPLEGADO and _SEED_ADMIN_PASSWORD == _SEED_ADMIN_DEFAULT_PASSWORD:
     raise RuntimeError(
         "SEED_ADMIN_PASSWORD no configurada en un entorno de producción "
-        "(RAILWAY_ENVIRONMENT detectado). Define una contraseña explícita antes "
+        f"({_DESPLEGADO} detectado). Define una contraseña explícita antes "
         "de desplegar — no uses el default de desarrollo."
     )
 
@@ -213,6 +218,9 @@ def init_db() -> None:
         # 028 es idempotente — detalle fiscal del CFDI: impuestos por tasa, conceptos,
         # encabezados, impuestos de cada pago (REP) y totales de nómina
         _run_sql_file("028_cfdi_detalle_fiscal.sql")
+
+        # 029 es idempotente — amplía cfdi.serie a VARCHAR(25) (el Anexo 20 permite 25; no cabían en 10)
+        _run_sql_file("029_ampliar_serie_cfdi.sql")
 
 
         # Seed inicial: usuario admin si la base aún no tiene usuarios
