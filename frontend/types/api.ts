@@ -339,4 +339,6 @@ export interface SatSyncResponse {
   solicitudes: { id: string; tipo: string }[];
   periodo: string;
   tipos: string[];
+  // Tipos que el SAT rechazó cuando otro sí se aceptó ("emitidos: …").
+  errores?: string[];
 }

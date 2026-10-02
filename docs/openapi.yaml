@@ -1710,7 +1710,15 @@ paths:
 
         Todo ocurre en background. Requiere FIEL guardada y vigente.
 
-        **Tipo**: emitidos | recibidos | ambos
+        **Tipo**: emitidos | recibidos | ambos. Cada tipo se pide por separado:
+        si el SAT rechaza uno, el otro se sigue pidiendo y el rechazo llega en
+        `errores` (responde 502 solo si no se aceptó ninguno).
+
+        **Solicitudes agotadas (CodEstatus 5002)**: el SAT limita de por vida
+        las solicitudes con las mismas fechas y RFC. Si rechaza el mes
+        completo, se vuelve a pedir partido en dos rangos contiguos (corte el
+        dia 15, distinto en cada intento), que cubren el mes segundo a segundo;
+        el mes queda en dos solicitudes de ese tipo.
       parameters:
         - $ref: '#/components/parameters/EmpresaId'
       requestBody:
@@ -1746,6 +1754,7 @@ paths:
                     tipo: recibidos
                 periodo: "2024-01"
                 tipos: [emitidos, recibidos]
+                errores: []
         '400':
           $ref: '#/components/responses/BadRequestError'
         '401':
@@ -3606,5 +3615,10 @@ components:
           type: string
         tipos:
           type: array
+          items:
+            type: string
+        errores:
+          type: array
+          description: Tipos que el SAT rechazó cuando otro sí se aceptó ("emitidos - motivo").
           items:
             type: string

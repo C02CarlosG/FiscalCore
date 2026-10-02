@@ -44,6 +44,12 @@ class FIELError(Exception):
     """Error relacionado con la FIEL o con el servicio SAT Descarga Masiva."""
 
 
+class SolicitudesAgotadasError(FIELError):
+    """CodEstatus 5002: el SAT agotó las solicitudes "de por vida" con esos
+    mismos parámetros (fecha inicial, fecha final y RFC). Con otras fechas
+    todavía se puede pedir."""
+
+
 def _check_satcfdi():
     if not SATCFDI_OK:
         raise FIELError("satcfdi no instalado. Ejecutar: pip install satcfdi")
@@ -162,6 +168,11 @@ def solicitar_descarga(
     cod_estatus = respuesta.get("CodEstatus")
     # 5000 = solicitud recibida con éxito; cualquier otro código es un rechazo
     # (5002 solicitudes agotadas, 5005 duplicada, …) aunque venga un IdSolicitud.
+    if cod_estatus == "5002":
+        raise SolicitudesAgotadasError(
+            f"El SAT ya no acepta más solicitudes de {tipo_lower} con estas mismas fechas "
+            "(código 5002: se agotaron las solicitudes de por vida)."
+        )
     if not id_solicitud or (cod_estatus and cod_estatus != "5000"):
         raise FIELError(
             f"El SAT rechazó la solicitud de {tipo_lower} "
