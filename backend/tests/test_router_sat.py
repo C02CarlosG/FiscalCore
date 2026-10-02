@@ -964,7 +964,8 @@ def test_verificar_solicitud_sin_informacion_queda_descargada(monkeypatch):
     monkeypatch.setattr(db, "query_one", lambda *a, **k: {
         "id": "sol-1", "empresa_id": EMPRESA, "id_solicitud_sat": "id-sat-1",
     })
-    monkeypatch.setattr(db, "execute", lambda *a, **k: None)
+    ejecutados = []
+    monkeypatch.setattr(db, "execute", lambda sql, params=(), returning=False: ejecutados.append((sql, params)))
     monkeypatch.setattr(sat, "cargar_fiel", lambda *a, **k: _FakeSigner())
     monkeypatch.setattr(sat, "verificar_solicitud", lambda *a, **k: {
         "estado": 5, "codigo_estado": "5004", "id_paquetes": [], "num_cfdi": 0,
@@ -981,6 +982,10 @@ def test_verificar_solicitud_sin_informacion_queda_descargada(monkeypatch):
         _teardown()
 
     assert r.json()["estado"] == "descargado"
+    # Limpia el error de un intento anterior: si no, la UI la vería "Incompleta".
+    sql, params = ejecutados[0]
+    assert "error_msg = CASE WHEN %s = 'descargado' THEN NULL" in sql
+    assert params[0] == params[3] == "descargado"
 
 
 # ─── _importar_paquetes_bg ──────────────────────────────────────────────────────
@@ -1078,7 +1083,49 @@ def test_importar_paquete_que_falla_no_se_salta_y_se_reintenta(monkeypatch):
     assert descargados == ["p1", "p2"]  # p3 espera a que p2 se reintente
     sql, params = ejecutados[-1]
     assert "estado" not in sql  # sigue en 'terminado' para la siguiente pasada
-    assert params[0].startswith("No se pudo descargar el paquete 2 de 3: timeout.")
+    assert params[0] == (
+        "No se pudo descargar el paquete 2 de 3 (intento 1 de 3): timeout. "
+        "Se reintentará en unos minutos."
+    )
+
+
+def test_importar_cuenta_los_reintentos_del_mismo_paquete(monkeypatch):
+    previo = "No se pudo descargar el paquete 2 de 3 (intento 1 de 3): timeout. Se reintentará en unos minutos."
+    _, ejecutados = _preparar_importacion(
+        monkeypatch, {"p2": FIELError("timeout")},
+        {"num_cfdi": 3, "cfdi_importados": 1, "error_msg": previo},
+    )
+
+    assert _importar(["p1", "p2", "p3"], desde=1) == "terminado"
+    assert "(intento 2 de 3)" in ejecutados[-1][1][0]
+
+
+def test_importar_paquete_que_agota_los_reintentos_deja_la_solicitud_en_fallo(monkeypatch):
+    """Un paquete que nunca se puede descargar no deja la solicitud 'Importando' para siempre."""
+    previo = "No se pudo descargar el paquete 2 de 3 (intento 2 de 3): timeout. Se reintentará en unos minutos."
+    _, ejecutados = _preparar_importacion(
+        monkeypatch, {"p2": FIELError("timeout")},
+        {"num_cfdi": 3, "cfdi_importados": 1, "error_msg": previo},
+    )
+
+    assert _importar(["p1", "p2", "p3"], desde=1) == "fallo"
+    sql, params = ejecutados[-1]
+    assert "estado='fallo'" in sql
+    assert params[0] == (
+        "No se pudo descargar el paquete 2 de 3 tras 3 intentos: timeout. "
+        "Vuelve a solicitar el periodo."
+    )
+
+
+def test_importar_falla_de_otro_paquete_reinicia_la_cuenta(monkeypatch):
+    previo = "No se pudo descargar el paquete 1 de 3 (intento 2 de 3): timeout. Se reintentará en unos minutos."
+    _, ejecutados = _preparar_importacion(
+        monkeypatch, {"p2": FIELError("timeout")},
+        {"num_cfdi": 3, "cfdi_importados": 1, "error_msg": previo},
+    )
+
+    assert _importar(["p1", "p2", "p3"], desde=1) == "terminado"
+    assert "(intento 1 de 3)" in ejecutados[-1][1][0]
 
 
 def test_importar_retoma_desde_el_paquete_indicado(monkeypatch):

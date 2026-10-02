@@ -1667,7 +1667,8 @@ paths:
         Una importacion sin avance durante 10 minutos se considera interrumpida
         y se retoma desde el primer paquete sin importar. Si un paquete no se
         puede descargar, la solicitud se queda en `terminado` (con el motivo en
-        `error_msg`) y se reintenta en la siguiente pasada.
+        `error_msg`) y se reintenta en la siguiente pasada; tras 3 intentos
+        fallidos del mismo paquete la solicitud queda en `fallo`.
 
         Al terminar se cuadran los CFDI importados contra los que reporto el
         SAT: si faltan, la solicitud queda `descargado` con el aviso de descarga

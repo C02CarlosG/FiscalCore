@@ -12,6 +12,7 @@ wrapper de slowapi y truena al importar.
 """
 import json as _json
 import logging
+import re
 from datetime import date
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Request, UploadFile
@@ -205,9 +206,11 @@ async def verificar_solicitud_endpoint(
 
     db.execute(
         """UPDATE sat_solicitudes
-           SET estado=%s, num_cfdi=%s, num_paquetes=%s, updated_at=NOW()
+           SET estado=%s, num_cfdi=%s, num_paquetes=%s,
+               error_msg = CASE WHEN %s = 'descargado' THEN NULL ELSE error_msg END,
+               updated_at=NOW()
            WHERE id=%s""",
-        (nuevo_estado, num_cfdi, len(id_paquetes), solicitud_id),
+        (nuevo_estado, num_cfdi, len(id_paquetes), nuevo_estado, solicitud_id),
     )
 
     return {
@@ -302,7 +305,8 @@ def _importar_paquetes_bg(
 
     Si un paquete no se puede descargar, la solicitud se queda en 'terminado'
     para reintentarlo después: saltarlo dejaría la descarga incompleta sin
-    que nadie se entere. Al terminar se cuadran los CFDI importados contra los
+    que nadie se entere. Tras ``_MAX_INTENTOS_PAQUETE`` intentos fallidos del
+    mismo paquete la solicitud queda en 'fallo'. Al terminar se cuadran los CFDI importados contra los
     que reportó el SAT y la diferencia queda en ``error_msg``.
 
     Al finalizar, corre el pipeline de conciliación/riesgos/scoring.
@@ -318,12 +322,7 @@ def _importar_paquetes_bg(
             xmls = descargar_paquete(creds, id_paq)
         except FIELError as e:
             _log.error("Error descargando paquete %s: %s", id_paq, e)
-            db.execute(
-                "UPDATE sat_solicitudes SET error_msg=%s, updated_at=NOW() WHERE id=%s",
-                (f"No se pudo descargar el paquete {num_paq} de {len(paquetes)}: {e}. "
-                 "Se reintentará en unos minutos.", solicitud_id),
-            )
-            return "terminado"
+            return _registrar_paquete_fallido(solicitud_id, num_paq, len(paquetes), e)
 
         importados_paq = 0
         for xml_bytes in xmls:
@@ -384,6 +383,40 @@ def _importar_paquetes_bg(
 
     _log.info("Solicitud %s: %d CFDIs importados de %d paquetes", solicitud_id, total_importados, len(paquetes))
     return estado_final
+
+
+_MAX_INTENTOS_PAQUETE = 3
+
+
+def _registrar_paquete_fallido(solicitud_id: str, num_paq: int, total_paq: int, error) -> str:
+    """Anota el intento fallido de un paquete; al agotar los intentos, falla la solicitud.
+
+    El número de intento viaja en el mismo ``error_msg`` que ve el usuario
+    ("intento 2 de 3"), así no hace falta otra columna. Devuelve el estado en
+    que queda la solicitud: 'terminado' (se reintentará) o 'fallo'.
+    """
+    previo = (db.query_one(
+        "SELECT error_msg FROM sat_solicitudes WHERE id=%s", (solicitud_id,),
+    ) or {}).get("error_msg") or ""
+    m = re.match(rf"No se pudo descargar el paquete {num_paq} de \d+ \(intento (\d+) de", previo)
+    intento = int(m.group(1)) + 1 if m else 1
+
+    if intento >= _MAX_INTENTOS_PAQUETE:
+        db.execute(
+            "UPDATE sat_solicitudes SET estado='fallo', error_msg=%s, updated_at=NOW() WHERE id=%s",
+            (f"No se pudo descargar el paquete {num_paq} de {total_paq} tras "
+             f"{_MAX_INTENTOS_PAQUETE} intentos: {error}. Vuelve a solicitar el periodo.",
+             solicitud_id),
+        )
+        return "fallo"
+
+    db.execute(
+        "UPDATE sat_solicitudes SET error_msg=%s, updated_at=NOW() WHERE id=%s",
+        (f"No se pudo descargar el paquete {num_paq} de {total_paq} "
+         f"(intento {intento} de {_MAX_INTENTOS_PAQUETE}): {error}. "
+         "Se reintentará en unos minutos.", solicitud_id),
+    )
+    return "terminado"
 
 
 def _insertar_cfdi(empresa_id: str, resultado, periodo: str, xml_raw_bytes: bytes) -> None:
