@@ -83,6 +83,7 @@ const INTERVALO_AVANCE_MS = 15_000;
 // verificarlas en el SAT e importarlas si ya están listas. Hace falta donde el
 // backend no puede seguirlas por su cuenta (serverless). La pasada que importa
 // puede tardar minutos; React Query no lanza otra mientras esa siga en vuelo.
+// Si una pasada falla, el sondeo se detiene hasta que se reintente a mano.
 export function useAvanzarDescargasSat(empresaId: string, activo: boolean) {
   const queryClient = useQueryClient();
   return useQuery({
@@ -96,7 +97,7 @@ export function useAvanzarDescargasSat(empresaId: string, activo: boolean) {
       return resultado;
     },
     enabled: Boolean(empresaId) && activo,
-    refetchInterval: INTERVALO_AVANCE_MS,
+    refetchInterval: (query) => (query.state.status === "error" ? false : INTERVALO_AVANCE_MS),
     retry: false,
     gcTime: 0,
   });

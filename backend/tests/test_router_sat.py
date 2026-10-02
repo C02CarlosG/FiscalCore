@@ -351,6 +351,8 @@ def test_descargar_cfdi_exitoso_agenda_background(monkeypatch):
         "id": "sol-1", "empresa_id": EMPRESA, "periodo_inicio": "2026-01",
     })
     monkeypatch.setattr(sat, "cargar_fiel", lambda *a, **k: _FakeSigner())
+    sqls = []
+    monkeypatch.setattr(db, "execute", lambda sql, params=(), returning=False: sqls.append(sql))
     llamadas_bg = []
     monkeypatch.setattr(sat, "_importar_paquetes_bg", lambda **kw: llamadas_bg.append(kw))
 
@@ -368,6 +370,8 @@ def test_descargar_cfdi_exitoso_agenda_background(monkeypatch):
     assert body["paquetes"] == 2
     assert len(llamadas_bg) == 1
     assert llamadas_bg[0]["paquetes"] == ["pkg1", "pkg2"]
+    # La importación acumula por paquete: arranca con los contadores en cero.
+    assert "paquetes_descargados=0, cfdi_importados=0" in sqls[0]
 
 
 # ─── POST /sat/empresas/{id}/fiel/guardar ───────────────────────────────────────
@@ -670,9 +674,12 @@ def _preparar_avanzar(monkeypatch, pendientes, verificacion, tomada=True):
 
     sqls = []
 
+    if tomada is True:
+        tomada = {"id": "sol-1", "paquetes_descargados": 0}
+
     def _execute(sql, params=(), returning=False):
         sqls.append(sql)
-        return ({"id": "sol-1"} if tomada else None) if returning else None
+        return (tomada or None) if returning else None
     monkeypatch.setattr(db, "execute", _execute)
 
     importaciones = []
@@ -898,3 +905,285 @@ def test_avanzar_error_no_controlado_del_sat_se_reintenta(monkeypatch):
     assert r.json() == {"avanzadas": [{"id": "sol-1", "estado": "en_proceso"}]}
     assert importaciones == []
     assert "estado='fallo'" not in sqls[0]
+
+
+def test_avanzar_sin_informacion_en_el_periodo_queda_descargada_con_cero_cfdi(monkeypatch):
+    """CodigoEstadoSolicitud 5004: no hay CFDI en el periodo. No es un fallo."""
+    sqls, importaciones = _preparar_avanzar(
+        monkeypatch, [_solicitud_pendiente("en_proceso")],
+        {"estado": 5, "codigo_estado": "5004", "id_paquetes": [], "num_cfdi": 0,
+         "mensaje": "No se encontró la información"},
+    )
+
+    try:
+        r = client.post(_AVANZAR_URL)
+    finally:
+        _teardown()
+
+    assert r.json() == {"avanzadas": [{"id": "sol-1", "estado": "descargado"}]}
+    assert importaciones == []
+    assert "estado='descargado'" in sqls[0]
+    assert "estado='fallo'" not in sqls[0]
+
+
+def test_avanzar_retoma_la_importacion_desde_el_paquete_pendiente(monkeypatch):
+    """Una importación cortada sigue desde el primer paquete sin importar, no desde cero."""
+    sqls, importaciones = _preparar_avanzar(
+        monkeypatch, [_solicitud_pendiente("terminado")],
+        {"estado": 3, "id_paquetes": ["pkg1", "pkg2", "pkg3"], "num_cfdi": 30},
+        tomada={"id": "sol-1", "paquetes_descargados": 2},
+    )
+
+    try:
+        r = client.post(_AVANZAR_URL)
+    finally:
+        _teardown()
+
+    assert r.json() == {"avanzadas": [{"id": "sol-1", "estado": "descargado"}]}
+    assert importaciones[0]["desde"] == 2
+    assert "paquetes_descargados=0" not in sqls[0]
+
+
+def test_avanzar_tolera_paquetes_nulos_del_sat(monkeypatch):
+    _, importaciones = _preparar_avanzar(
+        monkeypatch, [_solicitud_pendiente()],
+        {"estado": 2, "id_paquetes": None, "num_cfdi": None},
+    )
+
+    try:
+        r = client.post(_AVANZAR_URL)
+    finally:
+        _teardown()
+
+    assert r.json() == {"avanzadas": [{"id": "sol-1", "estado": "en_proceso"}]}
+    assert importaciones == []
+
+
+def test_verificar_solicitud_sin_informacion_queda_descargada(monkeypatch):
+    _auth(monkeypatch)
+    monkeypatch.setattr(db, "query_one", lambda *a, **k: {
+        "id": "sol-1", "empresa_id": EMPRESA, "id_solicitud_sat": "id-sat-1",
+    })
+    ejecutados = []
+    monkeypatch.setattr(db, "execute", lambda sql, params=(), returning=False: ejecutados.append((sql, params)))
+    monkeypatch.setattr(sat, "cargar_fiel", lambda *a, **k: _FakeSigner())
+    monkeypatch.setattr(sat, "verificar_solicitud", lambda *a, **k: {
+        "estado": 5, "codigo_estado": "5004", "id_paquetes": [], "num_cfdi": 0,
+        "mensaje": "No se encontró la información",
+    })
+
+    try:
+        r = client.post(
+            "/api/v1/sat/solicitudes/sol-1/verificar",
+            data={"password": "x"},
+            files={"cer_file": _CER, "key_file": _KEY},
+        )
+    finally:
+        _teardown()
+
+    assert r.json()["estado"] == "descargado"
+    # Limpia el error de un intento anterior: si no, la UI la vería "Incompleta".
+    sql, params = ejecutados[0]
+    assert "error_msg = CASE WHEN %s = 'descargado' THEN NULL" in sql
+    assert params[0] == params[3] == "descargado"
+
+
+# ─── _importar_paquetes_bg ──────────────────────────────────────────────────────
+
+class _CfdiOk:
+    uuid = "UUID-OK"
+    errores: list = []
+
+
+class _CfdiConError:
+    uuid = "UUID-MAL"
+    errores = ["Total no puede ser negativo"]
+
+
+class _FakeParser:
+    def parse_xml(self, xml_bytes):
+        return _CfdiConError() if xml_bytes == b"malo" else _CfdiOk()
+
+
+def _preparar_importacion(monkeypatch, paquetes_sat, fila_final, pipeline=None):
+    """`paquetes_sat` mapea id de paquete -> lista de XML, o una excepción."""
+    import backend.cfdi_parser as cfdi_parser
+    import backend.routers.ingesta as ingesta
+
+    monkeypatch.setattr(cfdi_parser, "CFDIParser", _FakeParser)
+    monkeypatch.setattr(sat, "_insertar_cfdi", lambda *a, **k: None)
+    monkeypatch.setattr(ingesta, "_correr_pipeline", lambda *a: (pipeline if pipeline is not None else []).append(a))
+
+    descargados = []
+
+    def _descargar(creds, id_paq):
+        descargados.append(id_paq)
+        xmls = paquetes_sat[id_paq]
+        if isinstance(xmls, Exception):
+            raise xmls
+        return xmls
+    monkeypatch.setattr(sat, "descargar_paquete", _descargar)
+
+    def _query_one(sql, params=()):
+        if "FROM empresas" in sql:
+            return {"rfc": "AAA010101AAA"}
+        return fila_final
+    monkeypatch.setattr(db, "query_one", _query_one)
+
+    ejecutados = []
+    monkeypatch.setattr(db, "execute", lambda sql, params=(), returning=False: ejecutados.append((sql, params)))
+    return descargados, ejecutados
+
+
+def _importar(paquetes, desde=0):
+    return sat._importar_paquetes_bg(
+        creds=_FakeSigner(), solicitud_id="sol-1", empresa_id=EMPRESA,
+        periodo="2026-09", paquetes=paquetes, desde=desde,
+    )
+
+
+def test_importar_completa_queda_descargada_sin_aviso(monkeypatch):
+    descargados, ejecutados = _preparar_importacion(
+        monkeypatch, {"p1": [b"a", b"b"], "p2": [b"c"]},
+        {"num_cfdi": 3, "cfdi_importados": 3},
+    )
+
+    assert _importar(["p1", "p2"]) == "descargado"
+    assert descargados == ["p1", "p2"]
+    # El avance se guarda paquete por paquete, con su número y sus CFDI.
+    assert ejecutados[0][1] == (1, 2, "sol-1")
+    assert ejecutados[1][1] == (2, 1, "sol-1")
+    assert ejecutados[-1][1] == ("descargado", None, "sol-1")
+
+
+def test_importar_con_cfdi_omitidos_avisa_que_la_descarga_quedo_incompleta(monkeypatch):
+    _, ejecutados = _preparar_importacion(
+        monkeypatch, {"p1": [b"a", b"malo", b"c"]},
+        {"num_cfdi": 3, "cfdi_importados": 2},
+    )
+
+    assert _importar(["p1"]) == "descargado"
+    assert ejecutados[0][1] == (1, 2, "sol-1")
+    estado, error_msg, _ = ejecutados[-1][1]
+    assert estado == "descargado"
+    assert error_msg == (
+        "Descarga incompleta: se importaron 2 de los 3 CFDI que reportó el SAT; "
+        "1 no se pudieron importar."
+    )
+
+
+def test_importar_paquete_que_falla_no_se_salta_y_se_reintenta(monkeypatch):
+    descargados, ejecutados = _preparar_importacion(
+        monkeypatch,
+        {"p1": [b"a"], "p2": FIELError("timeout"), "p3": [b"c"]},
+        {"num_cfdi": 3, "cfdi_importados": 1},
+    )
+
+    assert _importar(["p1", "p2", "p3"]) == "terminado"
+    assert descargados == ["p1", "p2"]  # p3 espera a que p2 se reintente
+    sql, params = ejecutados[-1]
+    assert "estado" not in sql  # sigue en 'terminado' para la siguiente pasada
+    assert params[0] == (
+        "No se pudo descargar el paquete 2 de 3 (intento 1 de 3): timeout. "
+        "Se reintentará en unos minutos."
+    )
+
+
+def test_importar_cuenta_los_reintentos_del_mismo_paquete(monkeypatch):
+    previo = "No se pudo descargar el paquete 2 de 3 (intento 1 de 3): timeout. Se reintentará en unos minutos."
+    _, ejecutados = _preparar_importacion(
+        monkeypatch, {"p2": FIELError("timeout")},
+        {"num_cfdi": 3, "cfdi_importados": 1, "error_msg": previo},
+    )
+
+    assert _importar(["p1", "p2", "p3"], desde=1) == "terminado"
+    assert "(intento 2 de 3)" in ejecutados[-1][1][0]
+
+
+def test_importar_paquete_que_agota_los_reintentos_deja_la_solicitud_en_fallo(monkeypatch):
+    """Un paquete que nunca se puede descargar no deja la solicitud 'Importando' para siempre."""
+    previo = "No se pudo descargar el paquete 2 de 3 (intento 2 de 3): timeout. Se reintentará en unos minutos."
+    _, ejecutados = _preparar_importacion(
+        monkeypatch, {"p2": FIELError("timeout")},
+        {"num_cfdi": 3, "cfdi_importados": 1, "error_msg": previo},
+    )
+
+    assert _importar(["p1", "p2", "p3"], desde=1) == "fallo"
+    sql, params = ejecutados[-1]
+    assert "estado='fallo'" in sql
+    assert params[0] == (
+        "No se pudo descargar el paquete 2 de 3 tras 3 intentos: timeout. "
+        "Vuelve a solicitar el periodo."
+    )
+
+
+def test_importar_falla_de_otro_paquete_reinicia_la_cuenta(monkeypatch):
+    previo = "No se pudo descargar el paquete 1 de 3 (intento 2 de 3): timeout. Se reintentará en unos minutos."
+    _, ejecutados = _preparar_importacion(
+        monkeypatch, {"p2": FIELError("timeout")},
+        {"num_cfdi": 3, "cfdi_importados": 1, "error_msg": previo},
+    )
+
+    assert _importar(["p1", "p2", "p3"], desde=1) == "terminado"
+    assert "(intento 1 de 3)" in ejecutados[-1][1][0]
+
+
+def test_importar_retoma_desde_el_paquete_indicado(monkeypatch):
+    descargados, ejecutados = _preparar_importacion(
+        monkeypatch, {"p1": [b"a"], "p2": [b"b"], "p3": [b"c"]},
+        {"num_cfdi": 3, "cfdi_importados": 3},
+    )
+
+    assert _importar(["p1", "p2", "p3"], desde=2) == "descargado"
+    assert descargados == ["p3"]
+    assert ejecutados[0][1] == (3, 1, "sol-1")
+
+
+def test_importar_sin_ningun_cfdi_valido_queda_en_fallo(monkeypatch):
+    pipeline = []
+    _, ejecutados = _preparar_importacion(
+        monkeypatch, {"p1": [b"malo"]}, {"num_cfdi": 1, "cfdi_importados": 0}, pipeline,
+    )
+
+    assert _importar(["p1"]) == "fallo"
+    assert ejecutados[-1][1] == ("fallo", "Ningún CFDI pudo importarse correctamente", "sol-1")
+    assert pipeline == []
+
+
+def test_sync_en_background_reintenta_la_importacion_pendiente(monkeypatch):
+    """Una solicitud que queda en 'terminado' (paquete por reintentar) no se abandona."""
+    import time
+
+    monkeypatch.setattr(time, "sleep", lambda s: None)
+    monkeypatch.setattr(fiel_store, "obtener_signer", lambda db_, eid: _FakeSigner())
+    filas = iter([
+        {"rfc": "AAA010101AAA"},
+        {**_solicitud_pendiente("en_proceso")},
+        {**_solicitud_pendiente("terminado")},
+    ])
+    monkeypatch.setattr(db, "query_one", lambda *a, **k: next(filas))
+    monkeypatch.setattr(db, "execute", lambda *a, **k: None)
+    resultados = iter(["terminado", "descargado"])
+    llamadas = []
+    monkeypatch.setattr(sat, "_avanzar_solicitud", lambda creds, row: llamadas.append(row["estado"]) or next(resultados))
+
+    sat._sync_completo_bg(EMPRESA, "2026-09", [{"id": "sol-1"}])
+
+    assert llamadas == ["en_proceso", "terminado"]
+
+
+def test_avanzar_estado_desconocido_del_sat_sigue_esperando(monkeypatch):
+    """Solo el 0 explícito es un rechazo: otro número o una respuesta sin estado se espera."""
+    for verificacion in (
+        {"estado": 9, "id_paquetes": [], "num_cfdi": 0},
+        {"id_paquetes": [], "num_cfdi": 0},
+    ):
+        sqls, importaciones = _preparar_avanzar(monkeypatch, [_solicitud_pendiente()], verificacion)
+
+        try:
+            r = client.post(_AVANZAR_URL)
+        finally:
+            _teardown()
+
+        assert r.json() == {"avanzadas": [{"id": "sol-1", "estado": "en_proceso"}]}
+        assert "estado='fallo'" not in sqls[0]

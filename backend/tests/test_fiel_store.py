@@ -271,13 +271,33 @@ def test_guardar_fiel_acepta_el_rfc_de_la_empresa_sin_importar_mayusculas(monkey
     assert len(db.execute_calls) == 1
 
 
-def test_guardar_fiel_sin_rfc_legible_en_el_certificado_no_bloquea(monkeypatch):
+def test_guardar_fiel_sin_rfc_legible_en_el_certificado_se_rechaza(monkeypatch):
+    """Sin RFC legible no se puede comprobar que la e.firma sea de la empresa."""
     monkeypatch.setattr("backend.sat_fiel.cargar_fiel", lambda cer, key, pwd: SimpleNamespace(rfc=None))
 
     db = FakeDB()
-    resultado = fiel_store.guardar_fiel(db, "emp-1", b"no-es-un-cert", b"key", "pwd", rfc_esperado="OTR010101AAA")
+    with pytest.raises(ValueError, match=r"No se pudo leer el RFC del certificado.*OTR010101AAA"):
+        fiel_store.guardar_fiel(db, "emp-1", b"no-es-un-cert", b"key", "pwd", rfc_esperado="OTR010101AAA")
+    assert db.execute_calls == []
+
+
+def test_guardar_fiel_sin_rfc_legible_y_sin_rfc_esperado_se_guarda(monkeypatch):
+    """Sin RFC de empresa contra qué comparar, no hay validación que hacer."""
+    monkeypatch.setattr("backend.sat_fiel.cargar_fiel", lambda cer, key, pwd: SimpleNamespace(rfc=None))
+
+    resultado = fiel_store.guardar_fiel(FakeDB(), "emp-1", b"no-es-un-cert", b"key", "pwd")
 
     assert resultado["guardada"] is True
+
+
+def test_guardar_fiel_valida_el_rfc_del_signer_aunque_el_cer_no_sea_der(monkeypatch):
+    """Un .cer que no se lee como DER no debe saltarse la validación del RFC."""
+    monkeypatch.setattr("backend.sat_fiel.cargar_fiel", lambda cer, key, pwd: SimpleNamespace(rfc="SIG010101AAA"))
+
+    db = FakeDB()
+    with pytest.raises(ValueError, match="SIG010101AAA.*OTR010101AAA"):
+        fiel_store.guardar_fiel(db, "emp-1", b"no-es-der", b"key", "pwd", rfc_esperado="OTR010101AAA")
+    assert db.execute_calls == []
 
 
 # ─── cargar_fiel: mensaje de contraseña incorrecta ───────────────────────────

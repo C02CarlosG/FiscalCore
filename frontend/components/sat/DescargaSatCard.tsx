@@ -40,6 +40,9 @@ const ESTADOS: Record<string, { label: string; className: string }> = {
   fallo: { label: "Falló", className: "bg-status-error-soft text-status-error" },
 };
 
+// Descargada, pero faltaron CFDI de los que reportó el SAT (el motivo viene en error_msg).
+const INCOMPLETA = { label: "Incompleta", className: "bg-status-pendiente-soft text-status-pendiente" };
+
 function fechaHora(iso: string): string {
   const fecha = new Date(iso);
   if (Number.isNaN(fecha.getTime())) return iso;
@@ -73,7 +76,10 @@ function Solicitudes({ solicitudes }: { solicitudes: SatSolicitud[] }) {
         </TableHeader>
         <TableBody>
           {solicitudes.map((s) => {
-            const estado = ESTADOS[s.estado] ?? { label: s.estado, className: "" };
+            const estado =
+              s.estado === "descargado" && s.error_msg
+                ? INCOMPLETA
+                : (ESTADOS[s.estado] ?? { label: s.estado, className: "" });
             return (
               <TableRow key={s.id}>
                 <TableCell className="whitespace-nowrap">{fechaHora(s.created_at)}</TableCell>
@@ -106,7 +112,7 @@ export function DescargaSatCard({ empresaId }: { empresaId: string }) {
   const fiel = useFielEstado(empresaId);
   const solicitudes = useSolicitudesSat(empresaId);
   const sincronizar = useSincronizarSat(empresaId);
-  useAvanzarDescargasSat(empresaId, solicitudes.data?.some(solicitudEnCurso) ?? false);
+  const avance = useAvanzarDescargasSat(empresaId, solicitudes.data?.some(solicitudEnCurso) ?? false);
 
   const [periodo, setPeriodo] = useState("");
   const [tipo, setTipo] = useState<SatTipoDescarga>("ambos");
@@ -207,6 +213,14 @@ export function DescargaSatCard({ empresaId }: { empresaId: string }) {
 
         <section aria-label="Historial de descargas" className="space-y-3">
           <h3 className="text-sm font-semibold">Historial de descargas</h3>
+          {avance.isError && (
+            <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-status-error">
+              <span>No se pudo avanzar la descarga: {avance.error.message}</span>
+              <Button type="button" variant="outline" size="sm" onClick={() => avance.refetch()}>
+                Reintentar
+              </Button>
+            </div>
+          )}
           {solicitudes.data && <Solicitudes solicitudes={solicitudes.data} />}
           {solicitudes.isError && (
             <p className="text-sm text-status-error">No se pudo cargar el historial de descargas.</p>

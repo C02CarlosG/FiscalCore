@@ -115,6 +115,20 @@ describe("DescargaSatCard", () => {
     expect(await screen.findByText("SAT reportó estado: rechazada")).toBeInTheDocument();
   });
 
+  it("flags a download that is missing CFDI reported by the SAT", async () => {
+    const aviso =
+      "Descarga incompleta: se importaron 287 de los 289 CFDI que reportó el SAT; 2 no se pudieron importar.";
+    mockApi({ tiene_fiel: true, vencida: false }, [
+      { ...solicitud, cfdi_importados: 287, error_msg: aviso },
+    ]);
+    renderCard();
+
+    expect(await screen.findByText("Incompleta")).toBeInTheDocument();
+    expect(screen.queryByText("Descargado")).not.toBeInTheDocument();
+    expect(screen.getByText(aviso)).toBeInTheDocument();
+    expect(screen.getByText("287 de 289")).toBeInTheDocument();
+  });
+
   it("asks the backend to advance downloads that are still in progress", async () => {
     mockApi({ tiene_fiel: true, vencida: false }, [{ ...solicitud, estado: "solicitado" }]);
     renderCard();
@@ -124,6 +138,20 @@ describe("DescargaSatCard", () => {
     });
     const [, options] = vi.mocked(apiFetch).mock.calls.find(([path]) => path === AVANZAR_URL)!;
     expect(options!.method).toBe("POST");
+  });
+
+  it("stops advancing and shows the error when a pass fails", async () => {
+    mockApi({ tiene_fiel: true, vencida: false }, [{ ...solicitud, estado: "en_proceso" }]);
+    const base = vi.mocked(apiFetch).getMockImplementation()!;
+    vi.mocked(apiFetch).mockImplementation(async (path: string, options?: RequestInit) => {
+      if (path === AVANZAR_URL) throw new Error("No hay FIEL guardada para esta empresa");
+      return base(path, options);
+    });
+    renderCard();
+
+    const alerta = await screen.findByRole("alert");
+    expect(alerta).toHaveTextContent("No se pudo avanzar la descarga: No hay FIEL guardada para esta empresa");
+    expect(screen.getByRole("button", { name: "Reintentar" })).toBeInTheDocument();
   });
 
   it("does not call the SAT when no download is in progress", async () => {

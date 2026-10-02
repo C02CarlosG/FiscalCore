@@ -103,7 +103,7 @@ observación de auditoría, **no** entra en el cálculo de la cédula. Verificac
 ### 3.1 Fuente de datos (sin tablas nuevas para el cálculo)
 Todo sale de la tabla única `cfdi` + `pagos_cfdi` + `pagos_relaciones` (ver mapa completo en el
 reporte de arquitectura). Dirección del CFDI = comparar `rfc_emisor`/`rfc_receptor` contra
-`empresas.rfc`. Columnas clave: `iva_trasladado`, `iva_retenido`, `subtotal`, `total`,
+`empresas.rfc`. Columnas clave: `iva_trasladado`, `iva_retenido`, `subtotal`, `descuento`, `total`,
 `tipo_comprobante`, `metodo_pago`, `forma_pago`, `estado`, `fecha_emision`, `es_anticipo_sat`.
 
 **Decisión de persistencia: cálculo _on-the-fly_ (sin migración).** Consistente con el endpoint DIOT
@@ -127,7 +127,7 @@ parcialidad (mejora la precisión de PPD multi-tasa).
 
 **Trasladado PUE** (ventas cobradas al contado, dentro del periodo):
 ```sql
-SELECT SUM(c.subtotal)       AS base,
+SELECT SUM(c.subtotal - COALESCE(c.descuento, 0)) AS base,  -- el descuento reduce la base
        SUM(c.iva_trasladado) AS iva
 FROM cfdi c
 JOIN empresas e ON e.id = c.empresa_id
