@@ -7,7 +7,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Optional
 from defusedxml import ElementTree as ET
 
@@ -22,6 +22,10 @@ NS = {
 # Namespaces Complemento de Pago
 NS_PAGO20 = "{http://www.sat.gob.mx/Pagos20}"
 NS_PAGO10 = "{http://www.sat.gob.mx/Pagos}"
+NS_NOMINA12 = "{http://www.sat.gob.mx/nomina12}"
+
+CENTAVOS = Decimal("0.01")
+SEIS_DECIMALES = Decimal("0.000001")
 
 RFC_REGEX = re.compile(
     r'^([A-ZÑ&]{3,4})(\d{6})([A-Z\d]{3})$', re.IGNORECASE
@@ -33,12 +37,49 @@ def validar_rfc(rfc: str) -> bool:
 
 
 @dataclass
+class ImpuestoResumen:
+    """Impuesto agrupado por ámbito, impuesto, factor y tasa, con su base."""
+    ambito: str                      # "traslado" | "retencion"
+    impuesto: str                    # 001 ISR, 002 IVA, 003 IEPS
+    tipo_factor: str                 # Tasa | Cuota | Exento
+    tasa_o_cuota: Optional[Decimal]  # None en Exento o si el XML no la trae
+    base: Decimal
+    importe: Decimal
+
+
+def _agrupar_impuestos(
+    filas: list[ImpuestoResumen], precision: Decimal = CENTAVOS
+) -> list[ImpuestoResumen]:
+    """Suma base e importe de las filas con la misma clave y redondea al final
+    (medio hacia arriba, como el SAT; ``quantize`` por defecto usa el bancario)."""
+    grupos: dict[tuple, list[Decimal]] = {}
+    for f in filas:
+        clave = (f.ambito, f.impuesto, f.tipo_factor, f.tasa_o_cuota)
+        acumulado = grupos.setdefault(clave, [Decimal("0"), Decimal("0")])
+        acumulado[0] += f.base
+        acumulado[1] += f.importe
+    return [
+        ImpuestoResumen(
+            ambito, impuesto, factor, tasa,
+            base.quantize(precision, rounding=ROUND_HALF_UP),
+            importe.quantize(precision, rounding=ROUND_HALF_UP),
+        )
+        for (ambito, impuesto, factor, tasa), (base, importe) in grupos.items()
+    ]
+
+
+@dataclass
 class DoctoRelacionado:
     uuid: str
     num_parcialidad: Optional[int]
     imp_pagado: Decimal
     imp_saldo_ant: Decimal
     imp_saldo_insoluto: Decimal
+    moneda_dr: Optional[str] = None
+    # None: documento en otra moneda sin equivalencia en el XML (no se inventa 1).
+    equivalencia_dr: Optional[Decimal] = Decimal("1")
+    # ImpuestosDR del REP 2.0 (vacío en Pagos 1.0).
+    impuestos: list[ImpuestoResumen] = field(default_factory=list)
 
 
 @dataclass
@@ -48,6 +89,7 @@ class PagoCFDI:
     moneda: str
     tipo_cambio: Decimal
     doctos_relacionados: list["DoctoRelacionado"] = field(default_factory=list)
+    version: str = "2.0"   # "1.0" cuando el complemento es Pagos 1.0
 
 
 @dataclass
@@ -57,6 +99,33 @@ class ImpuestoDetalle:
     importe: Decimal
     tipo_factor: str   # Tasa, Cuota, Exento
     es_retencion: bool = False
+
+
+@dataclass
+class ConceptoCFDI:
+    linea: int
+    clave_prod_serv: Optional[str]
+    no_identificacion: Optional[str]
+    cantidad: Decimal
+    clave_unidad: Optional[str]
+    unidad: Optional[str]
+    descripcion: Optional[str]
+    valor_unitario: Decimal
+    importe: Decimal
+    descuento: Decimal
+    objeto_imp: Optional[str]
+    cuenta_predial: Optional[str]
+    impuestos: list[ImpuestoResumen] = field(default_factory=list)
+
+
+@dataclass
+class NominaResumen:
+    total_percepciones: Decimal
+    total_deducciones: Decimal
+    total_otros_pagos: Decimal
+    total_gravado: Decimal
+    total_exento: Decimal
+    isr_retenido: Decimal
 
 
 @dataclass
@@ -131,6 +200,19 @@ class CFDIParsed:
     # complemento implocal). Se usan para el cuadre contra Total.
     total_traslados: Decimal = Decimal("0")
     total_retenciones: Decimal = Decimal("0")
+
+    # Impuestos agrupados por tasa con su base (traslados y retenciones).
+    resumen_impuestos: list[ImpuestoResumen] = field(default_factory=list)
+    conceptos: list["ConceptoCFDI"] = field(default_factory=list)
+
+    # Encabezados adicionales
+    no_certificado: Optional[str] = None
+    periodicidad: Optional[str] = None   # InformacionGlobal (factura global)
+    meses: Optional[str] = None
+    anio_global: Optional[int] = None
+
+    # Totales del complemento de nómina (solo CFDI tipo N).
+    nomina: Optional["NominaResumen"] = None
 
     @property
     def es_ingreso(self) -> bool:
@@ -231,6 +313,16 @@ class CFDIParser:
             (i.importe for i in impuestos if not i.es_retencion), Decimal("0"))
         parsed.total_retenciones = loc_retenciones + sum(
             (i.importe for i in impuestos if i.es_retencion), Decimal("0"))
+        parsed.resumen_impuestos = self._resumen_impuestos(root, ns_cfdi)
+        parsed.conceptos = self._extraer_conceptos(root, ns_cfdi)
+        parsed.no_certificado = self._attr(root, "NoCertificado")
+        info_global = root.find(f"{ns_cfdi}InformacionGlobal")
+        if info_global is not None:
+            parsed.periodicidad = info_global.get("Periodicidad")
+            parsed.meses = info_global.get("Meses")
+            anio = info_global.get("Año", "")
+            parsed.anio_global = int(anio) if anio.isdigit() else None
+        parsed.nomina = self._extraer_nomina(root)
 
         # Validaciones
         parsed.rfc_emisor_valido = validar_rfc(rfc_emisor)
@@ -293,8 +385,8 @@ class CFDIParser:
         # Traslados
         for traslado in imp_node.findall(f".//{ns_cfdi}Traslado"):
             impuesto = traslado.get("Impuesto", "")
-            importe = Decimal(traslado.get("Importe", "0"))
-            tasa = Decimal(traslado.get("TasaOCuota", "0"))
+            importe = self._decimal(traslado, "Importe")
+            tasa = self._decimal(traslado, "TasaOCuota")
             factor = traslado.get("TipoFactor", "Tasa")
 
             det = ImpuestoDetalle(
@@ -312,7 +404,7 @@ class CFDIParser:
         # Retenciones
         for retencion in imp_node.findall(f".//{ns_cfdi}Retencion"):
             impuesto = retencion.get("Impuesto", "")
-            importe = Decimal(retencion.get("Importe", "0"))
+            importe = self._decimal(retencion, "Importe")
 
             det = ImpuestoDetalle(
                 tipo=impuesto,
@@ -336,6 +428,95 @@ class CFDIParser:
         if nodo is None:
             return Decimal("0"), Decimal("0")
         return self._decimal(nodo, "TotaldeTraslados"), self._decimal(nodo, "TotaldeRetenciones")
+
+    def _leer_impuesto(self, nodo, ambito: str, sufijo: str = "") -> ImpuestoResumen:
+        """Lee un nodo Traslado/Retencion. ``sufijo="DR"`` para los nodos del REP
+        (BaseDR, ImpuestoDR, TipoFactorDR, TasaOCuotaDR, ImporteDR)."""
+        factor = nodo.get(f"TipoFactor{sufijo}") or "Tasa"
+        tasa: Optional[Decimal] = None
+        tasa_str = nodo.get(f"TasaOCuota{sufijo}")
+        if factor != "Exento" and tasa_str:
+            try:
+                tasa = Decimal(tasa_str).quantize(SEIS_DECIMALES)
+            except Exception:
+                tasa = None
+        return ImpuestoResumen(
+            ambito=ambito,
+            impuesto=nodo.get(f"Impuesto{sufijo}", ""),
+            tipo_factor=factor,
+            tasa_o_cuota=tasa,
+            base=self._decimal(nodo, f"Base{sufijo}"),
+            importe=self._decimal(nodo, f"Importe{sufijo}"),
+        )
+
+    def _resumen_impuestos(self, root, ns_cfdi: str) -> list[ImpuestoResumen]:
+        """Impuestos por tasa con su base.
+
+        Traslados: del nodo raíz cuando todos traen Base (CFDI 4.0, cifra oficial
+        ya agrupada); si no (CFDI 3.3), de los conceptos. Retenciones: de los
+        conceptos (traen base y tasa); si no hay, del nodo raíz."""
+        raiz = root.find(f"{ns_cfdi}Impuestos")
+        t_raiz = raiz.findall(f"{ns_cfdi}Traslados/{ns_cfdi}Traslado") if raiz is not None else []
+        r_raiz = raiz.findall(f"{ns_cfdi}Retenciones/{ns_cfdi}Retencion") if raiz is not None else []
+
+        t_conceptos, r_conceptos = [], []
+        for concepto in root.findall(f"{ns_cfdi}Conceptos/{ns_cfdi}Concepto"):
+            t_conceptos += concepto.findall(f"{ns_cfdi}Impuestos/{ns_cfdi}Traslados/{ns_cfdi}Traslado")
+            r_conceptos += concepto.findall(f"{ns_cfdi}Impuestos/{ns_cfdi}Retenciones/{ns_cfdi}Retencion")
+
+        raiz_con_base = bool(t_raiz) and all(t.get("Base") for t in t_raiz)
+        traslados = t_raiz if (raiz_con_base or not t_conceptos) else t_conceptos
+        retenciones = r_conceptos or r_raiz
+
+        filas = [self._leer_impuesto(n, "traslado") for n in traslados]
+        filas += [self._leer_impuesto(n, "retencion") for n in retenciones]
+        return _agrupar_impuestos(filas)
+
+    def _extraer_conceptos(self, root, ns_cfdi: str) -> list[ConceptoCFDI]:
+        conceptos: list[ConceptoCFDI] = []
+        nodos = root.findall(f"{ns_cfdi}Conceptos/{ns_cfdi}Concepto")
+        for linea, nodo in enumerate(nodos, start=1):
+            predial = nodo.find(f"{ns_cfdi}CuentaPredial")
+            impuestos = [
+                self._leer_impuesto(n, "traslado")
+                for n in nodo.findall(f"{ns_cfdi}Impuestos/{ns_cfdi}Traslados/{ns_cfdi}Traslado")
+            ] + [
+                self._leer_impuesto(n, "retencion")
+                for n in nodo.findall(f"{ns_cfdi}Impuestos/{ns_cfdi}Retenciones/{ns_cfdi}Retencion")
+            ]
+            conceptos.append(ConceptoCFDI(
+                linea=linea,
+                clave_prod_serv=nodo.get("ClaveProdServ"),
+                no_identificacion=nodo.get("NoIdentificacion"),
+                cantidad=self._decimal(nodo, "Cantidad"),
+                clave_unidad=nodo.get("ClaveUnidad"),
+                unidad=nodo.get("Unidad"),
+                descripcion=nodo.get("Descripcion"),
+                valor_unitario=self._decimal(nodo, "ValorUnitario"),
+                importe=self._decimal(nodo, "Importe"),
+                descuento=self._decimal(nodo, "Descuento"),
+                objeto_imp=nodo.get("ObjetoImp"),
+                cuenta_predial=predial.get("Numero") if predial is not None else None,
+                impuestos=impuestos,
+            ))
+        return conceptos
+
+    def _extraer_nomina(self, root) -> Optional[NominaResumen]:
+        """Suma los totales de todos los nodos nomina12:Nomina del comprobante."""
+        nodos = root.findall(f".//{NS_NOMINA12}Nomina")
+        if not nodos:
+            return None
+        resumen = NominaResumen(*([Decimal("0")] * 6))
+        for nodo in nodos:
+            percepciones = nodo.find(f"{NS_NOMINA12}Percepciones")
+            deducciones = nodo.find(f"{NS_NOMINA12}Deducciones")
+            resumen.total_percepciones += self._decimal(nodo, "TotalPercepciones")
+            resumen.total_deducciones += self._decimal(nodo, "TotalDeducciones")
+            resumen.total_otros_pagos += self._decimal(nodo, "TotalOtrosPagos")
+            resumen.total_gravado += self._decimal(percepciones, "TotalGravado")
+            resumen.total_exento += self._decimal(percepciones, "TotalExento")
+            resumen.isr_retenido += self._decimal(deducciones, "TotalImpuestosRetenidos")
+        return resumen
 
     def _validar(self, p: CFDIParsed) -> list[str]:
         errores = []
@@ -443,12 +624,24 @@ class CFDIParser:
             for docto in pago_node.findall(f"{ns_pago}DoctoRelacionado"):
                 parcialidad_str = docto.get("NumParcialidad")
                 try:
+                    impuestos_dr = [
+                        self._leer_impuesto(n, "traslado", "DR")
+                        for n in docto.findall(f"{ns_pago}ImpuestosDR/{ns_pago}TrasladosDR/{ns_pago}TrasladoDR")
+                    ] + [
+                        self._leer_impuesto(n, "retencion", "DR")
+                        for n in docto.findall(f"{ns_pago}ImpuestosDR/{ns_pago}RetencionesDR/{ns_pago}RetencionDR")
+                    ]
                     doctos.append(DoctoRelacionado(
                         uuid=docto.get("IdDocumento", "").strip().upper(),
                         num_parcialidad=int(parcialidad_str) if parcialidad_str else None,
                         imp_pagado=Decimal(docto.get("ImpPagado", "0")),
                         imp_saldo_ant=Decimal(docto.get("ImpSaldoAnt", "0")),
                         imp_saldo_insoluto=Decimal(docto.get("ImpSaldoInsoluto", "0")),
+                        moneda_dr=docto.get("MonedaDR"),
+                        equivalencia_dr=self._equivalencia_dr(docto, moneda),
+                        # Seis decimales: están en la moneda del documento y se
+                        # convierten a pesos después; redondear antes acumula error.
+                        impuestos=_agrupar_impuestos(impuestos_dr, SEIS_DECIMALES),
                     ))
                 except Exception:
                     continue
@@ -459,6 +652,7 @@ class CFDIParser:
                 moneda=moneda,
                 tipo_cambio=tipo_cambio,
                 doctos_relacionados=doctos,
+                version="2.0" if ns_pago == NS_PAGO20 else "1.0",
             ))
 
         return pagos
@@ -473,9 +667,27 @@ class CFDIParser:
     def _decimal(node, attr: str, default: str = "0") -> Decimal:
         val = node.get(attr, default) if node is not None else default
         try:
-            return Decimal(val or default)
+            valor = Decimal(val or default)
         except Exception:
             return Decimal(default)
+        # "NaN"/"Infinity" son Decimal válidos pero no importes: el XML subido
+        # es entrada externa y no debe llegar así a las sumas ni a la base.
+        return valor if valor.is_finite() else Decimal(default)
+
+    @staticmethod
+    def _equivalencia_dr(docto, moneda_pago: str) -> Optional[Decimal]:
+        """Equivalencia entre la moneda del documento y la del pago:
+        ``EquivalenciaDR`` en Pagos 2.0, ``TipoCambioDR`` en Pagos 1.0. Si no
+        viene, vale 1 solo cuando ambas monedas coinciden."""
+        valor = docto.get("EquivalenciaDR") or docto.get("TipoCambioDR")
+        if valor:
+            try:
+                equivalencia = Decimal(valor)
+            except Exception:
+                return None
+            return equivalencia if equivalencia.is_finite() and equivalencia > 0 else None
+        moneda_dr = docto.get("MonedaDR")
+        return Decimal("1") if not moneda_dr or moneda_dr == moneda_pago else None
 
     @staticmethod
     def _parse_fecha(fecha_str: str) -> Optional[datetime]:

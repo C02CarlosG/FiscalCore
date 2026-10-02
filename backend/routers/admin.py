@@ -3,10 +3,10 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 
-from .. import db
+from .. import db, reproceso
 from ..auditoria import registrar_evento
 from ..deps import require_admin, serializar
 
@@ -109,3 +109,20 @@ async def metricas_globales(admin: dict = Depends(require_admin)):
         """
     )
     return serializar(totales) if totales else {}
+
+
+@router.post("/reprocesar-cfdi")
+async def reprocesar_cfdi(
+    limite: int = Query(500, ge=1, le=5000, description="CFDI a reprocesar en esta llamada"),
+    admin: dict = Depends(require_admin),
+):
+    """Reconstruye el detalle fiscal (impuestos por tasa, conceptos, pagos) de los
+    CFDI guardados antes de la migración 028, por lotes. Llamar hasta que
+    ``pendientes`` sea 0."""
+    resultado = reproceso.reprocesar_detalle(limite=limite)
+    registrar_evento(
+        admin["user_id"], "reproceso_cfdi",
+        metadata={"procesados": resultado["procesados"], "errores": len(resultado["errores"]),
+                  "pendientes": resultado["pendientes"]},
+    )
+    return resultado

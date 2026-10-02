@@ -1767,6 +1767,44 @@ paths:
   # MOVIMIENTOS Y CATEGORIAS
   # ============================================================
 
+  /api/v1/admin/reprocesar-cfdi:
+    post:
+      operationId: reprocesarCfdiAdmin
+      tags: [Admin]
+      summary: Reprocesar el detalle fiscal de los CFDI almacenados
+      description: >
+        Requiere rol admin. Vuelve a leer el XML guardado de los CFDI sin detalle
+        (impuestos por tasa, conceptos, impuestos de cada pago) por lotes. Llamar
+        hasta que `pendientes` sea 0.
+      parameters:
+        - name: limite
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 5000, default: 500 }
+      responses:
+        '200':
+          description: Resumen del lote
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  procesados: { type: integer }
+                  pendientes: { type: integer }
+                  errores:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        uuid: { type: string }
+                        error: { type: string }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '422':
+          description: Límite fuera de rango
+
   /api/v1/empresas/{empresa_id}/movimientos/cuentas:
     get:
       operationId: listarCuentasMovimientos
