@@ -17,8 +17,10 @@ import re
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 
+import psycopg2.errors
+
 from . import cfdi_store, db
-from .sat_fiel import FIELError, descargar_paquete, verificar_solicitud
+from .sat_fiel import FIELError, SolicitudRechazada, descargar_paquete, solicitar_descarga, verificar_solicitud
 
 _log = logging.getLogger(__name__)
 
@@ -84,10 +86,6 @@ def espera_reintento(intentos: int) -> timedelta | None:
 # Reintentos de solicitudes
 # ---------------------------------------------------------------------------
 
-# Cuánto se difiere una solicitud cuando el SAT dice que se agotó el cupo (5002).
-_ESPERA_CUPO_AGOTADO = timedelta(hours=1)
-
-
 def _en_espera(solicitud: dict) -> bool:
     """True si la solicitud tiene un ``proximo_intento`` que aún no llega."""
     proximo = solicitud.get("proximo_intento")
@@ -98,27 +96,19 @@ def _en_espera(solicitud: dict) -> bool:
     return proximo > datetime.now(timezone.utc)
 
 
-def registrar_solicitud_fallida(solicitud_id: str, mensaje: str, *, diferir: bool = False) -> str:
+def registrar_solicitud_fallida(solicitud_id: str, mensaje: str) -> str:
     """Anota un fallo transitorio del SAT sobre una solicitud.
 
-    - Normal: cuenta un intento y agenda el siguiente con la espera creciente
-      (5 min, 15 min, 1 h, 6 h). Al agotarse, la solicitud queda en ``fallo``
-      con el mensaje del SAT.
-    - ``diferir=True`` (cupo de solicitudes agotado, código 5002): espera una hora
-      sin consumir intento; no es culpa de la solicitud.
+    Cuenta un intento y agenda el siguiente con la espera creciente (5 min, 15 min,
+    1 h, 6 h). Tras esos 4 reintentos, el quinto fallo seguido deja la solicitud en
+    ``fallo`` con el mensaje del SAT.
 
     Devuelve ``'fallo'`` si se agotó, o el estado vigente de la solicitud si se
     reintentará. ``mensaje`` es solo el texto del SAT: nunca lleva la e.firma.
-    """
-    if diferir:
-        fila = db.execute(
-            """UPDATE sat_solicitudes
-               SET proximo_intento = NOW() + %s, error_msg=%s, updated_at=NOW()
-               WHERE id=%s RETURNING estado""",
-            (_ESPERA_CUPO_AGOTADO, mensaje, solicitud_id), returning=True,
-        )
-        return (fila or {}).get("estado", "solicitado")
 
+    Los rechazos definitivos del SAT (5002, 5003, 5005…) no pasan por aquí: ver
+    ``crear_solicitud_ventana``.
+    """
     fila = db.execute(
         """UPDATE sat_solicitudes
            SET intentos = intentos + 1, error_msg=%s, updated_at=NOW()
@@ -138,6 +128,119 @@ def registrar_solicitud_fallida(solicitud_id: str, mensaje: str, *, diferir: boo
         (espera, solicitud_id),
     )
     return fila.get("estado", "solicitado")
+
+
+# ---------------------------------------------------------------------------
+# Alta de solicitudes al SAT
+# ---------------------------------------------------------------------------
+
+# Códigos de rechazo del servicio de Descarga Masiva (verificados contra la
+# documentación pública el 2026-10-03; ver "Dudas abiertas" de la spec de F2):
+#   5002  límite de por vida de solicitudes con los mismos parámetros. No se resuelve
+#         esperando: hay que pedir otra ventana. Rechazo definitivo.
+#   5003  tope máximo de CFDI (200,000) o metadatos (1,000,000) por solicitud: se parte.
+#   5005  ya hay una solicitud activa con esos parámetros. Rechazo definitivo.
+CODIGO_TOPE_MAXIMO = "5003"
+
+
+class SolicitudActiva(Exception):
+    """Ya hay una solicitud activa para esa ventana (índice uq_sat_solicitudes_ventana_activa)."""
+
+
+def _marcar_fallo(fila: dict, mensaje: str) -> None:
+    db.execute(
+        "UPDATE sat_solicitudes SET estado='fallo', error_msg=%s, updated_at=NOW() WHERE id=%s",
+        (mensaje, str(fila["id"])),
+    )
+    fila["estado"] = "fallo"
+    fila["error_msg"] = mensaje
+
+
+def crear_solicitud_ventana(
+    creds,
+    empresa: dict,
+    tipo: str,
+    inicio: date,
+    fin: date,
+    *,
+    origen: str,
+    estado_comprobante: str = "Vigente",
+    tipo_solicitud: str = "CFDI",
+    usuario_id: str | None = None,
+    tolerar_transitorios: bool = False,
+) -> list[dict]:
+    """Registra una solicitud de la ventana ``[inicio, fin]`` y la envía al SAT.
+
+    Si el SAT la rechaza por volumen (5003), la fila se cierra como ``fallo`` y la
+    ventana se parte en dos mitades que se piden por separado (recursivamente, hasta
+    un día). Devuelve las filas resultantes: ``solicitado`` las aceptadas, ``fallo``
+    las rechazadas de forma definitiva.
+
+    Un rechazo definitivo (5002, 5005, otros) o un error transitorio:
+    - ``tolerar_transitorios=False`` (endpoints): la fila queda en ``fallo`` y se
+      relanza la excepción para que el endpoint responda 502.
+    - ``tolerar_transitorios=True`` (worker): el rechazo definitivo queda en ``fallo``
+      y se devuelve; el error transitorio deja la fila ``pendiente`` con su intento
+      contado y su ``proximo_intento``, para reintentarla después.
+
+    Levanta ``SolicitudActiva`` si esa ventana ya tiene una solicitud en vuelo.
+    """
+    try:
+        fila = db.execute(
+            """INSERT INTO sat_solicitudes
+               (empresa_id, usuario_id, tipo, periodo_inicio, periodo_fin, estado,
+                origen, estado_comprobante, tipo_solicitud, fecha_inicio, fecha_fin)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING *""",
+            (str(empresa["id"]), usuario_id, tipo, inicio.strftime("%Y-%m"), fin.strftime("%Y-%m"),
+             "pendiente", origen, estado_comprobante, tipo_solicitud, inicio, fin),
+            returning=True,
+        )
+    except psycopg2.errors.UniqueViolation as exc:
+        raise SolicitudActiva(f"Ya hay una solicitud activa de {tipo} para {inicio} a {fin}") from exc
+
+    fila = dict(fila)
+    sol_id = str(fila["id"])
+    try:
+        id_sat = solicitar_descarga(
+            creds, empresa["rfc"], tipo, inicio, fin,
+            tipo_solicitud=tipo_solicitud, estado_comprobante=estado_comprobante,
+        )
+    except SolicitudRechazada as exc:
+        if exc.codigo == CODIGO_TOPE_MAXIMO:
+            mitades = partir_ventana(inicio, fin)
+            if mitades:
+                _marcar_fallo(
+                    fila,
+                    f"El SAT rechazó {inicio} a {fin} por volumen (código {CODIGO_TOPE_MAXIMO}); "
+                    "se partió en dos mitades.",
+                )
+                resultado: list[dict] = []
+                for ini, fi in mitades:
+                    resultado += crear_solicitud_ventana(
+                        creds, empresa, tipo, ini, fi, origen=origen,
+                        estado_comprobante=estado_comprobante, tipo_solicitud=tipo_solicitud,
+                        usuario_id=usuario_id, tolerar_transitorios=tolerar_transitorios,
+                    )
+                return resultado
+        _marcar_fallo(fila, str(exc))
+        if tolerar_transitorios:
+            return [fila]
+        raise
+    except FIELError as exc:
+        if tolerar_transitorios:
+            registrar_solicitud_fallida(sol_id, str(exc))
+            fila["intentos"] = (fila.get("intentos") or 0) + 1
+            return [fila]
+        _marcar_fallo(fila, str(exc))
+        raise
+
+    db.execute(
+        "UPDATE sat_solicitudes SET id_solicitud_sat=%s, estado='solicitado', updated_at=NOW() WHERE id=%s",
+        (id_sat, sol_id),
+    )
+    fila["id_solicitud_sat"] = id_sat
+    fila["estado"] = "solicitado"
+    return [fila]
 
 
 # ---------------------------------------------------------------------------

@@ -61,20 +61,6 @@ def test_el_quinto_fallo_cuatro_reintentos_agotados_deja_fallo_con_el_mensaje_de
     assert "SAT no responde" in bd.fila["error_msg"]
 
 
-def test_diferir_no_consume_intento_y_espera_una_hora(bd):
-    estado = sat_sync.registrar_solicitud_fallida("sol-1", "Solicitudes agotadas (5002)", diferir=True)
-    assert estado == "solicitado"
-    assert bd.fila["intentos"] == 0
-    assert bd.fila["proximo_intento"] == timedelta(hours=1)
-    assert bd.fila["estado"] == "solicitado"
-
-
-def test_diferir_varias_veces_nunca_agota_los_intentos(bd):
-    for _ in range(10):
-        assert sat_sync.registrar_solicitud_fallida("sol-1", "5002", diferir=True) == "solicitado"
-    assert bd.fila["intentos"] == 0
-
-
 # ─── avanzar_solicitud ────────────────────────────────────────────────────────
 
 def _solicitud(**extra):

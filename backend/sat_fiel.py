@@ -44,6 +44,19 @@ class FIELError(Exception):
     """Error relacionado con la FIEL o con el servicio SAT Descarga Masiva."""
 
 
+class SolicitudRechazada(FIELError):
+    """El SAT recibió la solicitud de descarga y la rechazó.
+
+    ``codigo`` es el CodEstatus del SAT: 5002 (límite de por vida para los mismos
+    parámetros), 5003 (tope máximo de CFDI o metadatos por solicitud), 5005
+    (solicitud duplicada), etc.
+    """
+
+    def __init__(self, mensaje: str, codigo: str | None = None):
+        super().__init__(mensaje)
+        self.codigo = codigo
+
+
 def _check_satcfdi():
     if not SATCFDI_OK:
         raise FIELError("satcfdi no instalado. Ejecutar: pip install satcfdi")
@@ -163,9 +176,10 @@ def solicitar_descarga(
     # 5000 = solicitud recibida con éxito; cualquier otro código es un rechazo
     # (5002 solicitudes agotadas, 5005 duplicada, …) aunque venga un IdSolicitud.
     if not id_solicitud or (cod_estatus and cod_estatus != "5000"):
-        raise FIELError(
+        raise SolicitudRechazada(
             f"El SAT rechazó la solicitud de {tipo_lower} "
-            f"(código {cod_estatus}): {respuesta.get('Mensaje') or respuesta}"
+            f"(código {cod_estatus}): {respuesta.get('Mensaje') or respuesta}",
+            codigo=str(cod_estatus) if cod_estatus else None,
         )
 
     _log.info(

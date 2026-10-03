@@ -21,6 +21,8 @@ from ..auditoria import registrar_evento
 from ..deps import get_current_user, validar_acceso_empresa, serializar, limiter
 from ..sat_fiel import FIELError, cargar_fiel, solicitar_descarga, verificar_solicitud
 from ..sat_sync import (
+    SolicitudActiva,
+    crear_solicitud_ventana,
     ESTADOS_PENDIENTES as _ESTADOS_PENDIENTES,
     avanzar_solicitud as _avanzar_solicitud,
     estado_sat as _estado_sat,
@@ -378,28 +380,19 @@ async def sync_completo_fiel(
         raise HTTPException(status_code=422, detail=str(exc))
 
     for t in tipos:
-        registro = db.execute(
-            """INSERT INTO sat_solicitudes
-               (empresa_id, usuario_id, tipo, periodo_inicio, periodo_fin, estado)
-               VALUES (%s, %s, %s, %s, %s, 'pendiente') RETURNING *""",
-            (empresa_id, current_user["user_id"], t, periodo, periodo),
-            returning=True,
-        )
-        solicitud_ids.append({"id": str(registro["id"]), "tipo": t})
-
         try:
-            id_sat = solicitar_descarga(creds, empresa["rfc"], t, fecha_inicio, fecha_fin,
-                                    estado_comprobante="Vigente")
-            db.execute(
-                "UPDATE sat_solicitudes SET id_solicitud_sat=%s, estado='solicitado', updated_at=NOW() WHERE id=%s",
-                (id_sat, str(registro["id"])),
+            filas = crear_solicitud_ventana(
+                creds, {"id": empresa_id, "rfc": empresa["rfc"]}, t, fecha_inicio, fecha_fin,
+                origen="manual", usuario_id=current_user["user_id"],
+            )
+        except SolicitudActiva:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Ya hay una descarga de {t} en curso para {periodo}. Espera a que termine.",
             )
         except FIELError as exc:
-            db.execute(
-                "UPDATE sat_solicitudes SET estado='fallo', error_msg=%s, updated_at=NOW() WHERE id=%s",
-                (str(exc), str(registro["id"])),
-            )
             raise HTTPException(status_code=502, detail=f"Error SAT al solicitar {t}: {exc}")
+        solicitud_ids += [{"id": str(f["id"]), "tipo": t} for f in filas if f["estado"] == "solicitado"]
 
     # Lanzar background task que verifica y descarga automáticamente
     background_tasks.add_task(

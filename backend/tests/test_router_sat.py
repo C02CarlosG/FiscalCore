@@ -605,7 +605,7 @@ def test_sync_completo_error_sat_al_solicitar_da_502(monkeypatch):
 
     def _raise(*a, **k):
         raise FIELError("SAT no disponible")
-    monkeypatch.setattr(sat, "solicitar_descarga", _raise)
+    monkeypatch.setattr(sat_sync, "solicitar_descarga", _raise)
 
     try:
         r = client.post(
@@ -632,7 +632,7 @@ def test_sync_completo_exitoso_ambos_tipos_agenda_background(monkeypatch):
             return {"id": f"sol-{contador['n']}"}
         return None
     monkeypatch.setattr(db, "execute", _execute)
-    monkeypatch.setattr(sat, "solicitar_descarga", lambda *a, **k: "id-sat-x")
+    monkeypatch.setattr(sat_sync, "solicitar_descarga", lambda *a, **k: "id-sat-x")
 
     llamadas_bg = []
     monkeypatch.setattr(sat, "_sync_completo_bg", lambda **kw: llamadas_bg.append(kw))
@@ -651,6 +651,30 @@ def test_sync_completo_exitoso_ambos_tipos_agenda_background(monkeypatch):
     assert {"emitidos", "recibidos"} == set(body["tipos"])
     assert len(llamadas_bg) == 1
     assert len(llamadas_bg[0]["solicitudes"]) == 2
+
+
+def test_sync_completo_ventana_ya_en_curso_da_409(monkeypatch):
+    import psycopg2.errors
+
+    _auth(monkeypatch)
+    monkeypatch.setattr(db, "query_one", lambda *a, **k: {"rfc": "TEST010101AAA"})
+    monkeypatch.setattr(fiel_store, "estado_fiel", lambda db_, eid: {"vencida": False})
+    monkeypatch.setattr(fiel_store, "obtener_signer", lambda db_, eid: _FakeSigner())
+
+    def _execute(sql, params=(), returning=False):
+        raise psycopg2.errors.UniqueViolation("duplicada")
+    monkeypatch.setattr(db, "execute", _execute)
+
+    try:
+        r = client.post(
+            f"/api/v1/sat/empresas/{EMPRESA}/fiel/sync",
+            data={"tipo": "emitidos", "periodo": "2026-01"},
+        )
+    finally:
+        _teardown()
+
+    assert r.status_code == 409
+    assert "en curso" in r.json()["detail"]
 
 
 # ─── POST /sat/empresas/{id}/fiel/sync/avanzar ──────────────────────────────────

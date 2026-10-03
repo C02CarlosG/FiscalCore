@@ -76,3 +76,17 @@ def test_solicitar_descarga_sin_id_de_solicitud_falla(sat_falso, monkeypatch):
         sat_fiel.solicitar_descarga(
             object(), "TEST010101AAA", "recibidos", date(2026, 9, 1), date(2026, 9, 30),
         )
+
+
+def test_rechazo_del_sat_conserva_el_codigo_en_la_excepcion(sat_falso, monkeypatch):
+    from backend.sat_fiel import SolicitudRechazada
+
+    monkeypatch.setattr(sat_falso, "respuesta", {"CodEstatus": "5003", "Mensaje": "Tope máximo"})
+
+    with pytest.raises(SolicitudRechazada) as exc:
+        sat_fiel.solicitar_descarga(
+            object(), "TEST010101AAA", "emitidos", date(2026, 9, 1), date(2026, 9, 30),
+        )
+
+    assert exc.value.codigo == "5003"
+    assert isinstance(exc.value, FIELError)

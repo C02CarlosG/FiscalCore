@@ -1711,6 +1711,10 @@ paths:
         Todo ocurre en background. Requiere FIEL guardada y vigente.
 
         **Tipo**: emitidos | recibidos | ambos
+
+        Si el SAT rechaza el mes por volumen (codigo 5003, mas de 200,000 CFDI),
+        la solicitud se parte en dos mitades que se piden por separado. Si ya hay
+        una descarga en curso para el mismo periodo y tipo, responde 409.
       parameters:
         - $ref: '#/components/parameters/EmpresaId'
       requestBody:
@@ -1762,6 +1766,8 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
               example:
                 detail: "No hay FIEL guardada para esta empresa. Guardala primero."
+        '409':
+          $ref: '#/components/responses/ConflictError'
         '502':
           $ref: '#/components/responses/GatewayError'
 

@@ -163,10 +163,21 @@ detiene a las demás. Al arrancar no necesita reconciliar nada: lo pendiente sig
 - Una solicitud nunca cubre más de un mes natural (D6). Si el SAT rechaza por volumen
   (resultado demasiado grande), la ventana se parte en dos mitades por fecha y se
   reintenta; el límite inferior es un día.
+- **Límites del SAT** (verificados el 2026-10-03 contra documentación pública, fuente
+  secundaria; confirmar con el WS oficial antes de F2.2): hasta 200,000 XML o 1,000,000
+  metadatos por solicitud; cada paquete se descarga como máximo **2 veces** y vive
+  **72 horas**; solo una solicitud activa por conjunto de parámetros.
+- **Códigos de rechazo**:
+  - `5003` (tope máximo): se parte la ventana (`crear_solicitud_ventana`).
+  - `5002` (límite de **por vida** para los mismos parámetros): no se resuelve esperando.
+    Rechazo definitivo: la solicitud queda `fallo` con el mensaje del SAT. El worker
+    (F2.2) evita repetir parámetros idénticos (la corrida diaria cambia `fecha_fin`).
+  - `5005` (solicitud duplicada): rechazo definitivo; el índice único de ventana activa
+    evita pedirla dos veces desde FiscalCore.
 - **Concurrencia hacia el SAT**: máximo `MAX_SOLICITUDES_EN_VUELO` (valor inicial 4) por
-  empresa, para no agotar el cupo de solicitudes. `5002` (solicitudes agotadas) no cuenta
-  como fallo: se difiere la solicitud 1 h.
-- **Reintentos**: `intentos` y `proximo_intento` con espera creciente (5 min, 15 min,
+  empresa, para no saturar al servicio.
+- **Reintentos** (errores transitorios: red, 404 "no controlado"): `intentos` y
+  `proximo_intento` con espera creciente (5 min, 15 min,
   1 h, 6 h); tras esos 4 reintentos (el quinto fallo seguido) la solicitud queda `fallo` con el mensaje del SAT. Esto
   reemplaza el conteo "intento N de 3" que hoy viaja dentro de `error_msg` solo para
   los paquetes, que se conserva tal cual.
@@ -270,7 +281,7 @@ manual con COPLASUR):
    demás empresas siguen avanzando.
 8. Fallo del SAT: reintentos con la espera definida; al quinto fallo seguido queda `fallo` con el
    mensaje del SAT visible en el historial; `ultima_exitosa` no avanza.
-9. `5002` difiere sin contar intento; `5004` cierra con cero CFDI.
+9. `5003` parte la ventana; `5002` y `5005` fallan de inmediato con el mensaje del SAT; `5004` cierra con cero CFDI.
 10. Desactivar detiene la creación y el avance; borrar la e.firma desactiva.
 11. Ningún texto de log, `error_msg` o `auditoria` contiene la contraseña ni bytes de la
     e.firma (prueba dedicada).
@@ -307,7 +318,8 @@ funcionando. F2.1 a F2.4 son backend y pueden revisarse sin tocar el frontend.
 
 | Riesgo | Mitigación |
 |---|---|
-| Límites del SAT (solicitudes por periodo, tamaño de resultado, máximo de paquetes) distintos a lo supuesto | Se verifican contra la documentación vigente al iniciar F2.1; los valores van en variables de entorno, no fijos; partición de ventanas ante rechazo por volumen |
+| Límites del SAT distintos a lo verificado (200,000 CFDI por solicitud, límite de por vida por parámetros idénticos) | Valores y esperas en variables de entorno; partición de ventanas ante `5003`; confirmar con el WS oficial antes de F2.2 |
+| Cada paquete solo se puede descargar 2 veces y vive 72 h; los reintentos de descarga (hoy 3) pueden agotarlo | F2.2: reducir los reintentos por paquete a 2 y, si falla, volver a solicitar la ventana con parámetros distintos (otra `fecha_fin`); evaluar guardar el ZIP antes de importar |
 | Los metadatos de cancelados no se pueden leer con satcfdi | Fallback documentado (XML de cancelados); se decide en F2.4 sin bloquear F2.1–F2.3 |
 | El hospedaje no admite segundo proceso | `WORKER_EN_PROCESO_WEB` como respaldo; `/fiel/sync/avanzar` sigue existiendo |
 | Fuga de la e.firma al operar desatendido | Sección Seguridad: consentimiento, memoria, auditoría, pausa y borrado |
