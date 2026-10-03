@@ -11,6 +11,8 @@ export interface LoginResponse {
   user_id: string;
   email: string;
   nombre: string | null;
+  /** Ausente en respuestas de versiones anteriores del servidor. */
+  rol?: "admin" | "contador";
   empresas: EmpresaResumen[];
 }
 

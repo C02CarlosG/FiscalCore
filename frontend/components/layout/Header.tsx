@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
-import { Bell, ChevronRight, Menu, Search } from "lucide-react";
+import { ChevronRight, Menu, Search } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -18,10 +18,9 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 const LABELS: Record<string, string> = {
   dashboard: "Dashboard",
   empresas: "Empresas",
-  cfdi: "Visor SAT",
+  cfdi: "CFDIs",
   emitidos: "CFDI Emitidos",
   recibidos: "CFDI Recibidos",
-  nomina: "CFDI Nómina",
   ingesta: "Ingesta",
   conciliacion: "Conciliación",
   "cedula-iva": "Cédula de IVA",
@@ -171,17 +170,6 @@ export function Header({ onMenuClick }: { onMenuClick: () => void }) {
           </ul>
         )}
       </div>
-
-      <Button
-        type="button"
-        aria-label="Notificaciones"
-        variant="ghost"
-        size="icon"
-        className="hidden shrink-0 text-muted-foreground sm:inline-flex"
-      >
-        {/* Sin badge de conteo: no hay endpoint de notificaciones todavía. */}
-        <Bell className="h-4 w-4" />
-      </Button>
 
       <DropdownMenu>
         <DropdownMenuTrigger asChild>

@@ -48,11 +48,22 @@ describe("Header", () => {
     expect(screen.getByText("Dashboard")).toBeInTheDocument();
   });
 
-  it("shows the Visor SAT breadcrumb and not Empresas on the cfdi route", () => {
+  it("shows the CFDIs breadcrumb and not Empresas on the cfdi route", () => {
     mockPathname.mockReturnValue("/empresas/e1/cfdi");
     render(<Header onMenuClick={() => {}} />);
-    expect(screen.getByText("Visor SAT")).toBeInTheDocument();
+    expect(screen.getByText("CFDIs")).toBeInTheDocument();
     expect(screen.queryByText("Empresas")).not.toBeInTheDocument();
+  });
+
+  it("shows the specific label on the emitidos and recibidos routes", () => {
+    mockPathname.mockReturnValue("/empresas/e1/cfdi/recibidos");
+    render(<Header onMenuClick={() => {}} />);
+    expect(screen.getByText("CFDI Recibidos")).toBeInTheDocument();
+  });
+
+  it("has no notifications button until it does something", () => {
+    render(<Header onMenuClick={() => {}} />);
+    expect(screen.queryByRole("button", { name: "Notificaciones" })).not.toBeInTheDocument();
   });
 
   it("navigates to the matched empresa on search", async () => {

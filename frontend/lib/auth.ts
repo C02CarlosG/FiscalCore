@@ -7,6 +7,8 @@ export interface Session {
   userId: string;
   email: string;
   nombre: string | null;
+  /** Una sesión guardada antes de que el servidor devolviera el rol no lo trae. */
+  rol?: LoginResponse["rol"];
   empresas: LoginResponse["empresas"];
 }
 
@@ -16,6 +18,7 @@ export function saveSession(login: LoginResponse): Session {
     userId: login.user_id,
     email: login.email,
     nombre: login.nombre,
+    rol: login.rol,
     empresas: login.empresas,
   };
   window.localStorage.setItem(STORAGE_KEY, JSON.stringify(session));
