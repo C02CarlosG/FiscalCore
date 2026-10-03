@@ -133,9 +133,7 @@ export function CfdiTabla({
                     aria-sort={
                       columna.ordenable ? (activa ? (dir === "asc" ? "ascending" : "descending") : "none") : undefined
                     }
-                    className={`h-11 whitespace-nowrap bg-muted/70 text-[11px] font-bold uppercase ${
-                      alineadaALaDerecha(columna) ? "text-right" : ""
-                    }`}
+                    className={alineadaALaDerecha(columna) ? "text-right" : ""}
                   >
                     {columna.ordenable ? (
                       <button

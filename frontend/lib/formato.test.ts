@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatearFecha, formatearFechaHora, formatearMoneda } from "./formato";
+import { formatearFecha, formatearFechaHora, formatearInstante, formatearMoneda } from "./formato";
 
 describe("formatearFecha", () => {
   it("escribe dd/mm/aaaa", () => {
@@ -50,5 +50,25 @@ describe("formatearMoneda", () => {
 
   it.each([null, undefined])("devuelve guion ante %j, nunca cero", (valor) => {
     expect(formatearMoneda(valor)).toBe("—");
+  });
+});
+
+describe("formatearInstante", () => {
+  it("muestra un instante UTC en la hora local como dd/mm/aaaa hh:mm", () => {
+    const instante = "2026-09-29T19:07:00Z";
+    const d = new Date(instante);
+    const p = (n: number) => String(n).padStart(2, "0");
+    expect(formatearInstante(instante)).toBe(
+      `${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}`,
+    );
+  });
+
+  it("sin zona lo trata como hora local del comprobante", () => {
+    expect(formatearInstante("2026-09-29T19:07:00")).toBe("29/09/2026 19:07");
+  });
+
+  it("sin dato o inválido muestra guion", () => {
+    expect(formatearInstante(null)).toBe("—");
+    expect(formatearInstante("basura")).toBe("—");
   });
 });

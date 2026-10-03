@@ -19,6 +19,20 @@ export function formatearFechaHora(iso: string | null | undefined): string {
   return m[4] === undefined ? fecha : `${fecha} ${m[4]}:${m[5]}`;
 }
 
+const dos = (n: number) => String(n).padStart(2, "0");
+
+/**
+ * Marca de tiempo del sistema (p. ej. `created_at`). Con zona (`Z` o `±hh:mm`) es un instante
+ * y se muestra en la hora local del navegador; sin zona se trata como hora local del comprobante.
+ */
+export function formatearInstante(iso: string | null | undefined): string {
+  if (typeof iso !== "string" || !FECHA_RE.test(iso)) return SIN_DATO;
+  if (!/(Z|[+-]\d{2}:?\d{2})$/.test(iso)) return formatearFechaHora(iso);
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return SIN_DATO;
+  return `${dos(d.getDate())}/${dos(d.getMonth() + 1)}/${d.getFullYear()} ${dos(d.getHours())}:${dos(d.getMinutes())}`;
+}
+
 const MONEDA = new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN" });
 
 /** Sin dato se muestra un guion: un cero diría que hay CFDI y suman nada. */
