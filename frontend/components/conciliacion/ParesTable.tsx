@@ -1,3 +1,4 @@
+import { formatFecha } from "@/lib/formato";
 import { DataTable, type DataTableColumn } from "@/components/shared/DataTable";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import type { ParConciliacion } from "@/types/api";
@@ -12,7 +13,7 @@ const columns: DataTableColumn<ParConciliacion>[] = [
   {
     key: "mov_fecha",
     header: "Fecha",
-    cell: (p) => p.mov_fecha ?? "—",
+    cell: (p) => formatFecha(p.mov_fecha),
     sortValue: (p) => p.mov_fecha ?? "",
   },
   {

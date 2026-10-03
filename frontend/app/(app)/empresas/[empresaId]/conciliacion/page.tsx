@@ -1,7 +1,6 @@
 "use client";
 
 import { useParams } from "next/navigation";
-import { useState } from "react";
 import {
   useConciliacionResumen,
   useConciliacionesAccionables,
@@ -10,12 +9,13 @@ import { ResumenConciliacion } from "@/components/conciliacion/ResumenConciliaci
 import { ParesTable } from "@/components/conciliacion/ParesTable";
 import { ErrorState } from "@/components/shared/ErrorState";
 import { PageHeader } from "@/components/shared/PageHeader";
-import { PeriodFilter } from "@/components/shared/PeriodFilter";
+import { PeriodSelector } from "@/components/shared/PeriodSelector";
+import { usePeriodo } from "@/hooks/usePeriodo";
 import { LoadingState } from "@/components/shared/LoadingState";
 
 export default function ConciliacionPage() {
   const params = useParams<{ empresaId: string }>();
-  const [periodo, setPeriodo] = useState("");
+  const [periodo, setPeriodo] = usePeriodo(params.empresaId);
 
   const resumen = useConciliacionResumen(params.empresaId, periodo);
   const accionables = useConciliacionesAccionables(params.empresaId, periodo);
@@ -27,7 +27,7 @@ export default function ConciliacionPage() {
         title="Cruces banco-CFDI"
         description="Movimientos bancarios comparados con comprobantes fiscales del periodo."
       />
-      <PeriodFilter id="conciliacion-periodo" value={periodo} onChange={setPeriodo} />
+      <PeriodSelector empresaId={params.empresaId} value={periodo} onChange={setPeriodo} />
 
       {resumen.isLoading && <LoadingState label="Cargando conciliación" />}
       {resumen.isError && (

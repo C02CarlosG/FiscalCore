@@ -18,6 +18,7 @@ import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { EmpresaSwitcher } from "@/components/layout/EmpresaSwitcher";
 import { ThemeToggle } from "@/components/shared/ThemeToggle";
 import { useEmpresaContext } from "@/components/providers/EmpresaProvider";
+import { usePeriodoParaEnlaces } from "@/hooks/usePeriodo";
 import { clearSession, loadSession } from "@/lib/auth";
 
 const NAV_ITEMS = [
@@ -30,18 +31,20 @@ const NAV_ITEMS = [
 
 const CFDI_GROUP = {
   slug: "cfdi",
-  label: "Gestión de CFDI",
+  label: "CFDIs",
   icon: FileSpreadsheet,
   children: [
-    { slug: "cfdi", label: "Visor SAT" },
-    { slug: "cfdi/emitidos", label: "CFDI Emitidos" },
-    { slug: "cfdi/recibidos", label: "CFDI Recibidos" },
-    { slug: "cfdi/nomina", label: "CFDI Nómina" },
+    { slug: "cfdi/emitidos", label: "Emitidos" },
+    { slug: "cfdi/recibidos", label: "Recibidos" },
   ],
 } as const;
 
 function isActive(pathname: string, slug: string): boolean {
   return pathname.includes(`/${slug}`);
+}
+
+function conPeriodo(href: string, periodo: string): string {
+  return periodo ? `${href}?periodo=${periodo}` : href;
 }
 
 function NavLink({
@@ -81,7 +84,15 @@ function NavLink({
   );
 }
 
-function CfdiNavGroup({ empresaId, pathname }: { empresaId: string | null; pathname: string }) {
+function CfdiNavGroup({
+  empresaId,
+  pathname,
+  periodo,
+}: {
+  empresaId: string | null;
+  pathname: string;
+  periodo: string;
+}) {
   const grupoActivo = isActive(pathname, CFDI_GROUP.slug);
   const [abierto, setAbierto] = useState(grupoActivo);
   const disabled = !empresaId;
@@ -123,7 +134,7 @@ function CfdiNavGroup({ empresaId, pathname }: { empresaId: string | null; pathn
             return (
               <Link
                 key={child.slug}
-                href={href}
+                href={conPeriodo(href, periodo)}
                 className={`rounded-lg px-2.5 py-1.5 text-sm font-medium transition-colors ${
                   active
                     ? "bg-accent text-accent-foreground"
@@ -144,6 +155,7 @@ function SidebarBody() {
   const router = useRouter();
   const pathname = usePathname();
   const { empresaId } = useEmpresaContext();
+  const periodo = usePeriodoParaEnlaces(empresaId);
   const session = typeof window !== "undefined" ? loadSession() : null;
 
   function handleLogout() {
@@ -190,19 +202,23 @@ function SidebarBody() {
           Fiscal
         </span>
         <NavLink
-          href={`/empresas/${empresaId}/${NAV_ITEMS[0].slug}`}
+          href={conPeriodo(`/empresas/${empresaId}/${NAV_ITEMS[0].slug}`, periodo)}
           disabled={!empresaId}
           active={isActive(pathname, NAV_ITEMS[0].slug)}
           icon={NAV_ITEMS[0].icon}
           label={NAV_ITEMS[0].label}
         />
 
-        <CfdiNavGroup empresaId={empresaId} pathname={pathname} />
+        <CfdiNavGroup empresaId={empresaId} pathname={pathname} periodo={periodo} />
 
         {NAV_ITEMS.slice(1).map((item) => (
           <NavLink
             key={item.slug}
-            href={`/empresas/${empresaId}/${item.slug}`}
+            href={
+              item.slug === "conciliacion" || item.slug === "cedula-iva"
+                ? conPeriodo(`/empresas/${empresaId}/${item.slug}`, periodo)
+                : `/empresas/${empresaId}/${item.slug}`
+            }
             disabled={!empresaId}
             active={isActive(pathname, item.slug)}
             icon={item.icon}
@@ -222,7 +238,7 @@ function SidebarBody() {
               {session?.nombre ?? session?.email ?? "Usuario"}
             </span>
             <span className="block truncate text-[11px] text-muted-foreground">
-              Contador
+              {session?.email ?? ""}
             </span>
           </span>
           <button
