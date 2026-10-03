@@ -188,3 +188,17 @@ def test_migracion_027_corrige_pagos_duplicados_y_uuids_en_minusculas(entorno):
     assert _num_relaciones(db) == 1
     assert _estado_factura(db) == (Decimal("5800.00"), "pagado_parcial")
     assert _iva_ppd_cedula(client, headers, empresa_id) == {"cobrado": 5800.0, "iva": 800.0}
+
+
+def test_migracion_027_solo_corrige_datos_en_el_primer_arranque(entorno):
+    """Con el índice único ya creado, el arranque no vuelve a recorrer las tablas:
+    la app normaliza los UUID al parsear, así que la corrección no se repite."""
+    db, client, headers, empresa_id = entorno
+    _subir(client, headers, empresa_id, "factura.xml", _xml_factura_ppd())
+    db.init_db()  # ya aplicó la 027 (el índice existe)
+    db.execute("UPDATE cfdi SET uuid = LOWER(uuid) WHERE uuid = %s", (UUID_FACTURA,))
+
+    db.init_db()  # segundo arranque: la corrección no se ejecuta otra vez
+
+    fila = db.query_one("SELECT uuid FROM cfdi WHERE empresa_id = %s", (empresa_id,))
+    assert fila["uuid"] == UUID_FACTURA.lower()
