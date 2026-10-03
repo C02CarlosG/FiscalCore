@@ -270,7 +270,7 @@ Criterios que los cálculos deben respetar con lo ya guardado:
 |---|---|---|---|
 | F0 | En revisión (PR abierto; falta cargar CFDI reales) | (no requiere) | (lista de verificación abajo) |
 | F1 | Implementada, en revisión (PR abierto). Falta el cierre con datos reales: reprocesar los CFDI de COPLASUR y cuadrar el IVA por tasa contra el encabezado | este documento, sección "Fases" y "Reglas comunes" | `docs/superpowers/plans/2026-10-01-fase1-detalle-fiscal-cfdi.md` |
-| F2 | Pantalla manual hecha (PR #13); automatización pendiente | — | — |
+| F2 | Pantalla manual hecha (PR #13); spec de la automatización en borrador | `docs/superpowers/specs/2026-10-03-f2-descarga-automatica-design.md` | Un plan por entrega (F2.1 a F2.5) |
 | F3 | F3.1 (API del listado) implementada, en revisión; F3.2 a F3.5 pendientes | `docs/superpowers/specs/2026-10-02-f3-listado-cfdi-design.md` | `docs/superpowers/plans/2026-10-02-f3-1-api-listado-cfdi.md`; un plan por cada entrega restante |
 | F4–F8, M1–M7 | Pendiente | — | — |
 
