@@ -13,14 +13,17 @@ wrapper de slowapi y truena al importar.
 import json as _json
 import logging
 import re
-from datetime import date
+from datetime import date, datetime, time, timedelta
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Request, UploadFile
 
 from .. import cfdi_store, db
 from ..auditoria import registrar_evento
 from ..deps import get_current_user, validar_acceso_empresa, serializar, limiter
-from ..sat_fiel import FIELError, cargar_fiel, descargar_paquete, solicitar_descarga, verificar_solicitud
+from ..sat_fiel import (
+    FIELError, SolicitudesAgotadasError, cargar_fiel, descargar_paquete, solicitar_descarga,
+    verificar_solicitud,
+)
 
 _log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/sat", tags=["SAT FIEL"])
@@ -538,36 +541,24 @@ async def sync_completo_fiel(
     ultimo_dia = calendar.monthrange(int(año), int(mes))[1]
     fecha_fin = date(int(año), int(mes), ultimo_dia)
 
-    # Crear registros de solicitud
-    solicitud_ids = []
     try:
         creds = obtener_signer(db, empresa_id)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
 
+    # Cada tipo se pide por separado: si el SAT rechaza uno, el otro sigue.
+    solicitud_ids: list[dict] = []
+    errores: list[str] = []
     for t in tipos:
-        registro = db.execute(
-            """INSERT INTO sat_solicitudes
-               (empresa_id, usuario_id, tipo, periodo_inicio, periodo_fin, estado)
-               VALUES (%s, %s, %s, %s, %s, 'pendiente') RETURNING *""",
-            (empresa_id, current_user["user_id"], t, periodo, periodo),
-            returning=True,
-        )
-        solicitud_ids.append({"id": str(registro["id"]), "tipo": t})
-
         try:
-            id_sat = solicitar_descarga(creds, empresa["rfc"], t, fecha_inicio, fecha_fin,
-                                    estado_comprobante="Vigente")
-            db.execute(
-                "UPDATE sat_solicitudes SET id_solicitud_sat=%s, estado='solicitado', updated_at=NOW() WHERE id=%s",
-                (id_sat, str(registro["id"])),
+            solicitud_ids += _solicitar_periodo(
+                creds, empresa_id, current_user["user_id"], empresa["rfc"], t,
+                periodo, fecha_inicio, fecha_fin,
             )
         except FIELError as exc:
-            db.execute(
-                "UPDATE sat_solicitudes SET estado='fallo', error_msg=%s, updated_at=NOW() WHERE id=%s",
-                (str(exc), str(registro["id"])),
-            )
-            raise HTTPException(status_code=502, detail=f"Error SAT al solicitar {t}: {exc}")
+            errores.append(f"{t}: {exc}")
+    if not solicitud_ids:
+        raise HTTPException(status_code=502, detail="Error SAT al solicitar " + "; ".join(errores))
 
     # Lanzar background task que verifica y descarga automáticamente
     background_tasks.add_task(
@@ -582,7 +573,104 @@ async def sync_completo_fiel(
         "solicitudes": solicitud_ids,
         "periodo": periodo,
         "tipos": tipos,
+        "errores": errores,
     }
+
+
+_MENSAJE_AGOTADAS = (
+    "El SAT ya no acepta más solicitudes de este periodo (código 5002: se agotaron "
+    "las solicitudes de por vida). Descarga los XML desde el portal del SAT y súbelos en Ingesta."
+)
+
+
+def _registrar_solicitud(empresa_id: str, usuario_id: str, tipo: str, periodo: str) -> str:
+    registro = db.execute(
+        """INSERT INTO sat_solicitudes
+           (empresa_id, usuario_id, tipo, periodo_inicio, periodo_fin, estado)
+           VALUES (%s, %s, %s, %s, %s, 'pendiente') RETURNING *""",
+        (empresa_id, usuario_id, tipo, periodo, periodo),
+        returning=True,
+    )
+    return str(registro["id"])
+
+
+def _rangos_partidos(fecha_inicio: date, fecha_fin: date, intento: int) -> list[tuple[datetime, datetime]]:
+    """Parte el periodo en dos rangos contiguos que lo cubren segundo a segundo.
+
+    El corte cae el día 15 a las 23:59:59 menos ``intento`` segundos, así cada
+    intento manda al SAT fechas distintas a las anteriores (el límite 5002 es por
+    parámetros idénticos) sin dejar fuera ningún CFDI del periodo.
+    """
+    corte = datetime.combine(fecha_inicio.replace(day=15), time(23, 59, 59)) - timedelta(seconds=intento)
+    return [
+        (datetime.combine(fecha_inicio, time.min), corte),
+        (corte + timedelta(seconds=1), datetime.combine(fecha_fin, time(23, 59, 59))),
+    ]
+
+
+def _solicitar_periodo(
+    creds, empresa_id: str, usuario_id: str, rfc: str, tipo: str,
+    periodo: str, fecha_inicio: date, fecha_fin: date,
+) -> list[dict]:
+    """Pide al SAT el periodo completo de un tipo y registra la(s) solicitud(es).
+
+    Si el SAT responde 5002 (solicitudes agotadas para esas mismas fechas), lo
+    vuelve a pedir partido en dos rangos contiguos con un corte nuevo. Devuelve
+    las solicitudes aceptadas; lanza ``FIELError`` si ninguna lo fue.
+    """
+    sol_id = _registrar_solicitud(empresa_id, usuario_id, tipo, periodo)
+    try:
+        id_sat = solicitar_descarga(creds, rfc, tipo, fecha_inicio, fecha_fin, estado_comprobante="Vigente")
+    except SolicitudesAgotadasError:
+        _log.info("Solicitud %s: el SAT agotó las del periodo %s completo; se pide en dos partes", sol_id, periodo)
+    except FIELError as exc:
+        db.execute(
+            "UPDATE sat_solicitudes SET estado='fallo', error_msg=%s, updated_at=NOW() WHERE id=%s",
+            (str(exc), sol_id),
+        )
+        raise
+    else:
+        db.execute(
+            "UPDATE sat_solicitudes SET id_solicitud_sat=%s, estado='solicitado', updated_at=NOW() WHERE id=%s",
+            (id_sat, sol_id),
+        )
+        return [{"id": sol_id, "tipo": tipo}]
+
+    # Cada intento registra al menos una solicitud, así que la cuenta crece y el
+    # corte nunca repite fechas que el SAT ya vio.
+    intento = (db.query_one(
+        "SELECT COUNT(*) AS n FROM sat_solicitudes WHERE empresa_id=%s AND tipo=%s AND periodo_inicio=%s",
+        (empresa_id, tipo, periodo),
+    ) or {}).get("n") or 0
+
+    aceptadas: list[dict] = []
+    ultimo_error: FIELError | None = None
+    for num, (desde, hasta) in enumerate(_rangos_partidos(fecha_inicio, fecha_fin, intento)):
+        parte_id = sol_id if num == 0 else _registrar_solicitud(empresa_id, usuario_id, tipo, periodo)
+        try:
+            id_sat = solicitar_descarga(creds, rfc, tipo, desde, hasta, estado_comprobante="Vigente")
+        except FIELError as exc:
+            ultimo_error = exc
+            mensaje = (
+                f"Parte {num + 1} de 2 ({desde:%d/%m/%Y %H:%M:%S} a {hasta:%d/%m/%Y %H:%M:%S}): "
+                + (_MENSAJE_AGOTADAS if isinstance(exc, SolicitudesAgotadasError) else str(exc))
+            )
+            db.execute(
+                "UPDATE sat_solicitudes SET estado='fallo', error_msg=%s, updated_at=NOW() WHERE id=%s",
+                (mensaje, parte_id),
+            )
+            continue
+        db.execute(
+            "UPDATE sat_solicitudes SET id_solicitud_sat=%s, estado='solicitado', updated_at=NOW() WHERE id=%s",
+            (id_sat, parte_id),
+        )
+        aceptadas.append({"id": parte_id, "tipo": tipo})
+
+    if not aceptadas:
+        if isinstance(ultimo_error, SolicitudesAgotadasError):
+            raise SolicitudesAgotadasError(_MENSAJE_AGOTADAS)
+        raise ultimo_error
+    return aceptadas
 
 
 # Estados en los que el SAT todavía está preparando la solicitud.

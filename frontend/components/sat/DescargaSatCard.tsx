@@ -118,6 +118,7 @@ export function DescargaSatCard({ empresaId }: { empresaId: string }) {
   const [tipo, setTipo] = useState<SatTipoDescarga>("ambos");
   const [formError, setFormError] = useState<string | null>(null);
   const [enviada, setEnviada] = useState(false);
+  const [rechazos, setRechazos] = useState<string[]>([]);
 
   const fielLista = Boolean(fiel.data?.tiene_fiel) && !fiel.data?.vencida;
   const aviso = !fiel.data
@@ -132,6 +133,7 @@ export function DescargaSatCard({ empresaId }: { empresaId: string }) {
     event.preventDefault();
     setFormError(null);
     setEnviada(false);
+    setRechazos([]);
 
     if (!periodo.trim()) {
       setFormError("El periodo es obligatorio");
@@ -139,8 +141,9 @@ export function DescargaSatCard({ empresaId }: { empresaId: string }) {
     }
 
     try {
-      await sincronizar.mutateAsync({ periodo: periodo.trim(), tipo });
+      const respuesta = await sincronizar.mutateAsync({ periodo: periodo.trim(), tipo });
       setEnviada(true);
+      setRechazos(respuesta.errores ?? []);
     } catch (err) {
       setFormError(
         err instanceof ApiError ? err.message : "No se pudo solicitar la descarga, intenta de nuevo",
@@ -203,6 +206,19 @@ export function DescargaSatCard({ empresaId }: { empresaId: string }) {
             <p role="status" className="text-sm font-medium text-status-ok">
               Solicitud enviada al SAT. El avance aparece abajo y se actualiza solo.
             </p>
+          )}
+          {rechazos.length > 0 && (
+            <div role="alert" className="space-y-1 text-sm font-medium text-status-error">
+              <p className="flex items-center gap-2">
+                <AlertCircle className="h-4 w-4 flex-none" />
+                El SAT rechazó una parte de la solicitud:
+              </p>
+              <ul className="list-disc pl-10">
+                {rechazos.map((r) => (
+                  <li key={r}>{r}</li>
+                ))}
+              </ul>
+            </div>
           )}
 
           <Button type="submit" disabled={!fielLista || sincronizar.isPending}>
