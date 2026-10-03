@@ -23,7 +23,7 @@ import backend.fiel_store as fiel_store
 from fastapi.testclient import TestClient
 
 import backend.main_api as main
-from backend import db
+from backend import db, sat_sync
 from backend.deps import get_current_user
 from backend.routers import sat
 from backend.sat_fiel import FIELError
@@ -670,7 +670,7 @@ def _preparar_avanzar(monkeypatch, pendientes, verificacion, tomada=True):
     _auth(monkeypatch)
     monkeypatch.setattr(db, "query_all", lambda *a, **k: pendientes)
     monkeypatch.setattr(fiel_store, "obtener_signer", lambda db_, eid: _FakeSigner())
-    monkeypatch.setattr(sat, "verificar_solicitud", lambda *a, **k: verificacion)
+    monkeypatch.setattr(sat_sync, "verificar_solicitud", lambda *a, **k: verificacion)
 
     sqls = []
 
@@ -687,7 +687,7 @@ def _preparar_avanzar(monkeypatch, pendientes, verificacion, tomada=True):
     def _importar(**kw):
         importaciones.append(kw)
         return "descargado"
-    monkeypatch.setattr(sat, "_importar_paquetes_bg", _importar)
+    monkeypatch.setattr(sat_sync, "importar_paquetes", _importar)
     return sqls, importaciones
 
 
@@ -780,7 +780,7 @@ def test_avanzar_error_al_verificar_conserva_el_estado(monkeypatch):
 
     def _raise(*a, **k):
         raise FIELError("timeout SAT")
-    monkeypatch.setattr(sat, "verificar_solicitud", _raise)
+    monkeypatch.setattr(sat_sync, "verificar_solicitud", _raise)
 
     try:
         r = client.post(_AVANZAR_URL)
@@ -831,7 +831,7 @@ def test_avanzar_estado_numerico_rechazada_guarda_el_mensaje_del_sat(monkeypatch
     _auth(monkeypatch)
     monkeypatch.setattr(db, "query_all", lambda *a, **k: [_solicitud_pendiente()])
     monkeypatch.setattr(fiel_store, "obtener_signer", lambda db_, eid: _FakeSigner())
-    monkeypatch.setattr(sat, "verificar_solicitud", lambda *a, **k: {
+    monkeypatch.setattr(sat_sync, "verificar_solicitud", lambda *a, **k: {
         "estado": 5, "id_paquetes": [], "num_cfdi": 0, "mensaje": "No se encontró la información",
     })
     params_vistos = []
@@ -874,7 +874,7 @@ def test_avanzar_estado_cero_del_sat_deja_de_esperar_y_guarda_el_motivo(monkeypa
     _auth(monkeypatch)
     monkeypatch.setattr(db, "query_all", lambda *a, **k: [_solicitud_pendiente("en_proceso")])
     monkeypatch.setattr(fiel_store, "obtener_signer", lambda db_, eid: _FakeSigner())
-    monkeypatch.setattr(sat, "verificar_solicitud", lambda *a, **k: {
+    monkeypatch.setattr(sat_sync, "verificar_solicitud", lambda *a, **k: {
         "estado": 0, "id_paquetes": [], "num_cfdi": 0, "mensaje": "No se encontro la informacion",
     })
     params_vistos = []
@@ -1011,7 +1011,7 @@ def _preparar_importacion(monkeypatch, paquetes_sat, fila_final, pipeline=None):
     import backend.routers.ingesta as ingesta
 
     monkeypatch.setattr(cfdi_parser, "CFDIParser", _FakeParser)
-    monkeypatch.setattr(sat, "_insertar_cfdi", lambda *a, **k: None)
+    monkeypatch.setattr(sat_sync, "_insertar_cfdi", lambda *a, **k: None)
     monkeypatch.setattr(ingesta, "_correr_pipeline", lambda *a: (pipeline if pipeline is not None else []).append(a))
 
     descargados = []
@@ -1022,7 +1022,7 @@ def _preparar_importacion(monkeypatch, paquetes_sat, fila_final, pipeline=None):
         if isinstance(xmls, Exception):
             raise xmls
         return xmls
-    monkeypatch.setattr(sat, "descargar_paquete", _descargar)
+    monkeypatch.setattr(sat_sync, "descargar_paquete", _descargar)
 
     def _query_one(sql, params=()):
         if "FROM empresas" in sql:
@@ -1036,7 +1036,7 @@ def _preparar_importacion(monkeypatch, paquetes_sat, fila_final, pipeline=None):
 
 
 def _importar(paquetes, desde=0):
-    return sat._importar_paquetes_bg(
+    return sat_sync.importar_paquetes(
         creds=_FakeSigner(), solicitud_id="sol-1", empresa_id=EMPRESA,
         periodo="2026-09", paquetes=paquetes, desde=desde,
     )

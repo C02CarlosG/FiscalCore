@@ -154,11 +154,11 @@ def test_rep_que_llega_antes_que_su_factura_se_aplica_al_llegar_la_factura(entor
 def test_descarga_sat_tambien_procesa_complementos_de_pago(entorno):
     db, _client, _headers, empresa_id = entorno
     from backend.cfdi_parser import CFDIParser
-    from backend.routers import sat
+    from backend import sat_sync
 
     parser = CFDIParser()
     for xml in (_xml_factura_ppd(), _xml_rep(), _xml_rep()):  # el paquete puede repetirse
-        sat._insertar_cfdi(empresa_id, parser.parse_xml(xml), PERIODO, xml)
+        sat_sync._insertar_cfdi(empresa_id, parser.parse_xml(xml), PERIODO, xml)
 
     assert _estado_factura(db) == (Decimal("5800.00"), "pagado_parcial")
     assert _num_relaciones(db) == 1
