@@ -25,7 +25,7 @@
 - La extracción no cambia el orden ni la atomicidad de los `UPDATE` condicionales de `_avanzar_solicitud` (dos pasadas no importan el mismo paquete) (Task 3).
 - El índice único parcial no hace fallar la migración cuando ya hay solicitudes activas repetidas (Task 1).
 - `5002` (solicitudes agotadas) difiere sin consumir intento; `5004` sigue siendo éxito con cero CFDI (Task 4).
-- Las esperas de reintento son las del spec: 5 min, 15 min, 1 h, 6 h; al cuarto intento, `fallo` (Task 4).
+- Las esperas de reintento son las del spec: 5 min, 15 min, 1 h, 6 h; al quinto fallo seguido (tras los 4 reintentos), `fallo` (Task 4).
 - La partición de ventanas nunca produce un rango vacío ni solapado (Task 2).
 
 ---
@@ -128,7 +128,7 @@ WHERE s.estado IN ('pendiente','solicitado','en_proceso','terminado')
 - Produces: `registrar_solicitud_fallida(solicitud_id, mensaje, *, diferir: bool = False) -> str` que devuelve `'pendiente'`/`'solicitado'` (se reintentará) o `'fallo'` (agotada).
 
 Reglas (del spec):
-- Error transitorio del SAT al **verificar** o **solicitar**: `intentos += 1`, `proximo_intento = now() + espera_reintento(intentos)`; al llegar a 4 intentos → `fallo` con el mensaje del SAT.
+- Error transitorio del SAT al **verificar** o **solicitar**: `intentos += 1`, `proximo_intento = now() + espera_reintento(intentos)`; tras 4 reintentos (quinto fallo seguido) → `fallo` con el mensaje del SAT.
 - `5002` (solicitudes agotadas) al solicitar: `proximo_intento = now() + 1 h`, **sin** incrementar `intentos`.
 - `5004` sigue siendo éxito con cero CFDI (ya cubierto; solo se agrega prueba de regresión).
 - Los reintentos de **paquete** conservan su mecanismo actual (3 intentos en `error_msg`); no se unifican en esta entrega.
@@ -136,7 +136,7 @@ Reglas (del spec):
 
 - [ ] **Step 1: Pruebas que fallan** (monkeypatch de `db` como en `test_router_sat.py`, sin Postgres)
   - Fallo transitorio #1 → `intentos=1`, `proximo_intento ≈ now+5 min`, estado sin cambiar a `fallo`.
-  - Fallos #2, #3 → esperas de 15 min y 1 h; fallo #4 → `fallo` y `error_msg` con el texto del SAT.
+  - Fallos #2, #3, #4 → esperas de 15 min, 1 h y 6 h; fallo #5 → `fallo` y `error_msg` con el texto del SAT.
   - `5002` → `proximo_intento ≈ now+1 h`, `intentos` igual.
   - Solicitud con `proximo_intento` futuro → `avanzar_solicitud` devuelve su estado sin llamar al SAT.
   - `error_msg` de un fallo nunca contiene la contraseña ni bytes de la e.firma (se fuerza un `FIELError` cuyo mensaje incluye un marcador y se verifica que solo pasa el texto del SAT).

@@ -788,7 +788,9 @@ def test_avanzar_error_al_verificar_conserva_el_estado(monkeypatch):
         _teardown()
 
     assert r.json() == {"avanzadas": [{"id": "sol-1", "estado": "en_proceso"}]}
-    assert sqls == []
+    # el fallo transitorio cuenta un intento y agenda el siguiente; no cambia el estado
+    assert any("intentos = intentos + 1" in q for q in sqls)
+    assert not any("estado='fallo'" in q for q in sqls)
 
 
 def test_avanzar_sin_fiel_guardada_da_422(monkeypatch):

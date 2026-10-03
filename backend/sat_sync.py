@@ -15,7 +15,7 @@ import logging
 import os
 import re
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 from . import cfdi_store, db
 from .sat_fiel import FIELError, descargar_paquete, verificar_solicitud
@@ -78,6 +78,66 @@ def espera_reintento(intentos: int) -> timedelta | None:
     if intentos < 1 or intentos > len(_ESPERAS_REINTENTO):
         return None
     return _ESPERAS_REINTENTO[intentos - 1]
+
+
+# ---------------------------------------------------------------------------
+# Reintentos de solicitudes
+# ---------------------------------------------------------------------------
+
+# Cuánto se difiere una solicitud cuando el SAT dice que se agotó el cupo (5002).
+_ESPERA_CUPO_AGOTADO = timedelta(hours=1)
+
+
+def _en_espera(solicitud: dict) -> bool:
+    """True si la solicitud tiene un ``proximo_intento`` que aún no llega."""
+    proximo = solicitud.get("proximo_intento")
+    if not proximo:
+        return False
+    if proximo.tzinfo is None:
+        proximo = proximo.replace(tzinfo=timezone.utc)
+    return proximo > datetime.now(timezone.utc)
+
+
+def registrar_solicitud_fallida(solicitud_id: str, mensaje: str, *, diferir: bool = False) -> str:
+    """Anota un fallo transitorio del SAT sobre una solicitud.
+
+    - Normal: cuenta un intento y agenda el siguiente con la espera creciente
+      (5 min, 15 min, 1 h, 6 h). Al agotarse, la solicitud queda en ``fallo``
+      con el mensaje del SAT.
+    - ``diferir=True`` (cupo de solicitudes agotado, código 5002): espera una hora
+      sin consumir intento; no es culpa de la solicitud.
+
+    Devuelve ``'fallo'`` si se agotó, o el estado vigente de la solicitud si se
+    reintentará. ``mensaje`` es solo el texto del SAT: nunca lleva la e.firma.
+    """
+    if diferir:
+        fila = db.execute(
+            """UPDATE sat_solicitudes
+               SET proximo_intento = NOW() + %s, error_msg=%s, updated_at=NOW()
+               WHERE id=%s RETURNING estado""",
+            (_ESPERA_CUPO_AGOTADO, mensaje, solicitud_id), returning=True,
+        )
+        return (fila or {}).get("estado", "solicitado")
+
+    fila = db.execute(
+        """UPDATE sat_solicitudes
+           SET intentos = intentos + 1, error_msg=%s, updated_at=NOW()
+           WHERE id=%s RETURNING intentos, estado""",
+        (mensaje, solicitud_id), returning=True,
+    ) or {}
+    intentos = fila.get("intentos") or 1
+    espera = espera_reintento(intentos)
+    if espera is None:
+        db.execute(
+            "UPDATE sat_solicitudes SET estado='fallo', error_msg=%s, updated_at=NOW() WHERE id=%s",
+            (f"El SAT no respondió tras {intentos} intentos: {mensaje}", solicitud_id),
+        )
+        return "fallo"
+    db.execute(
+        "UPDATE sat_solicitudes SET proximo_intento = NOW() + %s, updated_at=NOW() WHERE id=%s",
+        (espera, solicitud_id),
+    )
+    return fila.get("estado", "solicitado")
 
 
 # ---------------------------------------------------------------------------
@@ -323,10 +383,14 @@ def avanzar_solicitud(creds, solicitud: dict) -> str:
     solo quien logra el UPDATE condicional hace la descarga.
     """
     sol_id = str(solicitud["id"])
+    if _en_espera(solicitud):
+        return solicitud["estado"]
     try:
         resultado = verificar_solicitud(creds, solicitud["id_solicitud_sat"])
     except FIELError as exc:
         _log.warning("Error verificando %s: %s", sol_id, exc)
+        if registrar_solicitud_fallida(sol_id, str(exc)) == "fallo":
+            return "fallo"
         return solicitud["estado"]
 
     estado_str = estado_sat(resultado)
@@ -412,7 +476,8 @@ def avanzar_solicitud(creds, solicitud: dict) -> str:
 
     # En proceso — actualizar contadores y seguir esperando
     db.execute(
-        """UPDATE sat_solicitudes SET estado='en_proceso', num_cfdi=%s, updated_at=NOW()
+        """UPDATE sat_solicitudes SET estado='en_proceso', num_cfdi=%s,
+                  intentos=0, proximo_intento=NULL, updated_at=NOW()
            WHERE id=%s AND estado IN ('solicitado', 'en_proceso')""",
         (num_cfdi, sol_id),
     )

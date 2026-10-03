@@ -167,7 +167,7 @@ detiene a las demás. Al arrancar no necesita reconciliar nada: lo pendiente sig
   empresa, para no agotar el cupo de solicitudes. `5002` (solicitudes agotadas) no cuenta
   como fallo: se difiere la solicitud 1 h.
 - **Reintentos**: `intentos` y `proximo_intento` con espera creciente (5 min, 15 min,
-  1 h, 6 h); a los 4 intentos la solicitud queda `fallo` con el mensaje del SAT. Esto
+  1 h, 6 h); tras esos 4 reintentos (el quinto fallo seguido) la solicitud queda `fallo` con el mensaje del SAT. Esto
   reemplaza el conteo "intento N de 3" que hoy viaja dentro de `error_msg` solo para
   los paquetes, que se conserva tal cual.
 - **Sin información (5004)**: se trata como éxito con cero CFDI, como hoy.
@@ -268,7 +268,7 @@ manual con COPLASUR):
    periodo tenía cédula calculada, no se recalcula y queda el evento de auditoría.
 7. e.firma vencida: la empresa queda `pausada` con motivo, sin llamadas al SAT, y las
    demás empresas siguen avanzando.
-8. Fallo del SAT: reintentos con la espera definida; al cuarto queda `fallo` con el
+8. Fallo del SAT: reintentos con la espera definida; al quinto fallo seguido queda `fallo` con el
    mensaje del SAT visible en el historial; `ultima_exitosa` no avanza.
 9. `5002` difiere sin contar intento; `5004` cierra con cero CFDI.
 10. Desactivar detiene la creación y el avance; borrar la e.firma desactiva.

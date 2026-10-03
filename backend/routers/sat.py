@@ -438,6 +438,7 @@ def avanzar_sync_fiel(
     pendientes = db.query_all(
         """SELECT * FROM sat_solicitudes
            WHERE empresa_id=%s AND id_solicitud_sat IS NOT NULL
+             AND (proximo_intento IS NULL OR proximo_intento <= NOW())
              AND ((estado IN ('solicitado', 'en_proceso')
                    AND updated_at < NOW() - INTERVAL '20 seconds')
                OR (estado = 'terminado'
