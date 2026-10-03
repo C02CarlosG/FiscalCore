@@ -127,6 +127,13 @@ describe("DescargaSatCard", () => {
     expect(screen.getByText("289 de 289")).toBeInTheDocument();
   });
 
+  it("muestra la fecha de la solicitud como dd/mm/aaaa hh:mm", async () => {
+    mockApi({ tiene_fiel: true, vencida: false }, [{ ...solicitud, created_at: "2026-09-29T19:07:00" }]);
+    renderCard();
+
+    expect(await screen.findByText("29/09/2026 19:07")).toBeInTheDocument();
+  });
+
   it("shows the SAT error of a failed download", async () => {
     mockApi({ tiene_fiel: true, vencida: false }, [
       { ...solicitud, estado: "fallo", cfdi_importados: 0, error_msg: "SAT reportó estado: rechazada" },

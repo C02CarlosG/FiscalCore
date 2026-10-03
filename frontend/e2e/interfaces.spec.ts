@@ -15,36 +15,32 @@ const empresa = {
   created_at: "2026-01-01T00:00:00Z",
   updated_at: "2026-01-01T00:00:00Z",
 };
-const cfdiRows = [
-  {
-    uuid: "cfdi-demo-002",
-    tipo_comprobante: "Ingreso",
-    serie_folio: "SER-002",
-    fecha: "2026-09-02",
-    rfc_emisor: "BBB010101BBB",
-    nombre_emisor: "Proveedor ficticio dos",
-    rfc_receptor: empresa.rfc,
-    nombre_receptor: empresa.razon_social,
-    total: 2500,
-    iva: 400,
-    estado: "vigente",
-    direccion: "recibido" as const,
-  },
-  {
-    uuid: "cfdi-demo-001",
-    tipo_comprobante: "Ingreso",
-    serie_folio: "SER-001",
-    fecha: "2026-09-01",
-    rfc_emisor: "CCC010101CCC",
-    nombre_emisor: "Proveedor ficticio uno",
-    rfc_receptor: empresa.rfc,
-    nombre_receptor: empresa.razon_social,
-    total: 1250,
-    iva: 200,
-    estado: "vigente",
-    direccion: "recibido" as const,
-  },
+const columna = (clave: string, etiqueta: string, tipo_dato: string, ordenable = false) => ({
+  clave, etiqueta, tipo_dato, grupo: "encabezado", visible_por_defecto: true, ordenable, filtrable: ordenable, opciones: [],
+});
+const columnasCfdi = {
+  encabezado: [
+    columna("fecha_emision", "Fecha de expedición", "fecha", true),
+    columna("folio", "Folio", "texto", true),
+    columna("contraparte", "Nombre", "texto", true),
+    columna("total", "Total", "moneda", true),
+    columna("estado", "Estado", "catalogo"),
+  ],
+  concepto: [],
+};
+const filasCfdi = [
+  { uuid: "cfdi-demo-001", fecha_emision: "2026-09-01T10:00:00", folio: "001", contraparte: "Proveedor ficticio uno", total: 1250, estado: "vigente" },
+  { uuid: "cfdi-demo-002", fecha_emision: "2026-09-02T11:30:00", folio: "002", contraparte: "Proveedor ficticio dos", total: 2500, estado: "vigente" },
 ];
+const bloqueCfdi = (conteo: number, total: number) => ({
+  conteo, retencion_iva: 0, retencion_ieps: 0, retencion_isr: 0, traslado_iva: 600, traslado_ieps: 0,
+  traslado_isr: 0, total_retenciones: 0, subtotal: total - 600, descuento: 0, neto: total - 600, total,
+});
+const resumenCfdi = {
+  conteos: { I: 2, E: 0, T: 0, N: 1, P: 0 },
+  totales: { periodo: bloqueCfdi(2, 3750), acumulado: bloqueCfdi(9, 21000) },
+  advertencias: [],
+};
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
@@ -160,101 +156,21 @@ test.beforeEach(async ({ page }) => {
         resultado: { iva_por_pagar: 0, saldo_a_cargo: 0, saldo_a_favor: 0 },
         comparativo_sat: { diot_iva_pagado: 0, diferencia: 0 },
       };
-    } else if (path.includes("/emitidos")) {
-      body = {
-        periodo: "2026-09",
-        empresa_rfc: empresa.rfc,
-        resumen: {
-          subtotal: 0,
-          iva_trasladado: 0,
-          total_facturado: 3750,
-          vigentes: 2,
-          canceladas: 0,
-          total_cfdi_periodo: 0,
-          ingreso_neto_periodo: 0,
-          num_ingresos: 0,
-          num_egresos: 0,
-        },
-        ingresos: {
-          ventas_servicios: [{
-            uuid: "emitido-demo",
-            serie_folio: "FAC-001",
-            fecha: "2026-09-01",
-            rfc_receptor: "BBB010101BBB",
-            nombre_receptor: "Cliente ficticio",
-            subtotal: 1000,
-            descuento: 0,
-            total: 1160,
-            iva: 160,
-            metodo_pago: "PUE",
-            forma_pago: "03",
-            uso_cfdi: "G03",
-            moneda: "MXN",
-            estado: "vigente",
-            estado_pago: "pagado",
-            es_anticipo: false,
-            es_factura_con_anticipo: false,
-          }],
-          anticipos: [],
-          facturas_con_anticipo: [],
-        },
-        egresos: { notas_credito: [], aplicaciones_anticipo: [] },
-      };
-    } else if (path.includes("/recibidos")) {
-      body = {
-        periodo: "2026-09",
-        resumen: {
-          subtotal: 0,
-          iva_acreditable: 0,
-          total: 3750,
-          num_compras: 0,
-          num_egresos: 0,
-          vigentes: 2,
-          canceladas: 0,
-        },
-        compras: [{
-          uuid: "recibido-demo",
-          serie_folio: "COMP-001",
-          fecha: "2026-09-02",
-          rfc_emisor: "BBB010101BBB",
-          nombre_emisor: "Proveedor ficticio",
-          subtotal: 1000,
-          total: 1160,
-          iva: 160,
-          estado: "vigente",
-        }],
-        egresos: [],
-      };
-    } else if (path.includes("/cfdi/nomina")) {
-      body = {
-        periodo: "2026-09",
-        empresa_rfc: empresa.rfc,
-        resumen: { total_nomina: 2500, num_recibos: 1, vigentes: 1, canceladas: 0 },
-        recibos: [{
-          uuid: "nomina-demo",
-          serie_folio: "NOM-001",
-          fecha: "2026-09-15",
-          rfc_receptor: "DDD010101DDD",
-          nombre_receptor: "Persona ficticia",
-          subtotal: 2300,
-          total: 2500,
-          estado: "vigente",
-        }],
-      };
-    } else if (path.includes("/cfdi/visor")) {
-      body = {
-        periodo: "2026-09",
-        empresa_rfc: empresa.rfc,
-        resumen: {
-          total_cfdi: 2,
-          emitidos: 0,
-          recibidos: 2,
-          vigentes: 2,
-          canceladas: 0,
-          monto_total: 3750,
-        },
-        cfdi: cfdiRows,
-      };
+    } else if (path.endsWith("/cfdis/columnas")) {
+      body = columnasCfdi;
+    } else if (path.endsWith("/cfdis/resumen")) {
+      body = resumenCfdi;
+    } else if (path.endsWith("/cfdis")) {
+      // El servidor ordena: el mock respeta `orden` y `dir` para probar que viajan.
+      const consulta = new URL(route.request().url()).searchParams;
+      const filas = [...filasCfdi];
+      if (consulta.get("orden") === "total") {
+        filas.sort((a, b) => a.total - b.total);
+        if (consulta.get("dir") === "desc") filas.reverse();
+      }
+      body = { items: filas, total: filas.length, pagina: 1, por_pagina: 30 };
+    } else if (path.endsWith("/periodos")) {
+      body = { periodos: ["2026-09", "2026-08"] };
     }
 
     await route.fulfill({
@@ -307,7 +223,7 @@ test("empresas muestra su estado vacío cuando no hay registros", async ({ page 
 test("dashboard carga dentro del shell de empresa", async ({ page }) => {
   await page.goto(`/empresas/${empresaId}/dashboard`);
   await expect(page.getByRole("heading", { name: "Dashboard" })).toBeVisible();
-  await expect(page.getByText("Score fiscal actual")).toBeVisible();
+  await expect(page.getByText("Score fiscal del periodo")).toBeVisible();
 });
 
 test("dashboard muestra skeleton mientras consulta", async ({ page }) => {
@@ -335,39 +251,84 @@ test("dashboard presenta error contextual y permite reintentar", async ({ page }
   await expect(dashboardError).toBeVisible();
 });
 
-test("cédula de IVA consulta el periodo elegido", async ({ page }) => {
+test("cédula de IVA calcula con el periodo global", async ({ page }) => {
   await page.goto(`/empresas/${empresaId}/cedula-iva`);
-  await page.getByLabel("Periodo (YYYY-MM)").fill("2026-09");
+  await expect(page.getByRole("combobox", { name: "Periodo" })).toBeVisible();
   await expect(page.getByText("IVA por pagar")).toBeVisible();
 });
 
-test("visor SAT consulta CFDI por periodo", async ({ page }) => {
-  await page.goto(`/empresas/${empresaId}/cfdi`);
-  await expect(page.getByRole("heading", { name: "Visor SAT" })).toBeVisible();
-  await page.getByLabel("Periodo (YYYY-MM)").fill("2026-09");
-  await expect(page.getByText("Total CFDI")).toBeVisible();
+test("el periodo elegido se conserva al cambiar de pantalla", async ({ page }) => {
+  await page.goto(`/empresas/${empresaId}/dashboard`);
+  await page.getByRole("combobox", { name: "Periodo" }).click();
+  await page.getByRole("option", { name: "2026 - Agosto" }).click();
+  await expect(page).toHaveURL(/periodo=2026-08/);
+
+  await page.getByRole("link", { name: "Cédula de IVA" }).click();
+
+  await expect(page).toHaveURL(/cedula-iva\?periodo=2026-08/);
+  await expect(page.getByRole("combobox", { name: "Periodo" })).toContainText("2026 - Agosto");
 });
 
-test("CFDI emitidos consulta el periodo elegido", async ({ page }) => {
+test("CFDI emitidos muestra el listado del periodo con sus totales", async ({ page }) => {
   await page.goto(`/empresas/${empresaId}/cfdi/emitidos`);
-  await expect(page.getByRole("heading", { name: "CFDI Emitidos" })).toBeVisible();
-  await page.getByLabel("Periodo (YYYY-MM)").fill("2026-09");
-  await expect(page.getByText("Total facturado")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "CFDI emitidos" })).toBeVisible();
+  await expect(page).toHaveURL(/periodo=\d{4}-\d{2}/);
+  await expect(page.getByRole("tab", { name: /Ingreso/ })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("cell", { name: "Proveedor ficticio uno" })).toBeVisible();
+  await expect(page.getByRole("row", { name: /^Periodo/ })).toContainText("$3,750.00");
+  await expect(page.getByText("01/09/2026")).toBeVisible();
 });
 
-test("CFDI recibidos consulta el periodo elegido", async ({ page }) => {
-  await page.goto(`/empresas/${empresaId}/cfdi/recibidos`);
-  await expect(page.getByRole("heading", { name: "CFDI Recibidos" })).toBeVisible();
-  await page.getByLabel("Periodo (YYYY-MM)").fill("2026-09");
-  await expect(page.getByText("IVA acreditable", { exact: true })).toBeVisible();
+test("CFDI recibidos usa la misma pantalla con su propio título", async ({ page }) => {
+  await page.goto(`/empresas/${empresaId}/cfdi/recibidos?periodo=2026-09`);
+  await expect(page.getByRole("heading", { name: "CFDI recibidos" })).toBeVisible();
+  await expect(page.getByRole("cell", { name: "Proveedor ficticio dos" })).toBeVisible();
 });
 
-test("CFDI nómina consulta el periodo elegido", async ({ page }) => {
+test("el listado ordena en el servidor y el orden sobrevive a recargar", async ({ page }) => {
+  await page.goto(`/empresas/${empresaId}/cfdi/emitidos?periodo=2026-09`);
+  const primera = page.getByRole("cell", { name: /^Proveedor ficticio/ }).first();
+
+  await page.getByRole("button", { name: "Total" }).click();
+  await expect(page).toHaveURL(/orden=total/);
+  await expect(primera).toHaveText("Proveedor ficticio uno");
+
+  await page.getByRole("button", { name: "Total" }).click();
+  await expect(page).toHaveURL(/dir=desc/);
+  await expect(primera).toHaveText("Proveedor ficticio dos");
+
+  await page.reload();
+  await expect(page).toHaveURL(/orden=total.*dir=desc|dir=desc.*orden=total/);
+  await expect(primera).toHaveText("Proveedor ficticio dos");
+  // La tabla de totales también tiene un encabezado "Total": se acota al listado (la segunda tabla).
+  await expect(page.getByRole("table").nth(1).getByRole("columnheader", { name: "Total", exact: true }))
+    .toHaveAttribute("aria-sort", "descending");
+});
+
+test("Nómina es una pestaña del listado, no una pantalla aparte", async ({ page }) => {
+  await page.goto(`/empresas/${empresaId}/cfdi/emitidos?periodo=2026-09`);
+
+  await page.getByRole("tab", { name: /Nómina/ }).click();
+
+  await expect(page).toHaveURL(/tipo=N/);
+  await expect(page.getByRole("tab", { name: /Nómina/ })).toHaveAttribute("aria-selected", "true");
+});
+
+test("las rutas viejas del Visor SAT y de Nómina llevan al listado", async ({ page }) => {
+  await page.goto(`/empresas/${empresaId}/cfdi`);
+  await expect(page).toHaveURL(/\/cfdi\/emitidos/);
+
   await page.goto(`/empresas/${empresaId}/cfdi/nomina`);
-  await expect(page.getByRole("heading", { name: "CFDI Nómina" })).toBeVisible();
-  await page.getByLabel("Periodo (YYYY-MM)").fill("2026-09");
-  await expect(page.getByText("Total nómina")).toBeVisible();
-  await expect(page.getByText("NOM-001")).toBeVisible();
+  await expect(page).toHaveURL(/\/cfdi\/emitidos.*tipo=N/);
+});
+
+test("el menú CFDIs ofrece solo Emitidos y Recibidos", async ({ page }) => {
+  await page.goto(`/empresas/${empresaId}/dashboard`);
+  await page.getByRole("button", { name: "CFDIs" }).click();
+  await expect(page.getByRole("link", { name: "Emitidos" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Recibidos" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Visor SAT" })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: /Nómina/ })).toHaveCount(0);
 });
 
 test("conciliación presenta resumen y partidas accionables", async ({ page }) => {
@@ -393,6 +354,8 @@ test("ingesta procesa un archivo XML de prueba", async ({ page }) => {
   });
   await page.getByRole("button", { name: "Subir CFDI" }).click();
   await expect(page.getByText("1 CFDI procesado correctamente")).toBeVisible();
+  // Regresión: limpiar el formulario tras el éxito tronaba y se mostraba "No se pudo subir".
+  await expect(page.getByText("No se pudo subir")).toHaveCount(0);
 });
 
 test("selector de banco revela campo libre para la opción Otro", async ({ page }) => {
@@ -400,19 +363,6 @@ test("selector de banco revela campo libre para la opción Otro", async ({ page 
   await page.getByRole("combobox", { name: "Banco" }).click();
   await page.getByRole("option", { name: "Otro" }).click();
   await expect(page.getByLabel("Nombre del banco")).toBeVisible();
-});
-
-test("la tabla del Visor SAT busca y ordena filas CFDI", async ({ page }) => {
-  await page.goto(`/empresas/${empresaId}/cfdi`);
-  await page.getByLabel("Periodo (YYYY-MM)").fill("2026-09");
-  await expect(page.getByText("SER-002")).toBeVisible();
-  await page.getByRole("button", { name: "Total" }).click();
-  await expect(page.getByRole("row").nth(1)).toContainText("SER-001");
-  await page.getByRole("button", { name: "Total" }).click();
-  await expect(page.getByRole("row").nth(1)).toContainText("SER-002");
-  await page.getByRole("textbox", { name: "Buscar por folio, RFC o nombre..." }).fill("BBB010101BBB");
-  await expect(page.getByRole("row")).toHaveCount(2);
-  await expect(page.getByText("SER-002")).toBeVisible();
 });
 
 test("el upload bancario muestra el resultado de una carga de prueba", async ({ page }) => {
@@ -427,6 +377,7 @@ test("el upload bancario muestra el resultado de una carga de prueba", async ({ 
   });
   await page.getByRole("button", { name: /subir estado de cuenta/i }).click();
   await expect(page.getByText("1 movimiento procesado correctamente")).toBeVisible();
+  await expect(page.getByText("No se pudo subir")).toHaveCount(0);
 });
 
 test("el tema oscuro se aplica y persiste en la sesión local", async ({ page }) => {
@@ -438,9 +389,8 @@ test("el tema oscuro se aplica y persiste en la sesión local", async ({ page })
 
 test("la tabla conserva el ancho de página en móvil", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto(`/empresas/${empresaId}/cfdi`);
-  await page.getByLabel("Periodo (YYYY-MM)").fill("2026-09");
-  await expect(page.getByText("SER-001")).toBeVisible();
+  await page.goto(`/empresas/${empresaId}/cfdi/emitidos?periodo=2026-09`);
+  await expect(page.getByRole("cell", { name: "Proveedor ficticio uno" })).toBeVisible();
   const widths = await page.evaluate(() => ({
     document: document.documentElement.scrollWidth,
     viewport: window.innerWidth,

@@ -9,4 +9,10 @@ const nextConfig = {
       : {},
 };
 
+// Las pantallas Visor SAT y Nómina se reemplazaron por el listado único de CFDI.
+nextConfig.redirects = async () => [
+  { source: "/empresas/:empresaId/cfdi", destination: "/empresas/:empresaId/cfdi/emitidos", permanent: false },
+  { source: "/empresas/:empresaId/cfdi/nomina", destination: "/empresas/:empresaId/cfdi/emitidos?tipo=N", permanent: false },
+];
+
 export default nextConfig;
