@@ -286,30 +286,39 @@ def _insertar_movimientos_nuevos(empresa_id: str, banco: str, archivo_origen: st
         existentes[clave] += r["n"]
 
     vistos: Counter = Counter()
-    nuevos = duplicados = 0
+    duplicados = 0
+    filas = []
     for mov in movimientos:
         clave = _clave_movimiento(mov.fecha, mov.monto, mov.concepto, mov.referencia, mov.saldo)
         vistos[clave] += 1
         if vistos[clave] <= existentes[clave]:
             duplicados += 1
             continue
-        db.execute(
-            """
-            INSERT INTO movimientos_bancarios (
-                empresa_id, banco, archivo_origen,
-                fecha, concepto, referencia, monto, tipo, saldo, rfc_detectado
-            ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-            """,
-            (
-                empresa_id, banco, archivo_origen,
-                mov.fecha, mov.concepto, mov.referencia,
-                str(mov.monto), mov.tipo,
-                str(mov.saldo) if mov.saldo is not None else None,
-                mov.rfc_detectado,
-            ),
-        )
-        nuevos += 1
-    return nuevos, duplicados
+        filas.append((
+            empresa_id, banco, archivo_origen,
+            mov.fecha, mov.concepto, mov.referencia,
+            str(mov.monto), mov.tipo,
+            str(mov.saldo) if mov.saldo is not None else None,
+            mov.rfc_detectado,
+        ))
+
+    if filas:
+        # Una sola transacción: si una fila falla, ninguna queda cargada (antes cada
+        # fila se confirmaba por separado y el estado de cuenta quedaba a medias).
+        with db.get_conn() as conn:
+            with conn.cursor() as cur:
+                psycopg2.extras.execute_batch(
+                    cur,
+                    """
+                    INSERT INTO movimientos_bancarios (
+                        empresa_id, banco, archivo_origen,
+                        fecha, concepto, referencia, monto, tipo, saldo, rfc_detectado
+                    ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    """,
+                    filas,
+                    page_size=500,
+                )
+    return len(filas), duplicados
 
 
 @router.post("/api/v1/empresas/{empresa_id}/cfdi/upload")
