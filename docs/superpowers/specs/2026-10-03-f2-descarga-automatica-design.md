@@ -86,7 +86,7 @@ ALTER TABLE sat_solicitudes ADD COLUMN IF NOT EXISTS fecha_inicio DATE;
 ALTER TABLE sat_solicitudes ADD COLUMN IF NOT EXISTS fecha_fin DATE;
 -- evita duplicar la misma ventana en vuelo
 CREATE UNIQUE INDEX IF NOT EXISTS uq_sat_solicitudes_ventana_activa
-    ON sat_solicitudes (empresa_id, tipo, periodo_inicio,
+    ON sat_solicitudes (empresa_id, tipo, periodo_inicio, periodo_fin,
                         COALESCE(fecha_inicio, DATE '0001-01-01'),
                         COALESCE(fecha_fin, DATE '0001-01-01'),
                         estado_comprobante, tipo_solicitud)

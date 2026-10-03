@@ -38,7 +38,7 @@
 - Test: `backend/tests/test_migracion_031.py`
 
 **Interfaces:**
-- Produces: columnas `sat_solicitudes.origen`, `estado_comprobante`, `tipo_solicitud`, `intentos`, `proximo_intento`, `fecha_inicio`, `fecha_fin` (DATE, nulas en solicitudes viejas); `usuario_id` nulo; índice `uq_sat_solicitudes_ventana_activa` sobre `(empresa_id, tipo, periodo_inicio, COALESCE(fecha_inicio, '0001-01-01'), COALESCE(fecha_fin, '0001-01-01'), estado_comprobante, tipo_solicitud)` solo para estados activos; tabla `sat_sync_config`.
+- Produces: columnas `sat_solicitudes.origen`, `estado_comprobante`, `tipo_solicitud`, `intentos`, `proximo_intento`, `fecha_inicio`, `fecha_fin` (DATE, nulas en solicitudes viejas); `usuario_id` nulo; índice `uq_sat_solicitudes_ventana_activa` sobre `(empresa_id, tipo, periodo_inicio, periodo_fin, COALESCE(fecha_inicio, '0001-01-01'), COALESCE(fecha_fin, '0001-01-01'), estado_comprobante, tipo_solicitud)` solo para estados activos; tabla `sat_sync_config`.
 
 - [ ] **Step 1: Prueba que falla** (`@pytest.mark.db`, mismo patrón que `test_migracion_030.py`)
   - Aplica la 031 dos veces seguidas sin error.
