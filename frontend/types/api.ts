@@ -342,3 +342,67 @@ export interface SatSyncResponse {
   // Tipos que el SAT rechazó cuando otro sí se aceptó ("emitidos: …").
   errores?: string[];
 }
+
+// ─── Listado unificado de CFDI (F3) ──────────────────────────────────────────
+
+export type CfdiTipoComprobante = "I" | "E" | "T" | "N" | "P";
+
+export interface CfdiColumna {
+  clave: string;
+  etiqueta: string;
+  tipo_dato: "texto" | "fecha" | "fecha_hora" | "moneda" | "numero" | "booleano" | "catalogo" | "lista";
+  grupo: "encabezado" | "concepto";
+  visible_por_defecto: boolean;
+  ordenable: boolean;
+  filtrable: boolean;
+  opciones: string[];
+}
+
+export interface CfdiColumnasResponse {
+  encabezado: CfdiColumna[];
+  concepto: CfdiColumna[];
+}
+
+export type CfdiValor = string | number | boolean | null | string[];
+
+/** Una fila del listado: trae todas las columnas del catálogo, no solo las visibles. */
+export type CfdiFila = Record<string, CfdiValor>;
+
+export interface CfdiListadoResponse {
+  items: CfdiFila[];
+  total: number;
+  pagina: number;
+  por_pagina: number;
+}
+
+/** Cifras en pesos. Sin CFDI en el periodo, `conteo` es 0 y las demás van en null. */
+export interface CfdiTotalesBloque {
+  conteo: number;
+  retencion_iva: number | null;
+  retencion_ieps: number | null;
+  retencion_isr: number | null;
+  traslado_iva: number | null;
+  traslado_ieps: number | null;
+  traslado_isr: number | null;
+  total_retenciones: number | null;
+  subtotal: number | null;
+  descuento: number | null;
+  neto: number | null;
+  total: number | null;
+}
+
+export interface CfdiAdvertencia {
+  tipo: string;
+  uuid_factura: string;
+  mensaje: string;
+}
+
+export interface CfdiResumenResponse {
+  conteos: Record<CfdiTipoComprobante, number>;
+  totales: { periodo: CfdiTotalesBloque; acumulado: CfdiTotalesBloque };
+  advertencias: CfdiAdvertencia[];
+}
+
+export interface PeriodosResponse {
+  periodos: string[];
+}
