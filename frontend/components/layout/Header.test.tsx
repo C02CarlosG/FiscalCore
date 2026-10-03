@@ -48,10 +48,10 @@ describe("Header", () => {
     expect(screen.getByText("Dashboard")).toBeInTheDocument();
   });
 
-  it("shows the Visor SAT breadcrumb and not Empresas on the cfdi route", () => {
-    mockPathname.mockReturnValue("/empresas/e1/cfdi");
+  it("shows the Emitidos breadcrumb and not Empresas on the cfdi route", () => {
+    mockPathname.mockReturnValue("/empresas/e1/cfdi/emitidos");
     render(<Header onMenuClick={() => {}} />);
-    expect(screen.getByText("Visor SAT")).toBeInTheDocument();
+    expect(screen.getByText("CFDIs · Emitidos")).toBeInTheDocument();
     expect(screen.queryByText("Empresas")).not.toBeInTheDocument();
   });
 

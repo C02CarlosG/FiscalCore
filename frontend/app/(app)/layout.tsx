@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import { AuthGuard } from "@/components/auth/AuthGuard";
 import { EmpresaProvider } from "@/components/providers/EmpresaProvider";
 import { Sidebar } from "@/components/layout/Sidebar";
@@ -16,6 +16,7 @@ export default function ProtectedLayout({
   return (
     <AuthGuard>
       <EmpresaProvider>
+        <Suspense fallback={null}>
         <div className="flex min-h-screen bg-background">
           <Sidebar mobileOpen={mobileOpen} onMobileOpenChange={setMobileOpen} />
           <div className="flex min-h-screen min-w-0 flex-1 flex-col">
@@ -25,6 +26,7 @@ export default function ProtectedLayout({
             </div>
           </div>
         </div>
+        </Suspense>
       </EmpresaProvider>
     </AuthGuard>
   );

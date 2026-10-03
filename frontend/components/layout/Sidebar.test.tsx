@@ -8,9 +8,11 @@ import type { LoginResponse } from "@/types/api";
 
 const replaceMock = vi.fn();
 const mockPathname = vi.fn();
+const mockSearch = vi.fn(() => "");
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ replace: replaceMock }),
   usePathname: () => mockPathname(),
+  useSearchParams: () => new URLSearchParams(mockSearch()),
 }));
 
 vi.mock("@/components/providers/EmpresaProvider", () => ({
@@ -63,40 +65,36 @@ describe("Sidebar", () => {
     );
   });
 
-  it("expands the Gestión de CFDI submenu with its 4 options on click", async () => {
+  it("expands the CFDIs submenu with Emitidos and Recibidos on click", async () => {
     const user = userEvent.setup();
     render(<Sidebar mobileOpen={false} onMobileOpenChange={() => {}} />);
 
-    expect(screen.queryByRole("link", { name: "Visor SAT" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Emitidos" })).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: /Gestión de CFDI/ }));
+    await user.click(screen.getByRole("button", { name: /CFDIs/ }));
 
-    expect(screen.getByRole("link", { name: "Visor SAT" })).toHaveAttribute(
-      "href",
-      "/empresas/e1/cfdi",
-    );
-    expect(screen.getByRole("link", { name: "CFDI Emitidos" })).toHaveAttribute(
-      "href",
-      "/empresas/e1/cfdi/emitidos",
-    );
-    expect(screen.getByRole("link", { name: "CFDI Recibidos" })).toHaveAttribute(
-      "href",
-      "/empresas/e1/cfdi/recibidos",
-    );
-    expect(screen.getByRole("link", { name: "CFDI Nómina" })).toHaveAttribute(
-      "href",
-      "/empresas/e1/cfdi/nomina",
-    );
+    expect(screen.getByRole("link", { name: "Emitidos" })).toHaveAttribute("href", "/empresas/e1/cfdi/emitidos");
+    expect(screen.getByRole("link", { name: "Recibidos" })).toHaveAttribute("href", "/empresas/e1/cfdi/recibidos");
+    expect(screen.queryByRole("link", { name: /Visor SAT|Nómina/ })).not.toBeInTheDocument();
   });
 
-  it("auto-expands the Gestión de CFDI submenu when a cfdi route is active", () => {
-    mockPathname.mockReturnValue("/empresas/e1/cfdi/nomina");
+  it("auto-expands the CFDIs submenu when a cfdi route is active", () => {
+    mockPathname.mockReturnValue("/empresas/e1/cfdi/recibidos");
     render(<Sidebar mobileOpen={false} onMobileOpenChange={() => {}} />);
 
-    expect(screen.getByRole("link", { name: "CFDI Nómina" })).toHaveAttribute(
-      "href",
-      "/empresas/e1/cfdi/nomina",
-    );
+    expect(screen.getByRole("link", { name: "Recibidos" })).toHaveAttribute("href", "/empresas/e1/cfdi/recibidos");
+  });
+
+  it("carries the current periodo into the period-aware links", () => {
+    mockPathname.mockReturnValue("/empresas/e1/cfdi/emitidos");
+    mockSearch.mockReturnValue("periodo=2026-09&tipo=E");
+    render(<Sidebar mobileOpen={false} onMobileOpenChange={() => {}} />);
+
+    expect(screen.getByRole("link", { name: "Emitidos" })).toHaveAttribute("href", "/empresas/e1/cfdi/emitidos?periodo=2026-09");
+    expect(screen.getByRole("link", { name: /Dashboard/ })).toHaveAttribute("href", "/empresas/e1/dashboard?periodo=2026-09");
+    expect(screen.getByRole("link", { name: /Conciliación/ })).toHaveAttribute("href", "/empresas/e1/conciliacion?periodo=2026-09");
+    expect(screen.getByRole("link", { name: /Cédula de IVA/ })).toHaveAttribute("href", "/empresas/e1/cedula-iva?periodo=2026-09");
+    expect(screen.getByRole("link", { name: /Ingesta/ })).toHaveAttribute("href", "/empresas/e1/ingesta");
   });
 
   it("disables all nav items when there is no empresa selected", () => {
@@ -111,9 +109,9 @@ describe("Sidebar", () => {
       screen.queryByRole("link", { name: /Dashboard/ }),
     ).not.toBeInTheDocument();
     expect(
-      screen.queryByRole("button", { name: /Gestión de CFDI/ }),
+      screen.queryByRole("button", { name: /CFDIs/ }),
     ).not.toBeInTheDocument();
-    expect(screen.getByText("Gestión de CFDI")).toBeInTheDocument();
+    expect(screen.getByText("CFDIs")).toBeInTheDocument();
   });
 
   it("clears the session and redirects to /login on logout", async () => {
