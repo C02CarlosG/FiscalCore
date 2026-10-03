@@ -168,10 +168,10 @@ Reglas (del spec):
 
 ### Task 6: Verificación y cierre
 
-- [ ] **Step 1:** `python -m pytest` completo (con `docker compose up -d db`) y `python -m pytest -m "not db"` en verde; anotar conteos.
-- [ ] **Step 2:** `docs/openapi.yaml`: sin rutas nuevas en esta entrega; `test_openapi_sync.py` en verde. Si el listado de solicitudes cambia su forma (campos nuevos), documentarlos.
-- [ ] **Step 3:** Revisión del agente `dominio-fiscal` solo si algún cambio toca importación de CFDI (no se espera) y del `migration-validator` sobre la 031 final.
-- [ ] **Step 4:** Actualizar la tabla "Estado" del plan maestro: F2.1 hecha; anotar los límites del SAT verificados.
+- [x] **Step 1:** (651 en total, 71 con `-m db`) `python -m pytest` completo (con `docker compose up -d db`) y `python -m pytest -m "not db"` en verde; anotar conteos.
+- [x] **Step 2:** `docs/openapi.yaml`: sin rutas nuevas en esta entrega; `test_openapi_sync.py` en verde. Si el listado de solicitudes cambia su forma (campos nuevos), documentarlos.
+- [x] **Step 3:** Revisión del agente `dominio-fiscal` solo si algún cambio toca importación de CFDI (no se espera) y del `migration-validator` sobre la 031 final.
+- [x] **Step 4:** Actualizar la tabla "Estado" del plan maestro: F2.1 hecha; anotar los límites del SAT verificados.
 - [ ] **Step 5:** PR en borrador contra `main`, título `feat: base de la descarga automática del SAT (F2.1)`.
 
 ## Fuera de esta entrega
