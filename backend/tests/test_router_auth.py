@@ -71,6 +71,33 @@ def test_login_exitoso(monkeypatch):
     assert body["empresas"] == []
 
 
+def _login(monkeypatch, usuario_extra):
+    monkeypatch.setattr(db, "query_one", lambda *a, **k: {
+        "id": "u1", "password_hash": hash_password("Test1234!"), "nombre": "Ana", **usuario_extra,
+    })
+    monkeypatch.setattr(db, "query_all", lambda *a, **k: [])
+    return client.post("/api/v1/auth/login", json={"email": "ana@test.local", "password": "Test1234!"})
+
+
+def test_login_devuelve_el_rol_del_usuario(monkeypatch):
+    assert _login(monkeypatch, {"rol": "admin"}).json()["rol"] == "admin"
+    assert _login(monkeypatch, {"rol": "contador"}).json()["rol"] == "contador"
+
+
+def test_login_sin_rol_guardado_asume_contador(monkeypatch):
+    assert _login(monkeypatch, {}).json()["rol"] == "contador"
+
+
+def test_register_devuelve_el_rol_contador(monkeypatch):
+    monkeypatch.setattr(db, "query_one", lambda *a, **k: None)
+    monkeypatch.setattr(db, "execute", lambda *a, **k: {"id": "u1", "rol": "contador"})
+
+    r = client.post("/api/v1/auth/register",
+                     json={"email": "nueva2@test.local", "password": "Test1234!", "nombre": "Nueva"})
+
+    assert r.json()["rol"] == "contador"
+
+
 def test_login_password_incorrecta_da_401(monkeypatch):
     password_hash = hash_password("Test1234!")
     monkeypatch.setattr(db, "query_one", lambda *a, **k: {
