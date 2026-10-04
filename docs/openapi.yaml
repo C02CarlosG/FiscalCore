@@ -21,6 +21,8 @@ servers:
     description: Desarrollo local
 
 tags:
+  - name: Información fiscal
+    description: Constancia de situación fiscal y opinión de cumplimiento por empresa (F8)
   - name: Preferencias
     description: Orden y visibilidad de columnas de las tablas, por usuario
   - name: Sistema
@@ -2576,6 +2578,134 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /api/v1/informacion-fiscal/empresas/{empresa_id}:
+    get:
+      operationId: resumenInformacionFiscal
+      tags: [Información fiscal]
+      summary: Última constancia y última opinión de cumplimiento de la empresa
+      description: Cada clave es null si nunca se ha subido ese documento. F8, carril D.
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+      responses:
+        '200':
+          description: Último documento de cada tipo
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  constancia: { allOf: [{ $ref: '#/components/schemas/DocumentoFiscal' }], nullable: true }
+                  opinion: { allOf: [{ $ref: '#/components/schemas/DocumentoFiscal' }], nullable: true }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/v1/informacion-fiscal/empresas/{empresa_id}/documentos:
+    get:
+      operationId: historialDocumentosFiscales
+      tags: [Información fiscal]
+      summary: Historial de documentos fiscales subidos (sin el PDF)
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - { name: tipo, in: query, required: false, schema: { type: string, enum: [constancia, opinion] } }
+      responses:
+        '200':
+          description: Documentos, del más reciente al más antiguo
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/DocumentoFiscal' }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '422':
+          description: tipo inválido
+
+  /api/v1/informacion-fiscal/empresas/{empresa_id}/documentos/{tipo}:
+    post:
+      operationId: subirDocumentoFiscal
+      tags: [Información fiscal]
+      summary: Subir constancia de situación fiscal u opinión de cumplimiento (PDF)
+      description: |
+        Valida extensión `.pdf`, tipo de contenido, tamaño (5 MB), firma `%PDF-`,
+        hasta 10 páginas, que el documento sea del tipo indicado y que su RFC sea
+        el de la empresa. El mismo PDF dos veces responde 409.
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - { name: tipo, in: path, required: true, schema: { type: string, enum: [constancia, opinion] } }
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [archivo]
+              properties:
+                archivo: { type: string, format: binary }
+      responses:
+        '201':
+          description: Documento guardado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DocumentoFiscal' }
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '409':
+          $ref: '#/components/responses/ConflictError'
+        '413':
+          description: El archivo excede 5 MB
+        '422':
+          $ref: '#/components/responses/UnprocessableError'
+
+  /api/v1/informacion-fiscal/empresas/{empresa_id}/documentos/{documento_id}/pdf:
+    get:
+      operationId: pdfDocumentoFiscal
+      tags: [Información fiscal]
+      summary: PDF original del documento (visor o descarga)
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - { name: documento_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: descargar, in: query, required: false, schema: { type: boolean, default: false }, description: 'true responde con Content-Disposition attachment; si no, inline' }
+      responses:
+        '200':
+          description: El PDF tal como se subió
+          content:
+            application/pdf:
+              schema: { type: string, format: binary }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/v1/informacion-fiscal/empresas/{empresa_id}/documentos/{documento_id}:
+    delete:
+      operationId: eliminarDocumentoFiscal
+      tags: [Información fiscal]
+      summary: Eliminar un documento fiscal
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - { name: documento_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '204':
+          description: Eliminado
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
 # ============================================================
 # COMPONENTS
 # ============================================================
@@ -3793,3 +3923,28 @@ components:
           description: Tipos que el SAT rechazó cuando otro sí se aceptó ("emitidos - motivo").
           items:
             type: string
+
+    DocumentoFiscal:
+      type: object
+      description: Constancia de situación fiscal u opinión del cumplimiento subida en PDF (F8).
+      properties:
+        id: { type: string, format: uuid }
+        tipo: { type: string, enum: [constancia, opinion] }
+        nombre_archivo: { type: string }
+        tamano_bytes: { type: integer }
+        rfc: { type: string }
+        fecha_emision: { type: string, format: date, nullable: true }
+        created_at: { type: string, format: date-time }
+        datos:
+          type: object
+          description: |
+            Lo leído del PDF. Constancia: razon_social, regimenes, obligaciones, cp_fiscal,
+            curp, id_cif, estatus_padron. Opinión: razon_social, sentido (positivo, negativo,
+            inscrito_sin_obligaciones, no_inscrito o null), folio.
+        antiguedad_dias: { type: integer, nullable: true }
+        vigente_hasta:
+          type: string
+          format: date
+          nullable: true
+          description: Solo la opinión; 30 días naturales contando el de emisión.
+        vigente: { type: boolean, nullable: true }
