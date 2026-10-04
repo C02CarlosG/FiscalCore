@@ -20,6 +20,12 @@ vi.mock("@/hooks/usePeriodos", () => ({
   usePeriodos: () => ({ data: { periodos: ["2026-09", "2026-08"] } }),
 }));
 
+vi.mock("@/components/inicio/InicioFinanciero", () => ({
+  InicioFinanciero: ({ empresaId, periodo }: { empresaId: string; periodo: string }) => (
+    <div data-testid="inicio-financiero">{`${empresaId}|${periodo}`}</div>
+  ),
+}));
+
 const datos = {
   empresa: { razon_social: "Coplasur SA de CV" },
   score_actual: null,
@@ -83,5 +89,22 @@ describe("DashboardPage", () => {
 
     expect(screen.getByText("—")).toBeInTheDocument();
     expect(screen.queryByText("80/100")).not.toBeInTheDocument();
+  });
+
+  it("shows the financial part of the Inicio for the global period", () => {
+    render(<DashboardPage />);
+
+    expect(screen.getByTestId("inicio-financiero")).toHaveTextContent("e1|2026-09");
+  });
+
+  it("keeps the financial part visible when the risk dashboard fails", () => {
+    vi.mocked(useDashboard).mockReturnValue({
+      data: undefined, isLoading: false, isError: true, refetch: vi.fn(),
+    } as any);
+
+    render(<DashboardPage />);
+
+    expect(screen.getByTestId("inicio-financiero")).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent("No se pudo cargar el dashboard.");
   });
 });
