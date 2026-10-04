@@ -252,6 +252,7 @@ def _cargar_datos_cedula_iva(empresa_id: str, periodo: str):
         SELECT pr.cfdi_uuid, pr.importe_pagado, p.fecha_pago
         FROM pagos_cfdi p
         JOIN pagos_relaciones pr ON pr.pago_id = p.id
+        JOIN cfdi cp ON cp.id = p.cfdi_id AND cp.estado = 'vigente'   -- un REP cancelado no produce efectos
         WHERE p.empresa_id = %s
           AND p.fecha_pago >= (%s || '-01')::date
           AND p.fecha_pago  < ((%s || '-01')::date + INTERVAL '1 month')
@@ -486,6 +487,7 @@ def _cargar_datos_deducciones(empresa_id: str, periodo: str):
         SELECT pr.cfdi_uuid, pr.importe_pagado, p.fecha_pago
         FROM pagos_cfdi p
         JOIN pagos_relaciones pr ON pr.pago_id = p.id
+        JOIN cfdi cp ON cp.id = p.cfdi_id AND cp.estado = 'vigente'   -- un REP cancelado no produce efectos
         WHERE p.empresa_id = %s
           AND p.fecha_pago >= (%s || '-01-01')::date
           AND p.fecha_pago  < ((%s || '-01')::date + INTERVAL '1 month')

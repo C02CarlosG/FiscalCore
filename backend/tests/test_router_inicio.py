@@ -57,7 +57,7 @@ def test_iva_anual_delega_con_ejercicio_y_periodo(con_acceso, monkeypatch):
 
     def _iva(empresa_id, rfc, ejercicio):
         visto.update(empresa_id=empresa_id, rfc=rfc, ejercicio=ejercicio)
-        return []
+        return [], [{"codigo": "x", "mensaje": "aviso", "cfdi": 1}]
 
     monkeypatch.setattr(inicio_datos, "cargar_iva_ejercicio", _iva)
 
@@ -67,7 +67,9 @@ def test_iva_anual_delega_con_ejercicio_y_periodo(con_acceso, monkeypatch):
     assert visto == {"empresa_id": "emp-1", "rfc": "AAA010101AAA", "ejercicio": 2026}
     d = r.json()
     assert d["ejercicio"] == 2026 and len(d["meses"]) == 12
-    assert d["totales"]["iva_por_pagar"] == 0.0 and d["iva_retenido_incluido"] is False
+    assert d["totales"]["total_a_cargo"] == 0.0 and d["totales"]["total_a_favor"] == 0.0
+    assert d["iva_retenido_incluido"] is False
+    assert d["advertencias"] == [{"codigo": "x", "mensaje": "aviso", "cfdi": 1}]
 
 
 @pytest.mark.parametrize("params", [{"ejercicio": 1999}, {"ejercicio": 2100}, {"ejercicio": "x"}, {},

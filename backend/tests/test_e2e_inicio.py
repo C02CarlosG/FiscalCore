@@ -84,6 +84,15 @@ def _sembrar(db, empresa_id):
     db.execute(
         "INSERT INTO pagos_relaciones (pago_id, cfdi_uuid, parcialidad, importe_pagado, saldo_anterior, saldo_restante)"
         " VALUES (%s, %s, 1, 580, 1160, 580)", (str(pago["id"]), _uuid(30)))
+    # REP cancelado (luego sustituido por el 31): su pago de 1160 no debe contar nunca
+    rep_cancelado = _cfdi(db, empresa_id, 32, tipo_comprobante="P", subtotal="0", iva_trasladado="0", total="0",
+                          metodo_pago=None, forma_pago=None, uso_cfdi="CP01", moneda="XXX", estado="cancelado")
+    pago_c = db.execute(
+        "INSERT INTO pagos_cfdi (empresa_id, cfdi_id, uuid_cfdi_pago, fecha_pago, monto)"
+        " VALUES (%s, %s, %s, '2026-09-25 12:00:00', 1160) RETURNING id", (empresa_id, rep_cancelado, _uuid(32)), returning=True)
+    db.execute(
+        "INSERT INTO pagos_relaciones (pago_id, cfdi_uuid, parcialidad, importe_pagado, saldo_anterior, saldo_restante)"
+        " VALUES (%s, %s, 1, 1160, 1160, 0)", (str(pago_c["id"]), _uuid(30)))
     return ppd
 
 
@@ -190,6 +199,21 @@ def test_iva_anual_septiembre_y_totales(entorno):
     assert sep["resultado"]["saldo_a_cargo"] > 0 and sep["resultado"]["saldo_a_favor"] == 0.0
     assert anual["totales"]["trasladado"] == round(sum(m["trasladado"]["total"] for m in anual["meses"]), 2)
     assert anual["iva_retenido_incluido"] is False
+    assert anual["totales"]["total_a_cargo"] == round(sum(m["resultado"]["saldo_a_cargo"] for m in anual["meses"]), 2)
+    assert anual["totales"]["total_a_favor"] == round(sum(m["resultado"]["saldo_a_favor"] for m in anual["meses"]), 2)
+    codigos = {a["codigo"] for a in anual["advertencias"]}
+    assert {"pago_proporcion", "moneda_extranjera", "anticipos", "retenciones"} <= codigos
+
+
+def test_un_rep_cancelado_no_suma_ni_en_el_inicio_ni_en_la_cedula(entorno):
+    _db, client, headers, empresa_id = entorno
+
+    sep = _get(entorno, "iva-anual", ejercicio=2026)["meses"][8]
+    cedula = client.get(f"/api/v1/empresas/{empresa_id}/cedula-iva/2026-09", headers=headers).json()
+
+    assert sep["trasladado"]["ppd"] == 80.0                  # solo el REP vigente (580 de 1160 × 160)
+    assert cedula["trasladado"]["ppd"]["iva"] == 80.0
+    assert sep["trasladado"]["ppd"] == cedula["trasladado"]["ppd"]["iva"]
 
 
 def test_iva_anual_vacia_los_meses_posteriores_al_periodo(entorno):

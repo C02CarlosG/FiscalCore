@@ -133,10 +133,15 @@ export function IvaAnual({ datos, periodo }: { datos: InicioIvaAnual; periodo: s
         </Table>
       </div>
 
-      {!datos.iva_retenido_incluido && (
-        <p className="text-xs text-muted-foreground">
-          Aún no se incorporan las retenciones de IVA y el factor de prorrateo es 1; coincide con la cédula de IVA de cada mes.
-        </p>
+      {datos.advertencias.length > 0 && (
+        <ul aria-label="Advertencias del IVA" className="space-y-1 text-xs text-muted-foreground">
+          {datos.advertencias.map((a) => (
+            <li key={a.codigo} className="flex flex-wrap items-baseline gap-x-2">
+              <span>{a.mensaje}</span>
+              {a.cfdi !== null && <span className="font-mono tabular-nums text-foreground">{`${a.cfdi} CFDI`}</span>}
+            </li>
+          ))}
+        </ul>
       )}
     </div>
   );

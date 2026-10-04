@@ -1476,7 +1476,8 @@ paths:
         las mismas funciones que la cedula de IVA (`/cedula-iva/{periodo}`), por lo que
         coinciden con ella. Hasta que se incorporen las retenciones el IVA retenido es 0
         y el factor de prorrateo es 1 (`iva_retenido_incluido: false`). Con `periodo`,
-        los meses posteriores salen en cero.
+        los meses posteriores salen en cero. `totales` trae `total_a_cargo` y `total_a_favor`
+        por separado: no se compensa un mes a favor contra otro a cargo (LIVA 6).
       parameters:
         - $ref: '#/components/parameters/EmpresaId'
         - { name: ejercicio, in: query, required: true, schema: { type: integer, minimum: 2000, maximum: 2099 } }
@@ -1495,6 +1496,10 @@ paths:
                   iva_retenido_incluido: { type: boolean }
                   meses: { type: array, items: { type: object, additionalProperties: true } }
                   totales: { type: object, additionalProperties: true }
+                  advertencias:
+                    type: array
+                    description: Limitaciones del calculo que aplican a los datos del ejercicio (`cfdi` es null en las que no dependen de ellos)
+                    items: { type: object, additionalProperties: true }
         '401':
           $ref: '#/components/responses/UnauthorizedError'
         '403':

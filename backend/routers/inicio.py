@@ -60,5 +60,9 @@ async def iva_anual_inicio(
         if int(periodo[:4]) != ejercicio:
             raise HTTPException(status_code=422, detail="el periodo no pertenece al ejercicio")
     empresa = empresa_or_404(empresa_id)
-    meses = inicio_datos.cargar_iva_ejercicio(empresa_id, empresa["rfc"], ejercicio)
-    return _json({"empresa_id": empresa_id, **inicio.componer_iva_anual(ejercicio, meses, periodo)})
+    meses, advertencias = inicio_datos.cargar_iva_ejercicio(empresa_id, empresa["rfc"], ejercicio)
+    return _json({
+        "empresa_id": empresa_id,
+        **inicio.componer_iva_anual(ejercicio, meses, periodo),
+        "advertencias": advertencias,
+    })

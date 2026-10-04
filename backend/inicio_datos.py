@@ -49,16 +49,16 @@ def cargar_agregados(empresa_id: str, rfc: str, periodo: str) -> list[dict]:
     )
 
 
-def cargar_iva_ejercicio(empresa_id: str, rfc: str, ejercicio: int) -> list[dict]:
+def cargar_iva_ejercicio(empresa_id: str, rfc: str, ejercicio: int) -> tuple[list[dict], list[dict]]:
     """IVA trasladado y acreditable de cada mes del ejercicio, calculados con las
     mismas funciones y los mismos insumos que la cédula de IVA de un mes, para que
-    el Inicio nunca la contradiga."""
+    el Inicio nunca la contradiga. Devuelve los meses y las advertencias que aplican."""
     desde, hasta = f"{ejercicio:04d}-01-01", f"{ejercicio + 1:04d}-01-01"
     cfdis = db.query_all(
         """
         SELECT uuid, tipo_comprobante, metodo_pago, estado, es_anticipo_sat,
                rfc_emisor, rfc_receptor, forma_pago, fecha_emision,
-               subtotal, descuento, total, iva_trasladado
+               subtotal, descuento, total, iva_trasladado, moneda
         FROM cfdi
         WHERE empresa_id = %s
           AND estado = 'vigente'
@@ -71,6 +71,7 @@ def cargar_iva_ejercicio(empresa_id: str, rfc: str, ejercicio: int) -> list[dict
         SELECT pr.cfdi_uuid, pr.importe_pagado, p.fecha_pago
         FROM pagos_cfdi p
         JOIN pagos_relaciones pr ON pr.pago_id = p.id
+        JOIN cfdi cp ON cp.id = p.cfdi_id AND cp.estado = 'vigente'   -- un REP cancelado no produce efectos
         WHERE p.empresa_id = %s AND p.fecha_pago >= %s::date AND p.fecha_pago < %s::date
         """,
         (empresa_id, desde, hasta),
@@ -82,4 +83,4 @@ def cargar_iva_ejercicio(empresa_id: str, rfc: str, ejercicio: int) -> list[dict
         ajustado = iva.aplicar_prorrateo(acreditable["bruto"], Decimal("1"))
         # v1 igual que la cédula: sin retenciones y factor de prorrateo 1; llegan con F5.
         meses.append(inicio.aplanar_iva(mes, trasladado, acreditable, ajustado, Decimal("0.00")))
-    return meses
+    return meses, inicio.advertencias_iva(cfdis, pagos)

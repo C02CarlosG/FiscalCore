@@ -91,7 +91,8 @@ Ambos requieren acceso a la empresa (403 si no) y no escriben en `auditoria` (so
      "acreditable": {"pue": 0, "ppd": 0, "notas_credito": 0, "excluido_efectivo": 0, "bruto": 0, "ajustado": 0},
      "resultado": {"iva_retenido": 0, "iva_por_pagar": 0, "saldo_a_cargo": 0, "saldo_a_favor": 0}}
   ],
-  "totales": {"trasladado": 0, "acreditable": 0, "iva_retenido": 0, "iva_por_pagar": 0}
+  "totales": {"trasladado": 0, "acreditable": 0, "iva_retenido": 0, "total_a_cargo": 0, "total_a_favor": 0},
+  "advertencias": [{"codigo": "pago_proporcion", "mensaje": "…", "cfdi": 0}]
 }
 ```
 `meses` trae los 12 meses del ejercicio; los posteriores a `periodo` (si se manda) llevan ceros. `ejercicio` debe estar entre 2000 y 2099 y, si se manda, `periodo` debe pertenecer a ese ejercicio (422 si no).
@@ -116,10 +117,17 @@ Ambos requieren acceso a la empresa (403 si no) y no escriben en `auditoria` (so
 
 ## Limitaciones conocidas (heredadas de la cédula de IVA, se corrigen en F5)
 
+La tabla de IVA **no oculta** estas limitaciones: el endpoint devuelve `advertencias[]` (`pago_proporcion`, `moneda_extranjera`, `anticipos`, `retenciones`) con el número de CFDI afectados y la pantalla las muestra debajo de la tabla.
+
 El IVA anual reutiliza `iva.py` para coincidir con la cédula, y eso hereda tres cosas que F5 reescribe:
 1. **Egreso de aplicación de anticipo**: la cédula lo resta como si fuera nota de crédito (el IVA del anticipo se resta aunque el anticipo se haya excluido). Las cifras de ingresos del Inicio ya lo evitan; el IVA anual no hasta F5.
 2. **Moneda extranjera**: el IVA de un CFDI en USD se suma sin convertir, mientras la base de ingresos sí se convierte.
 3. **Factor de prorrateo** fijo en 1 y retenciones en 0 (la pantalla lo avisa; la cédula acepta `?factor=`).
+4. **Anticipo no contado en su mes**: el anticipo (A) se excluye pero su aplicación (C) se resta; lo correcto es A + B − C = B (ejemplo: anticipo de 100,000 + 16,000 en enero, factura de 1,000,000 + 160,000 y aplicación de 100,000 + 16,000 en marzo debe dar 16,000 en enero y 144,000 en marzo). F5 (criterio de aceptación 3) lo corrige.
+5. **Moneda por columna**: la conversión usa `tipo_cambio` y no la columna `moneda`; un CFDI en MXN con tipo de cambio distinto de 1 se multiplicaría. F5 usa la moneda.
+6. **Nómina**: otros pagos (subsidio, separación) y la deducibilidad del acreditable llegan con F7.
+
+Correcciones ya aplicadas por la revisión: los REP **cancelados** no suman (ni en el Inicio ni en la cédula, ni en ISR y deducciones); los redondeos son medio hacia arriba y cada mes se redondea antes de acumular; los totales anuales de IVA separan a cargo y a favor.
 
 Otras observaciones de la revisión fiscal que quedan documentadas, sin cambio: una autofactura (empresa como emisor y receptor) cuenta solo como ingreso en el resumen; cancelados y sustituidos se filtran por su estado actual (un CFDI cancelado después aparece como no existente en meses ya declarados, y el sustituto cae en el mes de su emisión); los gastos son lo facturado recibido, no lo deducible (la deducibilidad llega con F7); `to_char(fecha_emision)` usa la zona de la sesión igual que la cédula.
 
@@ -137,7 +145,7 @@ Con la empresa de prueba de la E2E (CFDI sembrados, todos en MXN salvo uno en US
 2. El acumulado de septiembre es igual a la suma de ene–sep de la serie; el de enero es igual al del periodo.
 3. `meses` siempre tiene 12 elementos consecutivos terminando en el periodo, también al cruzar de año.
 4. Para cada mes, `trasladado.total` y `acreditable.bruto` del IVA anual son **idénticos** a los de `GET /cedula-iva/{periodo}` del mismo mes.
-5. Resultado del mes = trasladado − acreditable ajustado − retenido, con saldo a cargo y a favor exclusivos.
+5. Resultado del mes = trasladado − acreditable ajustado − retenido, con saldo a cargo y a favor exclusivos; el total anual suma a cargo y a favor por separado (sin compensar meses).
 6. Un usuario sin acceso a la empresa recibe 403; un periodo mal formado, 422.
 7. La pantalla muestra los importes con formato de moneda, los meses vacíos con ceros y la nota de retenciones; recargar con otro periodo en la URL reproduce la misma vista.
 8. **Cuadre contra la referencia** (cifras de control del plan maestro): requiere los CFDI reales de COPLASUR en local; se hace en el cierre de F0/F1 (carril B) y cualquier diferencia se explica en el PR, sin ajustar el cálculo sin fundamento legal.

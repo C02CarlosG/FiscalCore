@@ -51,5 +51,9 @@ export const ivaAnual = (): InicioIvaAnual => ({
       },
     };
   }),
-  totales: { trasladado: 160 * 78, acreditable: 100 * 78, iva_retenido: 0, iva_por_pagar: 60 * 78 },
+  totales: { trasladado: 160 * 78, acreditable: 100 * 78, iva_retenido: 0, total_a_cargo: 60 * 78, total_a_favor: 0 },
+  advertencias: [
+    { codigo: "pago_proporcion", mensaje: "El IVA de los cobros y pagos de facturas a crédito se estima por la proporción pagada.", cfdi: 3 },
+    { codigo: "retenciones", mensaje: "Aún no se incorporan las retenciones de IVA y el factor de prorrateo es 1.", cfdi: null },
+  ],
 });

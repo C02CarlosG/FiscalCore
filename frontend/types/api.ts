@@ -372,5 +372,13 @@ export interface InicioIvaAnual {
   factor_prorrateo: number;
   iva_retenido_incluido: boolean;
   meses: InicioIvaMes[];
-  totales: { trasladado: number; acreditable: number; iva_retenido: number; iva_por_pagar: number };
+  totales: { trasladado: number; acreditable: number; iva_retenido: number; total_a_cargo: number; total_a_favor: number };
+  advertencias: InicioAdvertencia[];
+}
+
+/** Limitación del cálculo; `cfdi` es null cuando no depende de los datos del ejercicio. */
+export interface InicioAdvertencia {
+  codigo: string;
+  mensaje: string;
+  cfdi: number | null;
 }

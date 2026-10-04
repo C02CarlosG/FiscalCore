@@ -11,7 +11,7 @@ la suma de ``subtotal - descuento`` ya convertida a pesos.
 from __future__ import annotations
 
 import re
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, Iterable, Optional
 
 CENTAVOS = Decimal("0.01")
@@ -46,7 +46,8 @@ def rango_consulta(periodo: str) -> tuple[str, str]:
 
 
 def _q(valor: Decimal) -> Decimal:
-    return valor.quantize(CENTAVOS)
+    """Centavos, medio hacia arriba (no al par): así se redondea una cifra fiscal."""
+    return valor.quantize(CENTAVOS, rounding=ROUND_HALF_UP)
 
 
 def _dec(valor: Any) -> Decimal:
@@ -65,6 +66,14 @@ class _Mes:
     def sumar(self, otro: "_Mes") -> None:
         for campo in self.__slots__:
             setattr(self, campo, getattr(self, campo) + getattr(otro, campo))
+
+    def redondeado(self) -> "_Mes":
+        """El mes con sus importes a centavos (los conteos no cambian)."""
+        r = _Mes()
+        for campo in self.__slots__:
+            valor = getattr(self, campo)
+            setattr(r, campo, _q(valor) if isinstance(valor, Decimal) else valor)
+        return r
 
 
 def _acumular(filas: Iterable[dict]) -> dict[str, _Mes]:
@@ -115,7 +124,8 @@ def componer_resumen(filas: Iterable[dict], periodo: str) -> dict:
     Neto = facturado - notas de crédito. El acumulado va de enero del ejercicio del
     periodo hasta el periodo, inclusive. Un mes sin datos vale cero, no falta.
     """
-    por_mes = _acumular(filas)
+    # Cada mes se redondea a centavos antes de acumular: el acumulado es la suma de los meses que se ven.
+    por_mes = {mes: m.redondeado() for mes, m in _acumular(filas).items()}
     vacio = _Mes()
 
     acumulado = _Mes()
@@ -178,7 +188,7 @@ def componer_iva_anual(ejercicio: int, meses_iva: Iterable[dict], periodo: Optio
     posteriores a ``periodo`` (si se indica) salen en cero."""
     dados = {m["periodo"]: m for m in meses_iva}
     meses = []
-    tot_t = tot_a = tot_r = _CERO
+    tot_t = tot_a = tot_r = tot_cargo = tot_favor = _CERO
     for mes in meses_del_ejercicio(ejercicio):
         base = _bloque_iva_vacio(mes) if (periodo is not None and mes > periodo) or mes not in dados else dados[mes]
         trasladado = _dec(base["trasladado"]["total"])
@@ -199,6 +209,8 @@ def componer_iva_anual(ejercicio: int, meses_iva: Iterable[dict], periodo: Optio
         tot_t += trasladado
         tot_a += acreditable
         tot_r += retenido
+        tot_cargo += max(por_pagar, _CERO)
+        tot_favor += max(-por_pagar, _CERO)
     return {
         "ejercicio": ejercicio,
         "factor_prorrateo": Decimal("1"),
@@ -208,6 +220,37 @@ def componer_iva_anual(ejercicio: int, meses_iva: Iterable[dict], periodo: Optio
             "trasladado": _q(tot_t),
             "acreditable": _q(tot_a),
             "iva_retenido": _q(tot_r),
-            "iva_por_pagar": _q(tot_t - tot_a - tot_r),
+            # No se compensa un mes a favor contra otro a cargo (LIVA 6): se suman por separado.
+            "total_a_cargo": _q(tot_cargo),
+            "total_a_favor": _q(tot_favor),
         },
     }
+
+
+_MENSAJES_IVA = {
+    "pago_proporcion": "El IVA de los cobros y pagos de facturas a crédito se estima por la proporción pagada del CFDI, no con los impuestos del complemento de pago.",
+    "moneda_extranjera": "Hay CFDI en moneda extranjera: su IVA no se convierte a pesos en esta tabla (los ingresos y gastos sí).",
+    "anticipos": "Hay anticipos o egresos de aplicación de anticipo: el IVA del anticipo no se cuenta en su mes y su aplicación sí se resta.",
+    "retenciones": "Aún no se incorporan las retenciones de IVA y el factor de prorrateo es 1.",
+}
+
+
+def advertencias_iva(cfdis: Iterable[dict], pagos: Iterable[dict]) -> list[dict]:
+    """Limitaciones del IVA anual que aplican a los datos del ejercicio (se corrigen en F5).
+
+    ``cfdi`` cuenta documentos distintos; ``None`` en un aviso que no depende de los datos.
+    """
+    def llave(u: Any) -> str:
+        return str(u or "").upper()
+
+    vigentes = [c for c in cfdis if c.get("estado") == "vigente" and c.get("tipo_comprobante") in ("I", "E")]
+    conteos = {
+        "pago_proporcion": len({llave(p.get("cfdi_uuid")) for p in pagos}),
+        "moneda_extranjera": len({llave(c["uuid"]) for c in vigentes
+                                  if (c.get("moneda") or "MXN") != "MXN" and _dec(c.get("iva_trasladado")) != 0}),
+        "anticipos": len({llave(c["uuid"]) for c in vigentes
+                          if c.get("es_anticipo_sat") or (c["tipo_comprobante"] == "E" and c.get("forma_pago") == "30")}),
+    }
+    avisos = [{"codigo": k, "mensaje": _MENSAJES_IVA[k], "cfdi": n} for k, n in conteos.items() if n]
+    avisos.append({"codigo": "retenciones", "mensaje": _MENSAJES_IVA["retenciones"], "cfdi": None})
+    return avisos

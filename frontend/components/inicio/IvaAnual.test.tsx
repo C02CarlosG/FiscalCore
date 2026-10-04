@@ -63,10 +63,24 @@ describe("IvaAnual", () => {
     expect(screen.getByRole("row", { name: /^Total/ })).toHaveTextContent("$960.00");     // 160 + 320 + 480
   });
 
-  it("avisa que las retenciones y el prorrateo aún no se incorporan", () => {
+  it("muestra las advertencias del servidor, con cuántos CFDI afectan, y no dice que coincide con la cédula", () => {
     render(<IvaAnual datos={ivaAnual()} periodo="2026-12" />);
 
-    expect(screen.getByText(/retenciones de IVA y el factor de prorrateo/i)).toBeInTheDocument();
+    const lista = screen.getByRole("list", { name: "Advertencias del IVA" });
+    expect(within(lista).getAllByRole("listitem")).toHaveLength(2);
+    expect(within(lista).getByText(/se estima por la proporción pagada/)).toBeInTheDocument();
+    expect(within(lista).getByText("3 CFDI")).toBeInTheDocument();
+    expect(within(lista).getByText(/factor de prorrateo es 1/)).toBeInTheDocument();
+    expect(screen.queryByText(/coincide con la cédula/i)).not.toBeInTheDocument();
+  });
+
+  it("sin advertencias no dibuja la lista", () => {
+    const datos = ivaAnual();
+    datos.advertencias = [];
+
+    render(<IvaAnual datos={datos} periodo="2026-12" />);
+
+    expect(screen.queryByRole("list", { name: "Advertencias del IVA" })).not.toBeInTheDocument();
   });
 
   it("las pestañas se navegan con el teclado (flechas)", async () => {

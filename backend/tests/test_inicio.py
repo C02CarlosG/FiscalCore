@@ -173,8 +173,10 @@ def test_iva_anual_deja_vacios_los_meses_posteriores_al_periodo():
 def test_iva_anual_totales_suman_los_meses():
     r = inicio.componer_iva_anual(2026, [_mes_iva("2026-01", 160, 100), _mes_iva("2026-02", 50, 80, retenido="5")], None)
 
+    # enero queda a cargo (60) y febrero a favor (35): LIVA 6 no permite compensar un mes contra otro
     assert r["totales"] == {
-        "trasladado": D("210.00"), "acreditable": D("180.00"), "iva_retenido": D("5.00"), "iva_por_pagar": D("25.00"),
+        "trasladado": D("210.00"), "acreditable": D("180.00"), "iva_retenido": D("5.00"),
+        "total_a_cargo": D("60.00"), "total_a_favor": D("35.00"),
     }
     assert r["iva_retenido_incluido"] is False and r["factor_prorrateo"] == D("1")
 
@@ -240,3 +242,50 @@ def test_siguiente_mes_cambia_de_ejercicio_en_diciembre():
     assert _siguiente_mes("2026-12") == "2027-01"
     assert _siguiente_mes("2026-09") == "2026-10"
     assert _siguiente_mes("2026-01") == "2026-02"
+
+
+# ── Redondeo (ROUND_HALF_UP, mes por mes) ────────────────────────────────────
+
+def test_el_redondeo_es_medio_hacia_arriba_no_al_par():
+    r = inicio.componer_resumen([_fila("2026-09", "emitido", "I", "0.125"), _fila("2026-08", "emitido", "I", "0.135")], "2026-09")
+
+    assert r["ingresos"]["periodo"]["facturado"] == D("0.13")      # el redondeo bancario daría 0.12
+    por = {m["periodo"]: m for m in r["meses"]}
+    assert por["2026-08"]["ingresos"]["neto"] == D("0.14")
+
+
+def test_el_acumulado_suma_los_meses_ya_redondeados():
+    filas = [_fila(f"2026-0{m}", "emitido", "I", "0.005") for m in (1, 2, 3)]
+    r = inicio.componer_resumen(filas, "2026-03")
+
+    assert [x["ingresos"]["neto"] for x in r["meses"][-3:]] == [D("0.01")] * 3
+    assert r["ingresos"]["acumulado"]["neto"] == D("0.03")           # 3 × 0.01, no 0.015 redondeado a 0.02
+
+
+# ── Advertencias del IVA anual ───────────────────────────────────────────────
+
+def _c(**kw):
+    base = {"uuid": "U", "tipo_comprobante": "I", "estado": "vigente", "moneda": "MXN", "iva_trasladado": D("160"),
+            "es_anticipo_sat": False, "forma_pago": "03"}
+    base.update(kw)
+    return base
+
+
+def test_advertencias_siempre_avisa_de_retenciones_y_prorrateo():
+    a = inicio.advertencias_iva([], [])
+
+    assert [x["codigo"] for x in a] == ["retenciones"]
+    assert a[0]["cfdi"] is None and a[0]["mensaje"]
+
+
+def test_advertencias_por_pagos_a_credito_moneda_extranjera_y_anticipos():
+    cfdis = [
+        _c(uuid="U1", moneda="USD"), _c(uuid="U2", moneda="USD"), _c(uuid="U3", moneda="USD", iva_trasladado=D("0")),
+        _c(uuid="A1", es_anticipo_sat=True), _c(uuid="C1", tipo_comprobante="E", forma_pago="30"),
+        _c(uuid="X1", estado="cancelado", moneda="USD", es_anticipo_sat=True),
+    ]
+    pagos = [{"cfdi_uuid": "u9"}, {"cfdi_uuid": "U9"}, {"cfdi_uuid": "U8"}]
+
+    a = {x["codigo"]: x["cfdi"] for x in inicio.advertencias_iva(cfdis, pagos)}
+
+    assert a == {"pago_proporcion": 2, "moneda_extranjera": 2, "anticipos": 2, "retenciones": None}
