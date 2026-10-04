@@ -27,6 +27,7 @@ from .deps import limiter  # importar deps.py valida JWT_SECRET al arrancar
 from .routers import auth, empresas, ingesta, riesgos, scoring, conciliacion, emitidos, dashboard, sat, admin, reportes, movimientos, cfdi, cfdis, preferencias
 from .routers import inicio
 from .routers import informacion_fiscal
+from .routers import iva_flujo
 
 logging.basicConfig(
     level=logging.INFO,
@@ -80,6 +81,7 @@ app.include_router(cfdis.router)
 app.include_router(preferencias.router)
 app.include_router(inicio.router)
 app.include_router(informacion_fiscal.router)
+app.include_router(iva_flujo.router)
 
 
 @app.on_event("startup")
