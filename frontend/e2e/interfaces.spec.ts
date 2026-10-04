@@ -229,19 +229,25 @@ test.beforeEach(async ({ page }) => {
           ppd: { cobrado: 0, iva: 0 },
           notas_credito: { base: 0, iva: 0 },
           total: 0,
+          no_considerados: { cfdi: 0, iva: 0 },
+          reasignados: { cfdi: 0, iva: 0 },
         },
         acreditable: {
           pue: { base: 0, iva: 0 },
           ppd: { pagado: 0, iva: 0 },
           notas_credito: { base: 0, iva: 0 },
           excluido_efectivo: { iva: 0 },
+          no_considerados: { cfdi: 0, iva: 0 },
+          reasignados: { cfdi: 0, iva: 0 },
           bruto: 0,
           factor_prorrateo: 1,
           ajustado: 0,
         },
         iva_retenido: 0,
+        retenciones_a_enterar: 0,
         resultado: { iva_por_pagar: 0, saldo_a_cargo: 0, saldo_a_favor: 0 },
         comparativo_sat: { diot_iva_pagado: 0, diferencia: 0 },
+        advertencias: [],
       };
     } else if (/\/iva-flujo\/ajustes$/.test(path)) {
       body = route.request().method() === "GET" ? { items: [] } : { uuid: "cfdi-demo-001", accion: "excluir" };

@@ -11,7 +11,8 @@ from openpyxl.styles import Font
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
-from .. import cedula_iva as cedula_iva_motor, db, deducciones, isr, iva, iva_flujo, iva_flujo_datos
+from .. import cedula_iva as cedula_iva_motor, db, deducciones, isr, iva_flujo, iva_flujo_datos
+from .iva_flujo import _factor_o_422
 from ..auditoria import registrar_evento
 from ..deps import get_current_user, validar_acceso_empresa, serializar
 
@@ -264,12 +265,11 @@ async def cedula_iva(
     pantalla de IVA base flujo y la tabla del Inicio (``iva_flujo``), así que las tres dan la misma cifra."""
     if not _PERIODO_RE.match(periodo):
         raise HTTPException(status_code=422, detail="periodo inválido; formato esperado YYYY-MM")
-    if not 0 <= factor <= 1:
-        raise HTTPException(status_code=422, detail="el factor de prorrateo debe estar entre 0 y 1")
+    factor_dec = _factor_o_422(factor)
     validar_acceso_empresa(empresa_id, current_user)
 
     eventos, ajustes, diot_iva = _cargar_datos_cedula_iva(empresa_id, periodo)
-    resumen = iva_flujo.resumen(eventos, periodo, ajustes, Decimal(str(factor)))
+    resumen = iva_flujo.resumen(eventos, periodo, ajustes, factor_dec)
 
     registrar_evento(current_user["user_id"], "reporte_generado", empresa_id=empresa_id, metadata={"tipo": "cedula_iva", "periodo": periodo})
 

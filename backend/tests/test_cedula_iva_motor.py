@@ -115,3 +115,23 @@ def test_el_anual_marca_que_ya_incluye_las_retenciones():
     anual = inicio.componer_iva_anual(2026, [], None)
 
     assert anual["iva_retenido_incluido"] is True
+
+
+def test_la_cedula_explica_lo_que_el_motor_dejo_fuera_del_acreditable():
+    from datetime import date
+
+    from backend import iva_flujo
+
+    d = {"uuid": "R1", "tipo_comprobante": "I", "metodo_pago": "PUE", "forma_pago": "03", "uso_cfdi": "S01",
+         "estado": "vigente", "es_anticipo_sat": False, "rfc_emisor": "PRO010101AAA", "nombre_emisor": "P",
+         "rfc_receptor": "AAA010101AAA", "nombre_receptor": "E", "fecha_emision": date(2026, 9, 10),
+         "subtotal": Decimal("1000"), "descuento": Decimal("0"), "total": Decimal("1160"),
+         "iva_trasladado": Decimal("160"), "iva_retenido": Decimal("0"), "moneda": "MXN", "tipo_cambio": Decimal("1"),
+         "impuestos": [], "no_objeto": Decimal("0")}
+    ev = iva_flujo.eventos_de_documento(d, "AAA010101AAA")
+    r = cedula_iva.desde_motor(iva_flujo.resumen(ev, "2026-09", {}, Decimal("1")), Decimal("0"))
+
+    assert r["acreditable"]["bruto"] == Decimal("0.00")
+    assert r["acreditable"]["no_considerados"]["cfdi"] == 1
+    assert r["acreditable"]["no_considerados"]["por_motivo"]["uso_no_deducible"]["iva"] == Decimal("160.00")
+    assert r["trasladado"]["no_considerados"]["cfdi"] == 0 and "reasignados" in r["acreditable"]

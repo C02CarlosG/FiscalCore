@@ -189,12 +189,26 @@ def _cuadre_de_retencion(doc: dict, d: dict, k: Decimal) -> set:
     if not filas:
         if encabezado != 0:
             d["retencion"] = encabezado * k
-            return {"descuadre_retencion"}
+            return {"retencion_sin_desglose"}
         return set()
     suma = sum((_dec(i.get("importe")) for i in filas), CERO)
     if abs(suma - encabezado) > TOLERANCIA_DESCUADRE * len(filas):
         return {"descuadre_retencion"}
     return set()
+
+
+def _desglose_desde_encabezado(doc: dict, d: dict, iva: Decimal, k: Decimal) -> None:
+    """CFDI sin filas de ``cfdi_impuestos``: la base sale del encabezado (subtotal − descuento − lo no objeto)
+    y va en la tasa que dicta iva/base (16 %, 8 % u otras), para que el IVA no quede sin base."""
+    base = _dec(doc.get("subtotal")) - _dec(doc.get("descuento")) - _dec(doc.get("no_objeto"))
+    if base <= 0:
+        return
+    razon = iva / base
+    clave = "16" if abs(razon - Decimal("0.16")) <= Decimal("0.005") else (
+        "8" if abs(razon - Decimal("0.08")) <= Decimal("0.005") else "otras")
+    d["bases"][clave] += base * k
+    d["iva"][clave] += iva * k
+    d["iva"]["total"] += iva * k
 
 
 def _desglose_de_documento(doc: dict, k: Decimal) -> tuple[dict, Decimal, set]:
@@ -212,6 +226,7 @@ def _desglose_de_documento(doc: dict, k: Decimal) -> tuple[dict, Decimal, set]:
     if not filas:
         if encabezado != 0:
             marcas.add("sin_desglose")
+            _desglose_desde_encabezado(doc, d, encabezado, k)
         return d, encabezado * k, marcas
     suma = sum((i["importe"] if isinstance(i["importe"], Decimal) else _dec(i["importe"]) for i in filas
                 if i.get("tipo_factor") != "Exento"), CERO)
@@ -404,6 +419,7 @@ MENSAJES = {
     "sin_tipo_cambio": "Hay CFDI en moneda extranjera sin tipo de cambio: no se suman.",
     "sin_proporcion": "Hay pagos de documentos con total en cero: no se puede calcular su IVA.",
     "descuadre_retencion": "La retención de IVA del desglose no coincide con la del encabezado.",
+    "retencion_sin_desglose": "Hay CFDI con retención de IVA solo en el encabezado (sin desglose): se usó la del encabezado.",
     "equivalencia_sospechosa": "Hay pagos cuya equivalencia del documento parece invertida respecto al tipo de cambio del CFDI: revisa esos renglones.",
     "forma_pago_rep": "La forma de pago del REP no se guarda: un pago en efectivo de una factura a crédito no se detecta como no acreditable.",
 }

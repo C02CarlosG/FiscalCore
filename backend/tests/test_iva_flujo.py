@@ -190,7 +190,7 @@ def test_diferencia_de_centavos_no_es_descuadre():
 def test_sin_desglose_guardado_usa_el_encabezado_y_lo_marca():
     e = f.eventos_de_documento(doc(impuestos=[]), RFC)[0]
 
-    assert "sin_desglose" in e["marcas"] and e["iva_total"] == D("160") and e["bases"]["16"] == D("0")
+    assert "sin_desglose" in e["marcas"] and e["iva_total"] == D("160") and e["bases"]["16"] == D("1000")
 
 
 def test_no_objeto_se_informa_como_base_sin_iva():
@@ -792,7 +792,7 @@ def test_sin_filas_de_retencion_pero_con_retencion_en_el_encabezado_usa_el_encab
 
     e = f.eventos_de_documento(d, RFC)[0]
 
-    assert e["retencion"] == D("106.67") and "descuadre_retencion" in e["marcas"]
+    assert e["retencion"] == D("106.67") and "retencion_sin_desglose" in e["marcas"]
 
 
 @pytest.mark.parametrize("moneda,tc,eq,pago_moneda,sospechosa", [
@@ -818,3 +818,21 @@ def test_equivalencia_sospechosa_se_advierte_pero_si_suma():
 
     assert f.motivo_exclusion(e) is None
     assert "equivalencia_sospechosa" in {a["codigo"] for a in f.resumen([e], "2026-09", {})["advertencias"]}
+
+
+# ── CFDI sin desglose: la base sale del encabezado ───────────────────────────
+
+def test_sin_desglose_la_base_sale_del_encabezado_no_de_la_suma_de_bases():
+    d = doc("U1", subtotal=D("1000"), descuento=D("100"), iva_trasladado=D("144"), total=D("1044"), impuestos=[])
+
+    e = f.eventos_de_documento(d, RFC)[0]
+
+    assert "sin_desglose" in e["marcas"]
+    assert e["bases"]["16"] == D("900") and e["iva"]["16"] == D("144") and e["iva"]["total"] == D("144")
+
+
+def test_sin_desglose_a_tasa_de_8_o_distinta_cae_en_su_clave():
+    ocho = f.eventos_de_documento(doc("U1", subtotal=D("1000"), iva_trasladado=D("80"), impuestos=[]), RFC)[0]
+    otra = f.eventos_de_documento(doc("U2", subtotal=D("1000"), iva_trasladado=D("30"), impuestos=[]), RFC)[0]
+
+    assert ocho["bases"]["8"] == D("1000") and otra["bases"]["otras"] == D("1000")

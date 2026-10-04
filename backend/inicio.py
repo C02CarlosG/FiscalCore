@@ -185,8 +185,8 @@ def _bloque_iva_vacio(periodo: str) -> dict:
 
 
 def componer_iva_anual(ejercicio: int, meses_iva: Iterable[dict], periodo: Optional[str]) -> dict:
-    """IVA del ejercicio mes por mes. ``meses_iva`` trae, por mes, lo que devuelven
-    ``iva.iva_trasladado`` e ``iva.iva_acreditable`` (más ``iva_retenido``); el
+    """IVA del ejercicio mes por mes. ``meses_iva`` trae, por mes, el formato plano de
+    ``iva_mes_desde_motor`` (trasladado, acreditable e ``iva_retenido``); el
     resultado del mes es trasladado - acreditable ajustado - retenido. Los meses
     posteriores a ``periodo`` (si se indica) salen en cero."""
     dados = {m["periodo"]: m for m in meses_iva}
@@ -230,12 +230,15 @@ def componer_iva_anual(ejercicio: int, meses_iva: Iterable[dict], periodo: Optio
     }
 
 
-def advertencias_desde_motor(resumenes: Iterable[dict]) -> list[dict]:
+def advertencias_desde_motor(resumenes: Iterable[dict], periodo: Optional[str] = None) -> list[dict]:
     """Advertencias del ejercicio: las de cada mes del motor, sumando los CFDI afectados mes por mes
-    (un CFDI con pagos en dos meses cuenta en cada uno), más el aviso fijo del factor de prorrateo."""
+    (un CFDI con pagos en dos meses cuenta en cada uno), más el aviso fijo del factor de prorrateo.
+    Con ``periodo`` solo cuentan los meses hasta él, igual que la tabla (los posteriores salen en cero)."""
     mensajes: dict[str, str] = {}
     cuentas: dict[str, int] = {}
     for r in resumenes:
+        if periodo is not None and r.get("periodo", "") > periodo:
+            continue
         for a in r["advertencias"]:
             mensajes[a["codigo"]] = a["mensaje"]
             cuentas[a["codigo"]] = cuentas.get(a["codigo"], 0) + a["cfdi"]

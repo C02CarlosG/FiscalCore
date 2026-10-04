@@ -100,11 +100,20 @@ export interface IvaDesglose {
   iva: number;
 }
 
+/** Lo que el motor dejó fuera de la cifra (efectivo, uso sin efectos, ajustes) o movió a otro periodo. */
+export interface IvaFueraDeCifra {
+  cfdi: number;
+  iva: number;
+  por_motivo?: Record<string, { cfdi: number; iva: number }>;
+}
+
 export interface TrasladadoIva {
   pue: IvaDesglose;
   ppd: { cobrado: number; iva: number };
   notas_credito: IvaDesglose;
   total: number;
+  no_considerados: IvaFueraDeCifra;
+  reasignados: IvaFueraDeCifra;
 }
 
 export interface AcreditableIva {
@@ -112,6 +121,8 @@ export interface AcreditableIva {
   ppd: { pagado: number; iva: number };
   notas_credito: IvaDesglose;
   excluido_efectivo: { iva: number };
+  no_considerados: IvaFueraDeCifra;
+  reasignados: IvaFueraDeCifra;
   bruto: number;
   factor_prorrateo: number;
   ajustado: number;
@@ -134,8 +145,11 @@ export interface CedulaIva {
   trasladado: TrasladadoIva;
   acreditable: AcreditableIva;
   iva_retenido: number;
+  /** Retenciones de IVA que la empresa hizo a terceros y debe enterar. */
+  retenciones_a_enterar: number;
   resultado: ResultadoIva;
   comparativo_sat: ComparativoSat;
+  advertencias: InicioAdvertencia[];
 }
 
 export interface IngestaResponse {

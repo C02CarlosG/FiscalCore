@@ -203,9 +203,9 @@ def test_contado_separa_las_tasas_y_suma_con_el_encabezado(entorno):
     c = _resumen(entorno)["trasladado"]["origenes"]["contado"]
 
     # CFDI 1 (16/8/0/exento) + 2 + 41 (factura B) + 6 (sin detalle: IVA del encabezado) + 7 (USD × 20) + 3 NC aparte + 40 anticipo es de agosto
-    assert c["bases"]["16"] == 1000 + 400 + 5000 + 200
+    assert c["bases"]["16"] == 1000 + 400 + 5000 + 200 + 100                       # + 100: la base del CFDI sin detalle sale del encabezado
     assert c["bases"]["8"] == 500 and c["bases"]["0"] == 300 and c["bases"]["exento"] == 200
-    assert c["iva"]["16"] == 160 + 64 + 800 + 32 and c["iva"]["8"] == 40
+    assert c["iva"]["16"] == 160 + 64 + 800 + 32 + 16 and c["iva"]["8"] == 40
     assert c["iva"]["total"] == 160 + 40 + 64 + 800 + 16 + 32                       # + 16 del CFDI sin desglose
     assert c["cfdi"] == 5 and c["retenciones"] == 42.67
 

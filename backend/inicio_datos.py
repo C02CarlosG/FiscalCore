@@ -49,11 +49,11 @@ def cargar_agregados(empresa_id: str, rfc: str, periodo: str) -> list[dict]:
     )
 
 
-def cargar_iva_ejercicio(empresa_id: str, rfc: str, ejercicio: int) -> tuple[list[dict], list[dict]]:
+def cargar_iva_ejercicio(empresa_id: str, rfc: str, ejercicio: int, periodo: str | None = None) -> tuple[list[dict], list[dict]]:
     """IVA trasladado y acreditable de cada mes del ejercicio, calculados con el mismo motor
     (``iva_flujo``) y los mismos ajustes que la cédula y la pantalla de IVA, para que el Inicio nunca
     las contradiga. Lee los eventos del año una sola vez. Devuelve los meses y las advertencias."""
     ajustes = iva_flujo_datos.cargar_ajustes(empresa_id)
     eventos = iva_flujo_datos.cargar_eventos_ejercicio(empresa_id, rfc, ejercicio, ajustes)
     resumenes = [iva_flujo.resumen(eventos, mes, ajustes, Decimal("1")) for mes in inicio.meses_del_ejercicio(ejercicio)]
-    return [inicio.iva_mes_desde_motor(r) for r in resumenes], inicio.advertencias_desde_motor(resumenes)
+    return [inicio.iva_mes_desde_motor(r) for r in resumenes], inicio.advertencias_desde_motor(resumenes, periodo)
