@@ -272,3 +272,27 @@ def test_rfc_de_terceros_invalido_se_conserva_y_se_registra(caplog):
 
     assert p.conceptos[0].rfc_a_cuenta_terceros == "NO-ES-RFC"      # el dato no se pierde
     assert "RfcACuentaTerceros con forma inválida" in caplog.text
+
+
+def test_cada_pago_trae_su_orden_de_nodo_y_su_forma_de_pago():
+    p = CFDIParser().parse_xml(_rep('''<pago20:Pagos Version="2.0">
+        <pago20:Pago FechaPago="2026-01-20T12:00:00" FormaDePagoP="01" MonedaP="MXN" Monto="100.00"/>
+        <pago20:Pago FechaPago="2026-01-20T12:00:00" FormaDePagoP="03" MonedaP="MXN" Monto="100.00"/>
+        <pago20:Pago FechaPago="2026-01-21T12:00:00" MonedaP="MXN" Monto="50.00"/></pago20:Pagos>'''))
+
+    assert [(x.nodo, x.forma_pago) for x in p.pagos] == [(1, "01"), (2, "03"), (3, None)]
+
+
+def test_el_orden_de_nodo_cuenta_tambien_los_pagos_que_no_se_guardan():
+    """Un pago sin fecha o con monto 0 no se guarda, pero su lugar no se recorre: el nodo
+    siguiente conserva su número real del XML."""
+    p = CFDIParser().parse_xml(_rep('''<pago20:Pagos Version="2.0">
+        <pago20:Pago FechaPago="2026-01-20T12:00:00" MonedaP="MXN" Monto="0"/>
+        <pago20:Pago FechaPago="2026-01-20T12:00:00" FormaDePagoP="03" MonedaP="MXN" Monto="100.00"/></pago20:Pagos>'''))
+
+    assert [x.nodo for x in p.pagos] == [1, 2]
+
+
+def test_rep_10_tambien_numera_sus_pagos():
+    p = CFDIParser().parse_xml(_rep(PAGOS_10))
+    assert [(x.nodo, x.forma_pago) for x in p.pagos] == [(1, "03")]

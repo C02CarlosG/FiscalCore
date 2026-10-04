@@ -99,6 +99,10 @@ class PagoCFDI:
     version: str = "2.0"   # "1.0" cuando el complemento es Pagos 1.0
     # ImpuestosP del REP 2.0: lo que el pago declara en conjunto, en la moneda del pago.
     impuestos_p: list[ImpuestoResumen] = field(default_factory=list)
+    # Orden del nodo pago:Pago en el XML, desde 1 (cuenta también los que no se guardan).
+    nodo: int = 1
+    # FormaDePagoP (c_FormaPago) de este pago; None si el XML no la trae.
+    forma_pago: Optional[str] = None
 
 
 @dataclass
@@ -810,7 +814,7 @@ class CFDIParser:
         if pagos_node is None:
             return pagos
 
-        for pago_node in pagos_node.findall(f"{ns_pago}Pago"):
+        for nodo, pago_node in enumerate(pagos_node.findall(f"{ns_pago}Pago"), start=1):
             fecha_str = pago_node.get("FechaPago", "")
             # El nodo Pago usa el atributo Monto tanto en Pagos 1.0 como en 2.0
             # (Pagos20.xsd). MontoTotalPagos vive en pago20:Totales, no aquí.
@@ -867,6 +871,8 @@ class CFDIParser:
                 doctos_relacionados=doctos,
                 version="2.0" if ns_pago == NS_PAGO20 else "1.0",
                 impuestos_p=_agrupar_impuestos(impuestos_p, SEIS_DECIMALES),
+                nodo=nodo,
+                forma_pago=pago_node.get("FormaDePagoP") or None,
             ))
 
         return pagos

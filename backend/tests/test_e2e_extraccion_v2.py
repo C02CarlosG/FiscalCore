@@ -257,7 +257,7 @@ def test_el_reproceso_rellena_los_cfdi_guardados_con_la_version_1(entorno):
     assert _conteos(db) == ESPERADO
     assert _uno(db, "SELECT objeto_imp_dr FROM pagos_relaciones WHERE cfdi_uuid = %s", UUID_FACTURA)["objeto_imp_dr"] == "02"
     assert {_uno(db, "SELECT detalle_version AS v FROM cfdi WHERE uuid = %s", u)["v"]
-            for u in (UUID_FACTURA, UUID_REP, UUID_NOMINA)} == {2}
+            for u in (UUID_FACTURA, UUID_REP, UUID_NOMINA)} == {cfdi_store.DETALLE_VERSION}
 
 
 def test_reprocesar_dos_veces_no_duplica(entorno):
@@ -316,7 +316,7 @@ def _xml_rep_con_dos_pagos_identicos() -> bytes:
 </cfdi:Comprobante>'''.encode()
 
 
-def test_dos_pagos_identicos_acumulan_sus_impuestos_p_y_no_se_pisan(entorno):
+def test_dos_pagos_identicos_tienen_cada_uno_su_fila_y_sus_impuestos(entorno):
     db, client, headers, empresa_id = entorno
 
     for _ in range(2):    # subirlo dos veces tampoco duplica
@@ -326,11 +326,13 @@ def test_dos_pagos_identicos_acumulan_sus_impuestos_p_y_no_se_pisan(entorno):
     db.execute("UPDATE cfdi SET detalle_version = 1 WHERE uuid = %s", (UUID_REP_DOBLE,))
     reproceso.reprocesar_detalle(empresa_id=empresa_id)             # y reprocesarlo, igual
 
-    pagos = db.query_all("SELECT p.id FROM pagos_cfdi p JOIN cfdi c ON c.id = p.cfdi_id WHERE c.uuid = %s", (UUID_REP_DOBLE,))
-    assert len(pagos) == 1                                             # comparten fila
-    filas = db.query_all("SELECT ambito, impuesto, base, importe FROM pagos_impuestos WHERE pago_id = %s", (pagos[0]["id"],))
-    assert [(f["ambito"], f["impuesto"], f["base"], f["importe"]) for f in filas] == [
-        ("traslado", "002", D("2000.000000"), D("320.000000"))]       # el IVA de los dos pagos, no solo el del segundo
+    pagos = db.query_all("SELECT p.id, p.nodo, p.forma_pago FROM pagos_cfdi p JOIN cfdi c ON c.id = p.cfdi_id "
+                         "WHERE c.uuid = %s ORDER BY p.nodo", (UUID_REP_DOBLE,))
+    assert [(p["nodo"], p["forma_pago"]) for p in pagos] == [(1, "03"), (2, "03")]   # una fila por nodo
+    for p in pagos:
+        filas = db.query_all("SELECT ambito, impuesto, base, importe FROM pagos_impuestos WHERE pago_id = %s", (p["id"],))
+        assert [(f["ambito"], f["impuesto"], f["base"], f["importe"]) for f in filas] == [
+            ("traslado", "002", D("1000.000000"), D("160.000000"))]       # el IVA de cada pago, completo
 
 
 def test_totales_del_rep_conservan_seis_decimales_en_la_base(entorno):
@@ -341,3 +343,27 @@ def test_totales_del_rep_conservan_seis_decimales_en_la_base(entorno):
     t = _uno(db, "SELECT t.* FROM cfdi_pagos_totales t JOIN cfdi c ON c.id = t.cfdi_id WHERE c.uuid = %s", UUID_REP_DOBLE)
     assert (t["total_traslados_base_iva16"], t["total_traslados_iva16"], t["monto_total_pagos"]) == (
         D("35000.123456"), D("5600.019753"), D("40600.500000"))
+
+
+def test_un_rep_guardado_antes_de_la_041_reclama_su_fila_y_agrega_la_que_faltaba(entorno):
+    """Antes de la 041 los dos pagos idénticos compartían una fila (nodo 0, sin asignar). El
+    reproceso la reclama para el nodo 1 (conserva su id y sus relaciones) y crea la del nodo 2."""
+    db, client, headers, empresa_id = entorno
+    from backend import reproceso
+
+    client.post(f"/api/v1/empresas/{empresa_id}/cfdi/upload", headers=headers, data={"periodo": PERIODO},
+                files=[("archivos", ("rep2.xml", _xml_rep_con_dos_pagos_identicos(), "text/xml"))])
+    cfdi_id = _uno(db, "SELECT id FROM cfdi WHERE uuid = %s", UUID_REP_DOBLE)["id"]
+    db.execute("DELETE FROM pagos_cfdi WHERE cfdi_id = %s AND nodo = 2", (cfdi_id,))        # estado anterior: una sola fila
+    db.execute("UPDATE pagos_cfdi SET nodo = 0, forma_pago = NULL WHERE cfdi_id = %s", (cfdi_id,))
+    db.execute("DELETE FROM pagos_impuestos WHERE pago_id IN (SELECT id FROM pagos_cfdi WHERE cfdi_id = %s)", (cfdi_id,))
+    db.execute("UPDATE cfdi SET detalle_version = 2 WHERE id = %s", (cfdi_id,))
+    fila_vieja = _uno(db, "SELECT id FROM pagos_cfdi WHERE cfdi_id = %s", cfdi_id)["id"]
+
+    resultado = reproceso.reprocesar_detalle(empresa_id=empresa_id)
+
+    assert resultado["errores"] == [] and resultado["pendientes"] == 0
+    pagos = db.query_all("SELECT id, nodo, forma_pago FROM pagos_cfdi WHERE cfdi_id = %s ORDER BY nodo", (cfdi_id,))
+    assert [(p["nodo"], p["forma_pago"]) for p in pagos] == [(1, "03"), (2, "03")]
+    assert pagos[0]["id"] == fila_vieja                                       # reclamó la fila anterior
+    assert _uno(db, "SELECT COUNT(*) AS n FROM pagos_impuestos i JOIN pagos_cfdi p ON p.id = i.pago_id WHERE p.cfdi_id = %s", cfdi_id)["n"] == 2
