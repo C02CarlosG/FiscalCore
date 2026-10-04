@@ -1,0 +1,156 @@
+"""ISR base flujo (F7.1): flujo del mes y acumulado, detalle de lo que compone cada cifra, porcentaje de nómina exenta y
+ajustes manuales (no considerar) con auditoría. El cálculo vive en ``isr_flujo`` (puro) e ``isr_flujo_datos`` (SQL)."""
+from __future__ import annotations
+
+import re
+from decimal import Decimal
+from typing import Literal
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field, field_validator
+
+from .. import db, isr_flujo, isr_flujo_datos
+from ..auditoria import registrar_evento
+from ..deps import empresa_or_404, get_current_user, validar_acceso_empresa
+
+router = APIRouter(tags=["ISR por flujo"])
+
+_BASE = "/api/v1/empresas/{empresa_id}/isr-flujo"
+_PERIODO_RE = re.compile(r"20[0-9]{2}-(0[1-9]|1[0-2])")
+_UUID_MAX = 36
+
+
+class AjusteIn(BaseModel):
+    uuid: str = Field(..., min_length=1, max_length=_UUID_MAX)
+    lado: Literal["ingreso", "deduccion"]
+    motivo: str = Field(..., max_length=500, description="Obligatorio: queda en la auditoría")
+
+    @field_validator("motivo")
+    @classmethod
+    def _motivo_con_texto(cls, valor: str) -> str:
+        valor = valor.strip()
+        if not valor:
+            raise ValueError("el motivo es obligatorio")
+        return valor
+
+
+class ConfigIn(BaseModel):
+    pct_nomina_exenta: float = Field(..., ge=0, le=1, description="0.47 por defecto; 0.53 si se acredita la no disminución")
+
+
+def _json(obj):
+    if isinstance(obj, Decimal):
+        return float(obj)
+    if isinstance(obj, dict):
+        return {k: _json(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_json(v) for v in obj]
+    return obj
+
+
+def _periodo_o_422(periodo: str) -> str:
+    if not _PERIODO_RE.fullmatch(periodo):
+        raise HTTPException(status_code=422, detail="periodo inválido; formato esperado YYYY-MM")
+    return periodo
+
+
+def _ejercicio_o_422(ejercicio: int) -> int:
+    if not 2000 <= ejercicio <= 2099:
+        raise HTTPException(status_code=422, detail="ejercicio inválido")
+    return ejercicio
+
+
+# Las rutas fijas (config, ajustes) van antes que /{periodo}.
+
+@router.get(_BASE + "/config/{ejercicio}")
+async def leer_config(empresa_id: str, ejercicio: int, current_user: dict = Depends(get_current_user)):
+    validar_acceso_empresa(empresa_id, current_user)
+    _ejercicio_o_422(ejercicio)
+    return _json({"ejercicio": ejercicio, "pct_nomina_exenta": isr_flujo_datos.porcentaje_nomina_exenta(empresa_id, ejercicio)})
+
+
+@router.put(_BASE + "/config/{ejercicio}")
+async def guardar_config(empresa_id: str, ejercicio: int, datos: ConfigIn, current_user: dict = Depends(get_current_user)):
+    """Cambia el porcentaje deducible de la nómina exenta del ejercicio y lo audita."""
+    validar_acceso_empresa(empresa_id, current_user)
+    _ejercicio_o_422(ejercicio)
+    pct = Decimal(str(datos.pct_nomina_exenta))
+    isr_flujo_datos.guardar_porcentaje(empresa_id, ejercicio, pct, current_user["user_id"])
+    return _json({"ejercicio": ejercicio, "pct_nomina_exenta": pct})
+
+
+@router.get(_BASE + "/ajustes")
+async def listar_ajustes(empresa_id: str, current_user: dict = Depends(get_current_user)):
+    validar_acceso_empresa(empresa_id, current_user)
+    filas = db.query_all(
+        """SELECT cfdi_uuid AS uuid, lado, motivo, created_at, updated_at
+           FROM isr_ajustes WHERE empresa_id = %s ORDER BY updated_at DESC LIMIT 500""",
+        (empresa_id,),
+    )
+    return {"items": [{**f, "created_at": f["created_at"].isoformat(), "updated_at": f["updated_at"].isoformat()} for f in filas]}
+
+
+@router.put(_BASE + "/ajustes")
+async def guardar_ajuste(empresa_id: str, datos: AjusteIn, current_user: dict = Depends(get_current_user)):
+    """«No considerar ISR» en un CFDI y lado: sale de las sumas y queda auditado."""
+    validar_acceso_empresa(empresa_id, current_user)
+    empresa = empresa_or_404(empresa_id)
+    cfdi = db.query_one(
+        """SELECT uuid, tipo_comprobante, rfc_emisor, rfc_receptor
+           FROM cfdi WHERE empresa_id = %s AND UPPER(uuid) = UPPER(%s) AND estado = 'vigente'""",
+        (empresa_id, datos.uuid),
+    )
+    rfc = empresa["rfc"]
+    propio = cfdi and (
+        (datos.lado == "ingreso" and cfdi["rfc_emisor"] == rfc and cfdi["tipo_comprobante"] in ("I", "E"))
+        or (datos.lado == "deduccion" and cfdi["tipo_comprobante"] in ("I", "E", "N")
+            and (cfdi["rfc_receptor"] == rfc or (cfdi["tipo_comprobante"] == "N" and cfdi["rfc_emisor"] == rfc)))
+    )
+    if not propio:
+        raise HTTPException(status_code=404, detail="CFDI no encontrado para ese ajuste")
+    uuid = cfdi["uuid"].upper()
+    isr_flujo_datos.guardar_ajuste(empresa_id, uuid, datos.lado, datos.motivo, current_user["user_id"])
+    return {"uuid": uuid, "lado": datos.lado, "accion": "excluir", "motivo": datos.motivo}
+
+
+@router.delete(_BASE + "/ajustes/{lado}/{uuid}", status_code=204)
+async def quitar_ajuste(empresa_id: str, lado: Literal["ingreso", "deduccion"], uuid: str,
+                        current_user: dict = Depends(get_current_user)):
+    validar_acceso_empresa(empresa_id, current_user)
+    if len(uuid) > _UUID_MAX or not isr_flujo_datos.quitar_ajuste(empresa_id, uuid, lado, current_user["user_id"]):
+        raise HTTPException(status_code=404, detail="Ajuste no encontrado")
+
+
+@router.get(_BASE + "/{periodo}")
+async def resumen_isr_flujo(empresa_id: str, periodo: str, current_user: dict = Depends(get_current_user)):
+    """Flujo de ISR del mes y acumulado del ejercicio: ingresos, deducciones, nómina, retenciones y utilidad fiscal estimada."""
+    validar_acceso_empresa(empresa_id, current_user)
+    _periodo_o_422(periodo)
+    empresa = empresa_or_404(empresa_id)
+    ajustes = isr_flujo_datos.cargar_ajustes(empresa_id)
+    pct = isr_flujo_datos.porcentaje_nomina_exenta(empresa_id, int(periodo[:4]))
+    eventos = isr_flujo_datos.cargar_eventos(empresa_id, empresa["rfc"], periodo)
+    resultado = isr_flujo.resumen(eventos, periodo, ajustes, pct)
+    registrar_evento(current_user["user_id"], "reporte_generado", empresa_id=empresa_id,
+                     metadata={"tipo": "isr_flujo", "periodo": periodo})
+    return _json({"empresa_id": empresa_id, "regimen": isr_flujo.aplicabilidad(empresa.get("regimen_fiscal")), **resultado})
+
+
+@router.get(_BASE + "/{periodo}/detalle")
+async def detalle_isr_flujo(
+    empresa_id: str,
+    periodo: str,
+    lado: Literal["ingreso", "deduccion"] = Query(...),
+    bloque: Literal["contado", "credito", "devoluciones", "nomina", "inversiones", "no_considerados"] = Query(...),
+    acumulado: bool = Query(False, description="true = acumulado del ejercicio hasta el periodo"),
+    pagina: int = Query(1, ge=1),
+    por_pagina: int = Query(50, ge=1, le=isr_flujo.MAX_POR_PAGINA),
+    current_user: dict = Depends(get_current_user),
+):
+    """Los CFDI que componen una cifra del flujo, con sus marcas y motivo."""
+    validar_acceso_empresa(empresa_id, current_user)
+    _periodo_o_422(periodo)
+    empresa = empresa_or_404(empresa_id)
+    ajustes = isr_flujo_datos.cargar_ajustes(empresa_id)
+    eventos = isr_flujo_datos.cargar_eventos(empresa_id, empresa["rfc"], periodo)
+    return _json(isr_flujo.detalle(eventos, periodo, lado, bloque, ajustes, pagina, por_pagina, acumulado))
