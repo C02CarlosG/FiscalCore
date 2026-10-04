@@ -1,0 +1,136 @@
+"""Router de cuenta (U1) con la base mockeada: validaciones, permisos y auditoría sin
+contraseñas."""
+from datetime import datetime
+
+import pytest
+from fastapi import HTTPException
+from fastapi.testclient import TestClient
+
+import backend.main_api as main
+from backend import db
+from backend.deps import get_current_user, limiter
+from backend.routers import cuenta
+
+client = TestClient(main.app)
+EMPRESA = "11111111-1111-1111-1111-111111111111"
+YO = "22222222-2222-2222-2222-222222222222"
+OTRO = "33333333-3333-3333-3333-333333333333"
+BASE = f"/api/v1/cuenta/empresas/{EMPRESA}/usuarios"
+
+
+def _miembro(uid, rol, dia):
+    return {"usuario_id": uid, "rol": rol, "created_at": datetime(2026, 1, dia), "email": f"{uid[:4]}@x.mx", "nombre": "N"}
+
+
+@pytest.fixture(autouse=True)
+def sesion(monkeypatch):
+    main.app.dependency_overrides[get_current_user] = lambda: {"user_id": YO}
+    monkeypatch.setattr(cuenta, "validar_acceso_empresa", lambda *a, **k: None)
+    limiter.reset()
+    yield
+    limiter.reset()
+    main.app.dependency_overrides.clear()
+
+
+def _base_falsa(monkeypatch, miembros, rol_plataforma="contador"):
+    ejecutado = []
+
+    def _one(sql, params=()):
+        if "SELECT rol FROM usuarios" in sql:
+            return {"rol": rol_plataforma}
+        if "FROM empresas" in sql:
+            return {"id": EMPRESA}
+        if "LOWER(email)" in sql:
+            return None
+        raise AssertionError(sql)
+
+    monkeypatch.setattr(db, "query_one", _one)
+    monkeypatch.setattr(db, "query_all", lambda sql, params=(): miembros)
+    monkeypatch.setattr(db, "execute", lambda sql, params=(), returning=False: ejecutado.append((sql, params)))
+    return ejecutado
+
+
+def test_sin_sesion_responde_401():
+    main.app.dependency_overrides.clear()
+    assert client.get(BASE).status_code == 401
+    assert client.post("/api/v1/cuenta/contrasena", json={"actual": "a", "nueva": "b"}).status_code == 401
+
+
+def test_sin_acceso_responde_403(monkeypatch):
+    def _negar(*a, **k):
+        raise HTTPException(status_code=403, detail="Sin acceso a esta empresa")
+
+    monkeypatch.setattr(cuenta, "validar_acceso_empresa", _negar)
+    _base_falsa(monkeypatch, [])
+    assert client.get(BASE).status_code == 403
+
+
+def test_admin_de_plataforma_entra_sin_ser_miembro(monkeypatch):
+    monkeypatch.setattr(cuenta, "validar_acceso_empresa", lambda *a, **k: pytest.fail("no debe exigir membresía"))
+    _base_falsa(monkeypatch, [_miembro(OTRO, "administrador", 1)], rol_plataforma="admin")
+    r = client.get(BASE)
+    assert r.status_code == 200
+    assert r.json()["puede_administrar"] is True
+    assert r.json()["mi_rol"] is None
+
+
+def test_lista_marca_al_primer_vinculado_como_administrador(monkeypatch):
+    _base_falsa(monkeypatch, [_miembro(YO, "contador", 1), _miembro(OTRO, "contador", 2)])
+    cuerpo = client.get(BASE).json()
+    assert (cuerpo["mi_rol"], cuerpo["puede_administrar"]) == ("administrador", True)
+    assert [(u["rol"], u["soy_yo"]) for u in cuerpo["usuarios"]] == [("administrador", True), ("contador", False)]
+
+
+def test_contador_no_puede_dar_de_alta(monkeypatch):
+    ejecutado = _base_falsa(monkeypatch, [_miembro(OTRO, "administrador", 1), _miembro(YO, "contador", 2)])
+    r = client.post(BASE, json={"email": "a@b.mx", "rol": "contador", "nombre": "A", "password_temporal": "12345678"})
+    assert r.status_code == 403
+    assert ejecutado == []
+
+
+@pytest.mark.parametrize("cuerpo,detalle", [
+    ({"email": "no-es-correo", "rol": "contador"}, "Correo"),
+    ({"email": "a@b.mx", "rol": "dueño"}, "rol"),
+    ({"email": "a@b.mx", "rol": "contador", "password_temporal": "12345678"}, "nombre"),
+    ({"email": "a@b.mx", "rol": "contador", "nombre": "A", "password_temporal": "corta"}, "8 caracteres"),
+])
+def test_alta_invalida_responde_422_sin_escribir(monkeypatch, cuerpo, detalle):
+    ejecutado = _base_falsa(monkeypatch, [_miembro(YO, "administrador", 1)])
+    r = client.post(BASE, json=cuerpo)
+    assert r.status_code == 422
+    assert detalle in r.json()["detail"]
+    assert ejecutado == []
+
+
+def test_no_se_degrada_al_ultimo_administrador(monkeypatch):
+    _base_falsa(monkeypatch, [_miembro(YO, "administrador", 1), _miembro(OTRO, "contador", 2)])
+    assert client.patch(f"{BASE}/{YO}", json={"rol": "contador"}).status_code == 409
+    assert client.delete(f"{BASE}/{YO}").status_code == 409
+    assert client.patch(f"{BASE}/44444444-4444-4444-4444-444444444444", json={"rol": "contador"}).status_code == 404
+
+
+def test_cambio_de_contrasena_audita_sin_contrasenas(monkeypatch):
+    from backend.deps import hash_password
+
+    auditado = []
+    monkeypatch.setattr(db, "query_one", lambda sql, params=(): {"password_hash": hash_password("Actual-123")})
+    monkeypatch.setattr(db, "execute", lambda *a, **k: None)
+    monkeypatch.setattr(cuenta, "registrar_evento", lambda *a, **k: auditado.append((a, k)))
+    r = client.post("/api/v1/cuenta/contrasena", json={"actual": "Actual-123", "nueva": "Nueva-123"})
+    assert r.status_code == 204
+    assert auditado and "Nueva-123" not in repr(auditado) and "Actual-123" not in repr(auditado)
+
+
+def test_contrasena_nueva_igual_a_la_actual(monkeypatch):
+    from backend.deps import hash_password
+
+    monkeypatch.setattr(db, "query_one", lambda sql, params=(): {"password_hash": hash_password("Actual-123")})
+    r = client.post("/api/v1/cuenta/contrasena", json={"actual": "Actual-123", "nueva": "Actual-123"})
+    assert r.status_code == 422
+
+
+def test_cambio_de_contrasena_limitado_a_5_por_minuto(monkeypatch):
+    monkeypatch.setattr(db, "query_one", lambda sql, params=(): None)
+    codigos = [client.post("/api/v1/cuenta/contrasena", json={"actual": "x", "nueva": "y" * 8}).status_code
+               for _ in range(6)]
+    assert codigos == [400] * 5 + [429]

@@ -23,6 +23,8 @@ servers:
 tags:
   - name: Información fiscal
     description: Constancia de situación fiscal y opinión de cumplimiento por empresa (F8)
+  - name: Cuenta
+    description: Contraseña del usuario y usuarios de cada empresa con su rol (U1)
   - name: Preferencias
     description: Orden y visibilidad de columnas de las tablas, por usuario
   - name: Sistema
@@ -3089,6 +3091,150 @@ paths:
         '404':
           $ref: '#/components/responses/NotFoundError'
 
+  /api/v1/cuenta/contrasena:
+    post:
+      operationId: cambiarContrasena
+      tags: [Cuenta]
+      summary: Cambiar la contraseña del usuario autenticado
+      description: Exige la contraseña actual. Límite de 5 intentos por minuto. U1, carril D.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [actual, nueva]
+              properties:
+                actual: { type: string }
+                nueva: { type: string, minLength: 8, maxLength: 128 }
+      responses:
+        '204':
+          description: Contraseña cambiada
+        '400':
+          description: La contraseña actual no es correcta
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '422':
+          description: Contraseña nueva inválida o igual a la actual
+        '429':
+          description: Demasiados intentos
+
+  /api/v1/cuenta/empresas/{empresa_id}/usuarios:
+    get:
+      operationId: listarUsuariosEmpresa
+      tags: [Cuenta]
+      summary: Usuarios con acceso a la empresa y su rol
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+      responses:
+        '200':
+          description: Usuarios de la empresa
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  mi_rol: { type: string, nullable: true, enum: [administrador, contador, null] }
+                  puede_administrar: { type: boolean }
+                  usuarios: { type: array, items: { $ref: '#/components/schemas/UsuarioEmpresa' } }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+    post:
+      operationId: altaUsuarioEmpresa
+      tags: [Cuenta]
+      summary: Dar acceso a la empresa (vincula una cuenta existente o crea una nueva)
+      description: |
+        Solo un administrador de la empresa (o de la plataforma). Si el correo no tiene
+        cuenta, se crea con `nombre` y `password_temporal` (8 caracteres o más).
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, rol]
+              properties:
+                email: { type: string }
+                rol: { type: string, enum: [administrador, contador] }
+                nombre: { type: string, nullable: true }
+                password_temporal: { type: string, nullable: true }
+      responses:
+        '201':
+          description: Acceso concedido
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  usuario: { $ref: '#/components/schemas/UsuarioEmpresa' }
+                  cuenta_creada: { type: boolean }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '409':
+          $ref: '#/components/responses/ConflictError'
+        '422':
+          $ref: '#/components/responses/UnprocessableError'
+
+  /api/v1/cuenta/empresas/{empresa_id}/usuarios/{usuario_id}:
+    patch:
+      operationId: cambiarRolUsuarioEmpresa
+      tags: [Cuenta]
+      summary: Cambiar el rol de un usuario en la empresa
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - { name: usuario_id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [rol]
+              properties:
+                rol: { type: string, enum: [administrador, contador] }
+      responses:
+        '200':
+          description: Rol cambiado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UsuarioEmpresa' }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '409':
+          description: La empresa se quedaría sin administrador
+        '422':
+          $ref: '#/components/responses/UnprocessableError'
+    delete:
+      operationId: quitarUsuarioEmpresa
+      tags: [Cuenta]
+      summary: Quitar el acceso a la empresa (no borra la cuenta)
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - { name: usuario_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '204':
+          description: Acceso retirado
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '409':
+          description: La empresa se quedaría sin administrador
+
 # ============================================================
 # COMPONENTS
 # ============================================================
@@ -4380,3 +4526,13 @@ components:
           nullable: true
           enum: [sentido_no_positivo, sentido_no_identificado, sin_fecha, vencida, null]
           description: Por qué la opinión no está vigente.
+
+    UsuarioEmpresa:
+      type: object
+      properties:
+        usuario_id: { type: string, format: uuid }
+        email: { type: string }
+        nombre: { type: string, nullable: true }
+        rol: { type: string, enum: [administrador, contador] }
+        desde: { type: string, format: date-time, nullable: true }
+        soy_yo: { type: boolean }
