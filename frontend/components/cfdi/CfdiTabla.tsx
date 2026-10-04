@@ -10,6 +10,7 @@ import { CfdiConceptos } from "@/components/cfdi/CfdiConceptos";
 import { ErrorState } from "@/components/shared/ErrorState";
 import { CfdiCelda, alineadaALaDerecha } from "@/components/cfdi/CfdiCelda";
 import { POR_PAGINA, type CfdiEstadoUrl } from "@/lib/cfdi-url";
+import { columnasVisibles, type ColumnaPreferida } from "@/lib/columnas-preferidas";
 import type { CfdiColumna, CfdiFila, CfdiListadoResponse } from "@/types/api";
 
 const ENTERO = new Intl.NumberFormat("es-MX");
@@ -25,12 +26,14 @@ function Esqueleto() {
 }
 
 /**
- * Tabla del listado: muestra las columnas visibles por defecto del catálogo, ordena y
+ * Tabla del listado: muestra las columnas visibles (preferencia del usuario o, sin ella,
+ * las del catálogo), ordena y
  * pagina en el servidor. No guarda estado: todo llega por propiedades y sube por callbacks.
  */
 export function CfdiTabla({
   empresaId,
   columnas,
+  preferencia,
   columnasConcepto,
   datos,
   cargando,
@@ -48,6 +51,8 @@ export function CfdiTabla({
 }: {
   empresaId: string;
   columnas: CfdiColumna[] | undefined;
+  /** Orden y visibilidad del usuario; sin ella, el catálogo manda. */
+  preferencia?: ColumnaPreferida[] | null;
   columnasConcepto: CfdiColumna[];
   datos: CfdiListadoResponse | undefined;
   cargando: boolean;
@@ -89,7 +94,7 @@ export function CfdiTabla({
     );
   }
 
-  const visibles = columnas.filter((c) => c.visible_por_defecto);
+  const visibles = columnasVisibles(columnas, preferencia);
   const totalPaginas = Math.max(1, Math.ceil(datos.total / porPagina));
   const desde = (pagina - 1) * porPagina + 1;
   const hasta = Math.min(datos.total, pagina * porPagina);

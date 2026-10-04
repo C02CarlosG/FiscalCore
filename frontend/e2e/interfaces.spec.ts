@@ -446,11 +446,11 @@ test("el listado ordena en el servidor y el orden sobrevive a recargar", async (
   await page.goto(`/empresas/${empresaId}/cfdi/emitidos?periodo=2026-09`);
   const primera = page.getByRole("cell", { name: /^Proveedor ficticio/ }).first();
 
-  await page.getByRole("button", { name: "Total" }).click();
+  await page.getByRole("button", { name: "Total", exact: true }).click();
   await expect(page).toHaveURL(/orden=total/);
   await expect(primera).toHaveText("Proveedor ficticio uno");
 
-  await page.getByRole("button", { name: "Total" }).click();
+  await page.getByRole("button", { name: "Total", exact: true }).click();
   await expect(page).toHaveURL(/dir=desc/);
   await expect(primera).toHaveText("Proveedor ficticio dos");
 
@@ -460,6 +460,110 @@ test("el listado ordena en el servidor y el orden sobrevive a recargar", async (
   // La tabla de totales también tiene un encabezado "Total": se acota al listado (la segunda tabla).
   await expect(page.getByRole("table").nth(1).getByRole("columnheader", { name: "Total", exact: true }))
     .toHaveAttribute("aria-sort", "descending");
+});
+
+test("las columnas elegidas se guardan en el servidor y sobreviven a recargar", async ({ page }) => {
+  // El servidor guarda por usuario: el mock conserva lo último que recibió.
+  let guardado: unknown = null;
+  await page.route("**/api/v1/preferencias/tablas/**", async (route) => {
+    const peticion = route.request();
+    if (peticion.method() === "PUT") guardado = peticion.postDataJSON().columnas;
+    if (peticion.method() === "DELETE") guardado = null;
+    await route.fulfill({
+      status: peticion.method() === "DELETE" ? 204 : 200,
+      contentType: "application/json",
+      body: peticion.method() === "DELETE" ? "" : JSON.stringify({ columnas: guardado }),
+    });
+  });
+
+  await page.goto(`/empresas/${empresaId}/cfdi/emitidos?periodo=2026-09`);
+  const tabla = page.getByRole("table").nth(1);
+  await expect(tabla.getByRole("columnheader", { name: "Folio" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Columnas", exact: true }).click();
+  const dialogo = page.getByRole("dialog", { name: "Columnas del listado" });
+  await dialogo.getByRole("checkbox", { name: "Folio" }).uncheck();
+  await dialogo.getByRole("button", { name: "Subir Total" }).click();
+  await dialogo.getByRole("button", { name: "Guardar" }).click();
+  await expect(dialogo).toBeHidden();
+
+  await expect(tabla.getByRole("columnheader", { name: "Folio" })).toHaveCount(0);
+  await page.reload();
+  await expect(tabla.getByRole("columnheader", { name: /Fecha/ })).toBeVisible();   // ya cargó
+  await expect(tabla.getByRole("columnheader", { name: "Folio" })).toHaveCount(0);
+  const cabeceras = await tabla.getByRole("columnheader").allTextContents();
+  const posicion = (texto: string) => cabeceras.findIndex((c) => c.includes(texto));
+  expect(posicion("Total")).toBeGreaterThanOrEqual(0);
+  expect(posicion("Total")).toBeLessThan(posicion("Nombre"));   // subió un lugar
+
+  await page.getByRole("button", { name: "Columnas", exact: true }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Restablecer" }).click();
+  await expect(tabla.getByRole("columnheader", { name: "Folio" })).toBeVisible();
+});
+
+test("el filtro avanzado va a la URL, manda al servidor y se puede quitar", async ({ page }) => {
+  let consultaFiltros: string | null = null;
+  await page.route("**/api/v1/empresas/*/cfdis?**", async (route) => {
+    consultaFiltros = new URL(route.request().url()).searchParams.get("filtros");
+    await route.fallback();
+  });
+
+  await page.goto(`/empresas/${empresaId}/cfdi/emitidos?periodo=2026-09`);
+  await page.getByRole("button", { name: "Filtro avanzado" }).click();
+  const dialogo = page.getByRole("dialog", { name: "Filtro avanzado" });
+  await dialogo.getByRole("button", { name: "Agregar filtro" }).click();
+  await dialogo.getByLabel("Campo").selectOption("total");
+  await dialogo.getByLabel("Operador").selectOption("mayor");
+  await expect(dialogo.getByRole("button", { name: "Aplicar" })).toBeDisabled();
+  await dialogo.getByLabel("Valor de Total").fill("1000");
+  await dialogo.getByRole("button", { name: "Aplicar" }).click();
+
+  const esperado = JSON.stringify([{ campo: "total", op: "mayor", valor: 1000 }]);
+  await expect(page).toHaveURL(new RegExp(`filtros=${encodeURIComponent(esperado).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+  await expect(page.getByLabel("1 filtros activos")).toBeVisible();
+  await expect.poll(() => consultaFiltros).toBe(esperado);   // la petición sale después del cambio de URL
+
+  await page.reload();
+  await expect(page.getByLabel("1 filtros activos")).toBeVisible();   // la vista se reproduce
+
+  await page.getByRole("button", { name: "Filtro avanzado" }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Quitar todos" }).click();
+  await expect(page).not.toHaveURL(/filtros=/);
+});
+
+test("Exportar a Excel descarga lo filtrado con las columnas visibles", async ({ page }) => {
+  let pedido: URLSearchParams | null = null;
+  await page.route("**/api/v1/empresas/*/cfdis/exportar**", async (route) => {
+    pedido = new URL(route.request().url()).searchParams;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      headers: { "Content-Disposition": 'attachment; filename="cfdi_emitidos_I_2026-09.xlsx"' },
+      body: "PK-contenido-de-prueba",
+    });
+  });
+
+  await page.goto(`/empresas/${empresaId}/cfdi/emitidos?periodo=2026-09&q=ficticio&pagina=1`);
+  const descarga = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Exportar a Excel" }).click();
+
+  expect((await descarga).suggestedFilename()).toBe("cfdi_emitidos_I_2026-09.xlsx");
+  expect(pedido!.get("columnas")).toBe("fecha_emision,folio,contraparte,total,estado");
+  expect(pedido!.get("q")).toBe("ficticio");
+  expect(pedido!.has("pagina")).toBe(false);
+});
+
+test("si el servidor rechaza la exportación se muestra el motivo", async ({ page }) => {
+  await page.route("**/api/v1/empresas/*/cfdis/exportar**", (route) =>
+    route.fulfill({
+      status: 422,
+      contentType: "application/json",
+      body: JSON.stringify({ detail: "El resultado tiene 60,000 CFDI y el máximo a exportar es 50,000" }),
+    }));
+
+  await page.goto(`/empresas/${empresaId}/cfdi/emitidos?periodo=2026-09`);
+  await page.getByRole("button", { name: "Exportar a Excel" }).click();
+  await expect(page.getByRole("alert").filter({ hasText: "60,000 CFDI" })).toBeVisible();
 });
 
 test("Nómina es una pestaña del listado, no una pantalla aparte", async ({ page }) => {

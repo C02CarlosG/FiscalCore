@@ -46,6 +46,9 @@ class FiltroInvalido(ValueError):
     """La consulta pide algo fuera del catálogo o con un valor mal formado."""
 
 
+MAX_FILAS_EXPORTACION = 50_000
+
+
 @dataclass
 class Consulta:
     direccion: str
@@ -323,6 +326,50 @@ def listar(empresa_id: str, rfc: str, c: Consulta) -> dict:
         "pagina": c.pagina,
         "por_pagina": c.por_pagina,
     }
+
+
+def exportar(empresa_id: str, rfc: str, c: Consulta, claves: Optional[list[str]]) -> dict:
+    """Todas las filas que cumplen los filtros (sin paginar), con las columnas pedidas
+    en el orden pedido. Responde ``FiltroInvalido`` si hay más de 50,000 filas o si
+    alguna clave no es una columna del catálogo."""
+    por_clave = {col.clave: col for col in columnas(c.direccion, c.tipo)}
+    if claves:
+        desconocidas = [k for k in claves if k not in por_clave]
+        if desconocidas or len(set(claves)) != len(claves):
+            raise FiltroInvalido(f"Columnas inválidas: {', '.join(desconocidas) or 'repetidas'}")
+        cols = [por_clave[k] for k in claves]
+    else:
+        cols = [col for col in por_clave.values() if col.visible]
+
+    desde, hasta = rango(c.periodo)
+    where, params = condiciones(c, empresa_id, rfc, desde=desde, hasta=hasta)
+    total = db.query_one(f"SELECT COUNT(*) AS n FROM cfdi c WHERE {where}", tuple(params))["n"]
+    if total > MAX_FILAS_EXPORTACION:
+        raise FiltroInvalido(
+            f"El resultado tiene {int(total):,} CFDI y el máximo a exportar es "
+            f"{MAX_FILAS_EXPORTACION:,}; acota el periodo o los filtros")
+
+    orden = por_clave[c.orden].sql
+    direccion = "DESC" if c.dir == "desc" else "ASC"
+    # Las columnas derivadas (descripciones de catálogo) se calculan en Python a partir
+    # de su origen: se piden todas las del catálogo y se recorta al final.
+    seleccion = ", ".join(f'{col.sql} AS "{col.clave}"' for col in por_clave.values() if col.sql)
+    filas = db.query_all(
+        f"""
+        WITH pagina AS (
+            SELECT c.id, ROW_NUMBER() OVER (ORDER BY {orden} {direccion} NULLS LAST, c.id) AS n
+            FROM cfdi c
+            WHERE {where}
+        )
+        SELECT {seleccion}
+        FROM pagina p
+        JOIN cfdi c ON c.id = p.id
+        {LATERALES}
+        ORDER BY p.n
+        """,
+        tuple(params),
+    )
+    return {"columnas": cols, "items": [_item(f) for f in filas], "total": int(total)}
 
 
 def _bloque(prefijo: str, encabezado: dict, impuestos: dict) -> dict:

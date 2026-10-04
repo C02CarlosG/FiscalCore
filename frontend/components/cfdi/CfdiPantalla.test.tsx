@@ -23,6 +23,20 @@ vi.mock("@/hooks/useCfdis", () => ({
   useCfdiResumen: vi.fn(),
 }));
 
+const preferencias: Record<string, unknown> = {};
+const guardarMutate = vi.fn();
+const restablecerMutate = vi.fn();
+const exportarMutate = vi.fn();
+vi.mock("@/hooks/usePreferenciaTabla", () => ({
+  usePreferenciaTabla: (vista: string) => ({ data: preferencias[vista] ?? null }),
+  useGuardarPreferenciaTabla: (vista: string) => ({ mutate: (...a: unknown[]) => guardarMutate(vista, ...a), isPending: false, isError: false }),
+  useRestablecerPreferenciaTabla: (vista: string) => ({ mutate: (...a: unknown[]) => restablecerMutate(vista, ...a), isPending: false, isError: false }),
+}));
+let exportarEstado: Record<string, unknown> = {};
+vi.mock("@/hooks/useExportarCfdi", () => ({
+  useExportarCfdi: () => ({ mutate: exportarMutate, isPending: false, isError: false, ...exportarEstado }),
+}));
+
 vi.mock("@/hooks/usePeriodos", () => ({
   usePeriodos: () => ({ data: { periodos: ["2026-09", "2026-08"] } }),
 }));
@@ -32,7 +46,7 @@ const col = (clave: string, etiqueta: string, tipo_dato: CfdiColumna["tipo_dato"
 });
 
 const catalogo = {
-  encabezado: [col("fecha_emision", "Fecha de expedición", "fecha"), col("total", "Total", "moneda")],
+  encabezado: [col("fecha_emision", "Fecha de expedición", "fecha"), col("total", "Total", "moneda"), col("serie", "Serie", "texto")],
   concepto: [{ ...col("descripcion", "Descripción", "texto"), grupo: "concepto" as const }],
 };
 
@@ -67,6 +81,11 @@ describe("CfdiPantalla", () => {
     window.localStorage.clear();
     busqueda = "periodo=2026-09";
     ruta = "/empresas/e1/cfdi/emitidos";
+    for (const k of Object.keys(preferencias)) delete preferencias[k];
+    guardarMutate.mockClear();
+    restablecerMutate.mockClear();
+    exportarMutate.mockClear();
+    exportarEstado = {};
     preparar();
   });
 
@@ -215,6 +234,106 @@ describe("CfdiPantalla", () => {
 
     expect(screen.getByRole("alert")).toHaveTextContent("No se pudieron cargar los totales.");
     expect(screen.getByText("05/09/2026")).toBeInTheDocument();
+  });
+
+  describe("columnas, filtro avanzado y exportación (F3.4)", () => {
+    it("aplica el orden y la visibilidad guardados por el usuario", () => {
+      preferencias["cfdi-emitidos-I"] = [
+        { clave: "total", visible: true }, { clave: "fecha_emision", visible: false }, { clave: "serie", visible: true },
+      ];
+      render(<CfdiPantalla direccion="emitidos" />);
+
+      const cabeceras = screen.getAllByRole("columnheader").map((c) => c.textContent).filter((t) => t);
+      expect(cabeceras.slice(-2)).toEqual(["Total", "Serie"]);
+      expect(screen.queryByRole("columnheader", { name: /Fecha de expedición/ })).not.toBeInTheDocument();
+    });
+
+    it("guarda por usuario y por pestaña desde el editor de columnas", async () => {
+      busqueda = "periodo=2026-09&tipo=E";
+      const user = userEvent.setup();
+      render(<CfdiPantalla direccion="recibidos" />);
+
+      await user.click(screen.getByRole("button", { name: "Columnas" }));
+      const dialogo = screen.getByRole("dialog", { name: "Columnas del listado" });
+      await user.click(within(dialogo).getByRole("button", { name: "Subir Total" }));
+      await user.click(within(dialogo).getByLabelText("Serie"));   // ocultar
+      await user.click(within(dialogo).getByRole("button", { name: "Guardar" }));
+
+      expect(guardarMutate).toHaveBeenCalledWith(
+        "cfdi-recibidos-E",
+        [{ clave: "total", visible: true }, { clave: "fecha_emision", visible: true }, { clave: "serie", visible: false }],
+        expect.anything(),
+      );
+    });
+
+    it("restablecer vuelve al catálogo", async () => {
+      const user = userEvent.setup();
+      render(<CfdiPantalla direccion="emitidos" />);
+
+      await user.click(screen.getByRole("button", { name: "Columnas" }));
+      await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Restablecer" }));
+
+      expect(restablecerMutate).toHaveBeenCalledWith("cfdi-emitidos-I", undefined, expect.anything());
+    });
+
+    it("las columnas de totales tienen su propia preferencia", async () => {
+      preferencias["cfdi-emitidos-I-totales"] = [{ clave: "total", visible: true }, { clave: "neto", visible: false }];
+      const user = userEvent.setup();
+      render(<CfdiPantalla direccion="emitidos" />);
+
+      expect(screen.queryByRole("columnheader", { name: "Neto" })).not.toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "Columnas de totales" }));
+      await user.click(within(screen.getByRole("dialog", { name: "Columnas de totales" })).getByRole("button", { name: "Guardar" }));
+
+      expect(guardarMutate).toHaveBeenCalledWith("cfdi-emitidos-I-totales", expect.any(Array), expect.anything());
+    });
+
+    it("aplicar el filtro avanzado lo escribe en la URL y el botón cuenta los activos", async () => {
+      const user = userEvent.setup();
+      const { unmount } = render(<CfdiPantalla direccion="emitidos" />);
+
+      await user.click(screen.getByRole("button", { name: "Filtro avanzado" }));
+      const dialogo = screen.getByRole("dialog", { name: "Filtro avanzado" });
+      await user.click(within(dialogo).getByRole("button", { name: "Agregar filtro" }));
+      await user.selectOptions(within(dialogo).getByLabelText("Campo"), "total");
+      await user.selectOptions(within(dialogo).getByLabelText("Operador"), "mayor");
+      expect(within(dialogo).getByRole("button", { name: "Aplicar" })).toBeDisabled();   // falta el valor
+      await user.type(within(dialogo).getByLabelText("Valor de Total"), "1000");
+      await user.click(within(dialogo).getByRole("button", { name: "Aplicar" }));
+
+      const filtros = JSON.stringify([{ campo: "total", op: "mayor", valor: 1000 }]);
+      expect(replaceMock).toHaveBeenCalledWith(
+        `/empresas/e1/cfdi/emitidos?periodo=2026-09&filtros=${encodeURIComponent(filtros)}`,
+        { scroll: false },
+      );
+      unmount();
+
+      busqueda = `periodo=2026-09&filtros=${encodeURIComponent(filtros)}`;
+      render(<CfdiPantalla direccion="emitidos" />);
+      expect(screen.getByLabelText("1 filtros activos")).toBeInTheDocument();
+    });
+
+    it("exporta lo filtrado con las columnas visibles en su orden", async () => {
+      preferencias["cfdi-emitidos-I"] = [
+        { clave: "total", visible: true }, { clave: "fecha_emision", visible: false }, { clave: "serie", visible: true },
+      ];
+      busqueda = "periodo=2026-09&q=abc";
+      const user = userEvent.setup();
+      render(<CfdiPantalla direccion="emitidos" />);
+
+      await user.click(screen.getByRole("button", { name: "Exportar a Excel" }));
+
+      expect(exportarMutate).toHaveBeenCalledWith({
+        estado: expect.objectContaining({ periodo: "2026-09", q: "abc", tipo: "I" }),
+        columnas: ["total", "serie"],
+      });
+    });
+
+    it("muestra el error de la exportación con su motivo", () => {
+      exportarEstado = { isError: true, error: new Error("El resultado tiene 60,000 CFDI y el máximo es 50,000") };
+      render(<CfdiPantalla direccion="emitidos" />);
+      expect(screen.getByRole("alert")).toHaveTextContent("60,000 CFDI");
+    });
   });
 
   describe("conceptos y visor", () => {
