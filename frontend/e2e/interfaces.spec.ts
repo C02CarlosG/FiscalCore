@@ -78,7 +78,7 @@ const ivaAnualInicio = {
   empresa_id: "empresa-demo",
   ejercicio: 2026,
   factor_prorrateo: 1,
-  iva_retenido_incluido: false,
+  iva_retenido_incluido: true,
   meses: Array.from({ length: 12 }, (_, i) => ({
     periodo: `2026-${String(i + 1).padStart(2, "0")}`,
     trasladado: { pue: 160 * (i + 1), ppd: 0, notas_credito: 0, total: 160 * (i + 1) },
@@ -86,7 +86,7 @@ const ivaAnualInicio = {
     resultado: { iva_retenido: 0, iva_por_pagar: 60 * (i + 1), saldo_a_cargo: 60 * (i + 1), saldo_a_favor: 0 },
   })),
   totales: { trasladado: 12480, acreditable: 7800, iva_retenido: 0, total_a_cargo: 4680, total_a_favor: 0 },
-  advertencias: [{ codigo: "retenciones", mensaje: "Aún no se incorporan las retenciones de IVA y el factor de prorrateo es 1.", cfdi: null }],
+  advertencias: [{ codigo: "prorrateo", mensaje: "El factor de prorrateo del acreditable es 1 (actividad 100 % gravada); la cédula de IVA acepta otro factor.", cfdi: null }],
 };
 const bloqueIva = (iva16: number, cfdi = 0) => ({
   cfdi, pagos: cfdi,
@@ -229,19 +229,25 @@ test.beforeEach(async ({ page }) => {
           ppd: { cobrado: 0, iva: 0 },
           notas_credito: { base: 0, iva: 0 },
           total: 0,
+          no_considerados: { cfdi: 0, iva: 0 },
+          reasignados: { cfdi: 0, iva: 0 },
         },
         acreditable: {
           pue: { base: 0, iva: 0 },
           ppd: { pagado: 0, iva: 0 },
           notas_credito: { base: 0, iva: 0 },
           excluido_efectivo: { iva: 0 },
+          no_considerados: { cfdi: 0, iva: 0 },
+          reasignados: { cfdi: 0, iva: 0 },
           bruto: 0,
           factor_prorrateo: 1,
           ajustado: 0,
         },
         iva_retenido: 0,
+        retenciones_a_enterar: 0,
         resultado: { iva_por_pagar: 0, saldo_a_cargo: 0, saldo_a_favor: 0 },
         comparativo_sat: { diot_iva_pagado: 0, diferencia: 0 },
+        advertencias: [],
       };
     } else if (/\/iva-flujo\/ajustes$/.test(path)) {
       body = route.request().method() === "GET" ? { items: [] } : { uuid: "cfdi-demo-001", accion: "excluir" };
@@ -353,7 +359,7 @@ test("el Inicio muestra ingresos y gastos, la gráfica de 12 meses y el IVA del 
   await expect(page.getByRole("table", { name: "Ingresos por mes" }).getByRole("row")).toHaveCount(14);
   await expect(page.getByRole("heading", { name: "IVA del ejercicio 2026" })).toBeVisible();
   await expect(page.getByRole("table", { name: "IVA trasladado cobrado por mes" })).toBeVisible();
-  await expect(page.getByRole("list", { name: "Advertencias del IVA" })).toContainText("factor de prorrateo es 1");
+  await expect(page.getByRole("list", { name: "Advertencias del IVA" })).toContainText("factor de prorrateo del acreditable es 1");
   await expect(page.getByText("Score fiscal del periodo")).toBeVisible();     // lo de riesgos se conserva
 });
 

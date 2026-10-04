@@ -70,7 +70,7 @@ describe("IvaAnual", () => {
     expect(within(lista).getAllByRole("listitem")).toHaveLength(2);
     expect(within(lista).getByText(/se estima por la proporción pagada/)).toBeInTheDocument();
     expect(within(lista).getByText("3 CFDI")).toBeInTheDocument();
-    expect(within(lista).getByText(/factor de prorrateo es 1/)).toBeInTheDocument();
+    expect(within(lista).getByText(/factor de prorrateo del acreditable es 1/)).toBeInTheDocument();
     expect(screen.queryByText(/coincide con la cédula/i)).not.toBeInTheDocument();
   });
 

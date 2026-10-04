@@ -162,3 +162,13 @@ Ejemplos de la revisión fiscal que deben salir exactos:
 8. Un periodo sin movimiento devuelve ceros en todas las tarjetas, no error.
 9. Usuario sin acceso a la empresa: 403; periodo, origen o dirección inválidos: 422; CFDI ajeno: 404.
 10. **Cuadre contra la referencia** (cifras de control: IVA trasladado cobrado 3,190,362.48 = contado 2,275,262.33 + crédito 915,100.15; IVA acreditable pagado 2,162,403.41; IVA a cargo 1,027,959.07; retenciones 3,786.75): requiere los CFDI reales de COPLASUR; se hace en el cierre de F0/F1 (carril B) y toda diferencia se explica por escrito en el PR sin ajustar el cálculo sin fundamento legal.
+
+## Notas de F5.3
+
+- **Reasignar un PPD mueve todas sus parcialidades.** El ajuste es por CFDI, no por pago: al reasignar
+  un PPD a otro periodo, todos sus pagos se contabilizan allí.
+- **CFDI sin desglose guardado** (anteriores a la migración 028): el IVA sale del encabezado y la base de
+  `subtotal − descuento − no objeto`, en la tasa que dicta iva/base (16 %, 8 % u otras). Se avisa con `sin_desglose`.
+- **Retención solo en el encabezado:** se usa y se marca `retencion_sin_desglose` (distinta de `descuadre_retencion`).
+- **Pendiente para F5.4:** tratar `equivalencia_sospechosa` como `sin_equivalencia` cuando el cociente con el
+  tipo de cambio salga de [0.5, 2], y avisos informativos para las marcas `anticipo` y `aplicacion_anticipo`.

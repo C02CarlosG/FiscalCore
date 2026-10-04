@@ -190,19 +190,21 @@ def test_iva_anual_septiembre_y_totales(entorno):
     anual = _get(entorno, "iva-anual", ejercicio=2026)
     sep = anual["meses"][8]
 
-    # PUE: 160 + 240 + 1.6 (USD sin convertir: F5) ; PPD: 160 × 580/1160 = 80 ; NC: 48
-    assert sep["trasladado"]["ppd"] == 80.0
-    # La cédula (y por tanto esta tabla) resta TODO egreso emitido, también el de aplicación de
-    # anticipo (forma de pago 30, IVA 320): 48 + 320. F5 lo corrige en ambas; ver el spec, "Limitaciones".
+    # Sin desglose guardado el motor usa el IVA del encabezado. Contado: 160 + 240 + 32 (1.6 USD × 20) +
+    # 800 (factura B) + 160 (el 30-sep) + 160 + 160 (los dos anticipos A, cobrados al facturarse) = 1712.
+    assert sep["trasladado"]["pue"] == 1712.0
+    assert sep["trasladado"]["ppd"] == 80.0                   # 160 × 580/1160 (REP sin desglose: aproximado)
+    # Notas de crédito: 48 y el egreso de aplicación de anticipo (forma de pago 30, IVA 320), que el
+    # motor sí resta: A + B − C deja el IVA de B (D-F5-3).
     assert sep["trasladado"]["notas_credito"] == 48.0 + 320.0
     assert sep["acreditable"]["bruto"] == 64.0 - 8.0
     assert sep["resultado"]["saldo_a_cargo"] > 0 and sep["resultado"]["saldo_a_favor"] == 0.0
     assert anual["totales"]["trasladado"] == round(sum(m["trasladado"]["total"] for m in anual["meses"]), 2)
-    assert anual["iva_retenido_incluido"] is False
+    assert anual["iva_retenido_incluido"] is True
     assert anual["totales"]["total_a_cargo"] == round(sum(m["resultado"]["saldo_a_cargo"] for m in anual["meses"]), 2)
     assert anual["totales"]["total_a_favor"] == round(sum(m["resultado"]["saldo_a_favor"] for m in anual["meses"]), 2)
     codigos = {a["codigo"] for a in anual["advertencias"]}
-    assert {"pago_proporcion", "moneda_extranjera", "anticipos", "retenciones"} <= codigos
+    assert {"sin_desglose", "aproximado", "prorrateo"} <= codigos
 
 
 def test_un_rep_cancelado_no_suma_ni_en_el_inicio_ni_en_la_cedula(entorno):
