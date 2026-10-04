@@ -238,6 +238,9 @@ def init_db() -> None:
         # 060 es idempotente — documentos_fiscales: constancia y opinión de cumplimiento en PDF (F8, carril D)
         _run_sql_file("060_documentos_fiscales.sql")
 
+        # 062 es idempotente — roles por empresa: administrador (el creador) y contador (U1, carril D)
+        _run_sql_file("062_roles_usuario_empresa.sql")
+
         # Seed inicial: usuario admin si la base aún no tiene usuarios
         _seed_admin()
 
