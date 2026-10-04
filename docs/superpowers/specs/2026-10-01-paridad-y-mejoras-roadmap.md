@@ -409,6 +409,7 @@ pausa.
 | Fecha | De → para | Qué se necesita | Estado |
 |---|---|---|---|
 | 2026-10-04 | D → B | Agregar `"informacion-fiscal": "Información fiscal"` al mapa del breadcrumb de `layout/Header.tsx` (hoy muestra "Empresas" en `/empresas/{id}/informacion-fiscal`) y `"informacion-fiscal"` a `SUB_RUTAS` de `layout/EmpresaSwitcher.tsx` (para conservar la pantalla al cambiar de empresa) | Hecho en el PR #30 (F2.3) |
+| 2026-10-04 | D → B | Lo mismo para la pantalla de V1: `"validaciones": "Validaciones de CFDI"` en el breadcrumb de `Header.tsx` y `"validaciones"` en `SUB_RUTAS` de `EmpresaSwitcher.tsx` | Pendiente |
 
 ## Riesgos
 
@@ -434,11 +435,12 @@ pausa.
 | F3 | A | F3.1, F3.2, F3.3 (PR #21), F3.4 (PR #24) y F3.5a extracción v2 (PR #27) integradas; siguen F3.5b (incluye el orden del nodo en la llave de `pagos_cfdi`, migración 041) y F3.6 | `docs/superpowers/specs/2026-10-02-f3-listado-cfdi-design.md` | `2026-10-02-f3-1-api-listado-cfdi.md`, `2026-10-03-f3-2-pantalla-cfdi.md`; un plan por entrega restante |
 | F4 | C | Integrada (PR #25); falta cuadrar con los CFDI reales de COPLASUR | `docs/superpowers/specs/2026-10-04-f4-inicio-design.md` | `docs/superpowers/plans/2026-10-04-f4-inicio.md` |
 | F5 | C | F5.1 (motor, API y ajustes, PR #29), F5.2 (pantalla y Excel, PR #32) y F5.3 (cédula e Inicio al motor nuevo, PR #35) integradas; F5.4 (REP completo: `ObjetoImpDR`, cuadre contra `ImpuestosP`/`Totales`, forma de pago del REP lista para cuando exista la columna) en revisión | `docs/superpowers/specs/2026-10-04-f5-iva-base-flujo-design.md` | `docs/superpowers/plans/2026-10-04-f5-1-motor-iva-flujo.md`, `2026-10-04-f5-2-pantalla-iva-flujo.md` |
-| F6, F7 | C | Pendiente | — | — |
+| F6 | C | F6.1 (catálogo de proveedores, migración 051, PR #38) integrada; F6.2 (DIOT por flujo) después; F6.3 (archivo de carga) espera el layout oficial del SAT, que el entorno no puede consultar | `docs/superpowers/specs/2026-10-04-f6-proveedores-diot-design.md` | un plan por entrega |
+| F7 | C | Pendiente | — | — |
 | F8 | D | Integrada (PR #31); falta probar con PDF reales | `docs/superpowers/specs/2026-10-04-f8-informacion-fiscal-design.md` | `docs/superpowers/plans/2026-10-04-f8-informacion-fiscal.md` |
 | M1, M4, M6 | A | Pendiente | — | — |
 | M3 | B | Pendiente |
-| V1 | D | En curso |
+| V1 | D | En revisión (PR D·V1) | `docs/superpowers/specs/2026-10-04-v1-validaciones-cfdi-design.md` | `docs/superpowers/plans/2026-10-04-v1-validaciones-cfdi.md` |
 | U1, M7 | D | Pendiente |
 | F3.6 | A | Pendiente (después de F3.5b) | — | — |
 | Punto de control de paridad | Coordinación | Pendiente: al terminar F5–F7 se recorre FiscalCore con Playwright contra las capturas y se cuadran las cifras de control | — | — |
