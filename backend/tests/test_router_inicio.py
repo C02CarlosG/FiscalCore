@@ -68,7 +68,7 @@ def test_iva_anual_delega_con_ejercicio_y_periodo(con_acceso, monkeypatch):
     d = r.json()
     assert d["ejercicio"] == 2026 and len(d["meses"]) == 12
     assert d["totales"]["total_a_cargo"] == 0.0 and d["totales"]["total_a_favor"] == 0.0
-    assert d["iva_retenido_incluido"] is False
+    assert d["iva_retenido_incluido"] is True
     assert d["advertencias"] == [{"codigo": "x", "mensaje": "aviso", "cfdi": 1}]
 
 

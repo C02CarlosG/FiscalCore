@@ -11,7 +11,7 @@ from openpyxl.styles import Font
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
-from .. import db, deducciones, isr, iva
+from .. import cedula_iva as cedula_iva_motor, db, deducciones, isr, iva, iva_flujo, iva_flujo_datos
 from ..auditoria import registrar_evento
 from ..deps import get_current_user, validar_acceso_empresa, serializar
 
@@ -223,42 +223,14 @@ def _floats(obj):
 
 
 def _cargar_datos_cedula_iva(empresa_id: str, periodo: str):
-    """Carga de DB los insumos de la cédula: RFC, CFDIs candidatos, pagos del
-    periodo y el IVA acreditable devengado (base DIOT) para el comparativo."""
+    """Carga de DB los insumos de la cédula: los eventos de IVA del motor por flujo (``iva_flujo``),
+    los ajustes del contador y el IVA acreditable devengado (base DIOT) para el comparativo."""
     emp = db.query_one("SELECT rfc FROM empresas WHERE id = %s", (empresa_id,))
     if not emp:
         raise HTTPException(status_code=404, detail="Empresa no encontrada")
-    rfc = emp["rfc"]
 
-    cfdis = db.query_all(
-        """
-        SELECT uuid, tipo_comprobante, metodo_pago, estado, es_anticipo_sat,
-               rfc_emisor, rfc_receptor, forma_pago, fecha_emision,
-               subtotal, descuento, total, iva_trasladado
-        FROM cfdi
-        WHERE empresa_id = %s
-          AND estado = 'vigente'
-          AND (
-                metodo_pago = 'PPD'
-                OR (fecha_emision >= (%s || '-01')::date
-                    AND fecha_emision  < ((%s || '-01')::date + INTERVAL '1 month'))
-              )
-        """,
-        (empresa_id, periodo, periodo),
-    )
-
-    pagos = db.query_all(
-        """
-        SELECT pr.cfdi_uuid, pr.importe_pagado, p.fecha_pago
-        FROM pagos_cfdi p
-        JOIN pagos_relaciones pr ON pr.pago_id = p.id
-        JOIN cfdi cp ON cp.id = p.cfdi_id AND cp.estado = 'vigente'   -- un REP cancelado no produce efectos
-        WHERE p.empresa_id = %s
-          AND p.fecha_pago >= (%s || '-01')::date
-          AND p.fecha_pago  < ((%s || '-01')::date + INTERVAL '1 month')
-        """,
-        (empresa_id, periodo, periodo),
-    )
+    ajustes = iva_flujo_datos.cargar_ajustes(empresa_id)
+    eventos = iva_flujo_datos.cargar_eventos(empresa_id, emp["rfc"], periodo, ajustes)
 
     diot = db.query_one(
         """
@@ -277,7 +249,7 @@ def _cargar_datos_cedula_iva(empresa_id: str, periodo: str):
         (empresa_id, periodo, periodo),
     )
     diot_iva = (diot["iva"] if diot and diot["iva"] is not None else Decimal("0"))
-    return rfc, cfdis, pagos, Decimal(str(diot_iva))
+    return eventos, ajustes, Decimal(str(diot_iva))
 
 
 @router.get("/api/v1/empresas/{empresa_id}/cedula-iva/{periodo}")
@@ -287,42 +259,21 @@ async def cedula_iva(
     factor: float = 1.0,   # factor de prorrateo (Art. 5-V); 1.0 = 100% gravado
     current_user: dict = Depends(get_current_user),
 ):
-    """Cédula mensual de IVA por flujo de efectivo: trasladado, acreditable,
-    prorrateo, resultado del periodo y comparativo contra el IVA devengado (DIOT)."""
+    """Cédula mensual de IVA por flujo de efectivo: trasladado, acreditable, prorrateo, retenciones,
+    resultado del periodo y comparativo contra el IVA devengado (DIOT). Sale del mismo motor que la
+    pantalla de IVA base flujo y la tabla del Inicio (``iva_flujo``), así que las tres dan la misma cifra."""
     if not _PERIODO_RE.match(periodo):
         raise HTTPException(status_code=422, detail="periodo inválido; formato esperado YYYY-MM")
+    if not 0 <= factor <= 1:
+        raise HTTPException(status_code=422, detail="el factor de prorrateo debe estar entre 0 y 1")
     validar_acceso_empresa(empresa_id, current_user)
 
-    rfc, cfdis, pagos, diot_iva = _cargar_datos_cedula_iva(empresa_id, periodo)
-
-    trasladado = iva.iva_trasladado(cfdis, pagos, periodo, rfc)
-    acred = iva.iva_acreditable(cfdis, pagos, periodo, rfc)
-    factor_dec = Decimal(str(factor))
-    ajustado = iva.aplicar_prorrateo(acred["bruto"], factor_dec)
-
-    iva_retenido = Decimal("0.00")  # v1: retenciones no computadas todavía
-    por_pagar = (trasladado["total"] - ajustado - iva_retenido).quantize(Decimal("0.01"))
-
-    resultado = {
-        "iva_por_pagar": por_pagar,
-        "saldo_a_cargo": por_pagar if por_pagar > 0 else Decimal("0.00"),
-        "saldo_a_favor": -por_pagar if por_pagar < 0 else Decimal("0.00"),
-    }
+    eventos, ajustes, diot_iva = _cargar_datos_cedula_iva(empresa_id, periodo)
+    resumen = iva_flujo.resumen(eventos, periodo, ajustes, Decimal(str(factor)))
 
     registrar_evento(current_user["user_id"], "reporte_generado", empresa_id=empresa_id, metadata={"tipo": "cedula_iva", "periodo": periodo})
 
-    return _floats({
-        "empresa_id": empresa_id,
-        "periodo": periodo,
-        "trasladado": trasladado,
-        "acreditable": {**acred, "factor_prorrateo": factor_dec, "ajustado": ajustado},
-        "iva_retenido": iva_retenido,
-        "resultado": resultado,
-        "comparativo_sat": {
-            "diot_iva_pagado": diot_iva,
-            "diferencia": (ajustado - diot_iva).quantize(Decimal("0.01")),
-        },
-    })
+    return _floats({"empresa_id": empresa_id, "periodo": periodo, **cedula_iva_motor.desde_motor(resumen, diot_iva)})
 
 
 # ---------------------------------------------------------------------------

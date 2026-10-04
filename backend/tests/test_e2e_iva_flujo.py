@@ -263,7 +263,7 @@ def test_acreditable_excluye_efectivo_y_uso_no_deducible_y_los_lista(entorno):
 
     # 20 (40) + 25 (40) + REP 24 de septiembre (80); 21 (S01), 22 y 26 (efectivo) no
     assert r["total"]["iva"]["total"] == 160.0
-    assert r["no_considerados"] == {"cfdi": 3, "iva": 856.0}
+    assert (r["no_considerados"]["cfdi"], r["no_considerados"]["iva"]) == (3, 856.0)
     motivos = {i["uuid"]: i["motivo"] for i in _detalle(entorno, "2026-09", "acreditable", "no_considerados")["items"]}
     assert motivos == {_uuid(21): "uso_no_deducible", _uuid(22): "efectivo", _uuid(26): "efectivo"}
 
@@ -305,7 +305,7 @@ def test_excluir_un_cfdi_lo_saca_lo_audita_y_se_puede_deshacer(entorno):
     despues = _resumen(entorno)["trasladado"]
     assert despues["total"]["iva"]["total"] == antes - 800
     # el CFDI excluido (800) y el cobro en USD sin equivalencia (0), que nunca suma
-    assert despues["no_considerados"] == {"cfdi": 2, "iva": 800.0}
+    assert (despues["no_considerados"]["cfdi"], despues["no_considerados"]["iva"]) == (2, 800.0)
     fila = next(i for i in _detalle(entorno, "2026-09", "trasladado", "no_considerados")["items"] if i["uuid"] == _uuid(41))
     assert fila["motivo"] == "manual" and fila["ajuste"]["motivo"] == "factura duplicada"
     n = db.query_one("SELECT COUNT(*) AS n FROM auditoria WHERE accion = 'iva_ajuste' AND entidad_id = %s", (_uuid(41),))

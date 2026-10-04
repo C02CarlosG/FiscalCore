@@ -180,6 +180,23 @@ def _evento(doc: dict, direccion: str, origen: str, fecha_efecto: Any, d: dict, 
     }
 
 
+def _cuadre_de_retencion(doc: dict, d: dict, k: Decimal) -> set:
+    """Compara la retención de IVA del desglose con la del encabezado (``iva_retenido``). Sin filas de
+    retención pero con retención en el encabezado, se usa el encabezado; si ambas existen y difieren
+    más de un centavo por fila, queda marcada (manda el desglose, que trae la tasa)."""
+    encabezado = _dec(doc.get("iva_retenido"))
+    filas = [i for i in doc.get("impuestos") or [] if i.get("impuesto") == IVA and i.get("ambito") == "retencion"]
+    if not filas:
+        if encabezado != 0:
+            d["retencion"] = encabezado * k
+            return {"descuadre_retencion"}
+        return set()
+    suma = sum((_dec(i.get("importe")) for i in filas), CERO)
+    if abs(suma - encabezado) > TOLERANCIA_DESCUADRE * len(filas):
+        return {"descuadre_retencion"}
+    return set()
+
+
 def _desglose_de_documento(doc: dict, k: Decimal) -> tuple[dict, Decimal, set]:
     """Desglose del documento por ``k`` (pesos o proporción de un pago), su IVA total y las marcas.
 
@@ -190,6 +207,7 @@ def _desglose_de_documento(doc: dict, k: Decimal) -> tuple[dict, Decimal, set]:
     marcas: set = set()
     filas = [i for i in doc.get("impuestos") or [] if i.get("impuesto") == IVA and i.get("ambito") == "traslado"]
     d = escalar(desglose(doc.get("impuestos") or [], doc.get("no_objeto")), k)
+    marcas |= _cuadre_de_retencion(doc, d, k)
     encabezado = _dec(doc.get("iva_trasladado"))
     if not filas:
         if encabezado != 0:
@@ -279,6 +297,9 @@ def iva_de_pago(pago: dict, doc: dict) -> tuple[dict, Decimal, set]:
     f = _factor_del_pago(pago, doc)
     if f is None:
         return _desglose_vacio(), CERO, {"sin_equivalencia"}
+    tc_doc = _tc_documento(doc)
+    if tc_doc is not None and not (Decimal("0.5") <= f / tc_doc <= Decimal("2")):
+        marcas.add("equivalencia_sospechosa")      # el factor a pesos se aleja del tipo de cambio del CFDI
     if pago.get("impuestos_dr"):
         d = escalar(desglose(pago["impuestos_dr"]), f)
         return d, d["iva"]["total"], marcas
@@ -382,6 +403,8 @@ MENSAJES = {
     "sin_equivalencia": "Hay pagos en otra moneda sin equivalencia del documento: no se suman, falta el tipo de cambio.",
     "sin_tipo_cambio": "Hay CFDI en moneda extranjera sin tipo de cambio: no se suman.",
     "sin_proporcion": "Hay pagos de documentos con total en cero: no se puede calcular su IVA.",
+    "descuadre_retencion": "La retención de IVA del desglose no coincide con la del encabezado.",
+    "equivalencia_sospechosa": "Hay pagos cuya equivalencia del documento parece invertida respecto al tipo de cambio del CFDI: revisa esos renglones.",
     "forma_pago_rep": "La forma de pago del REP no se guarda: un pago en efectivo de una factura a crédito no se detecta como no acreditable.",
 }
 _ORDEN_ADVERTENCIAS = tuple(MENSAJES)
@@ -392,6 +415,7 @@ class _Bloque:
         self.bases = {k: CERO for k in CLAVES_TASA}
         self.iva = {"16": CERO, "8": CERO, "otras": CERO, "total": CERO}
         self.retenciones = CERO
+        self.importe = CERO
         self.docs: set = set()
         self.eventos = 0
 
@@ -402,6 +426,7 @@ class _Bloque:
             self.iva[k] += signo * ev["iva"][k]
         self.iva["total"] += signo * ev["iva_total"]
         self.retenciones += signo * ev["retencion"]
+        self.importe += ev.get("importe_pagado") or CERO
         self.docs.add(llave(ev["uuid"]))
         self.eventos += 1
 
@@ -412,6 +437,7 @@ class _Bloque:
             "bases": {k: _q(v) for k, v in self.bases.items()},
             "iva": {k: _q(v) for k, v in self.iva.items()},
             "retenciones": _q(self.retenciones),
+            "importe_pagado": _q(self.importe),     # lo cobrado o pagado en pesos (crédito); 0 en los demás orígenes
             "total": _q(self.iva["total"]),
         }
 
@@ -456,6 +482,7 @@ def resumen(eventos: list[dict], periodo: str, ajustes: dict, factor: Decimal = 
         origenes = {o: _Bloque() for o in ORIGENES}
         docs_total: set = set()
         fuera = {"no_considerados": [set(), CERO], "reasignados": [set(), CERO]}
+        por_motivo: dict[str, list] = {}
         retencion_que_se_entera = CERO       # retención de CFDI no acreditables que igual se entera
         for ev in eventos:
             if ev["direccion"] != direccion:
@@ -476,6 +503,10 @@ def resumen(eventos: list[dict], periodo: str, ajustes: dict, factor: Decimal = 
                 clave = "reasignados" if kind == "reasignado" else "no_considerados"
                 fuera[clave][0].add(llave(ev["uuid"]))
                 fuera[clave][1] += _signo(ev) * ev["iva_total"]
+                if kind == "no_considerado":
+                    acum = por_motivo.setdefault(estado[1], [set(), CERO])
+                    acum[0].add(llave(ev["uuid"]))
+                    acum[1] += _signo(ev) * ev["iva_total"]
                 if kind == "no_considerado" and estado[1] in MOTIVOS_QUE_CONSERVAN_RETENCION:
                     retencion_que_se_entera += _signo(ev) * ev["retencion"]
         publicos = {o: b.publico() for o, b in origenes.items()}
@@ -487,12 +518,17 @@ def resumen(eventos: list[dict], periodo: str, ajustes: dict, factor: Decimal = 
             "bases": s["bases"],
             "iva": s["iva"],
             "retenciones": s["retenciones"],
+            "importe_pagado": publicos["credito"]["importe_pagado"],
             "total": s["iva"]["total"],
         }
         salida = {
             "origenes": publicos,
             "total": bloque_total,
-            "no_considerados": {"cfdi": len(fuera["no_considerados"][0]), "iva": _q(fuera["no_considerados"][1])},
+            "no_considerados": {
+                "cfdi": len(fuera["no_considerados"][0]),
+                "iva": _q(fuera["no_considerados"][1]),
+                "por_motivo": {m: {"cfdi": len(v[0]), "iva": _q(v[1])} for m, v in por_motivo.items()},
+            },
             "reasignados": {"cfdi": len(fuera["reasignados"][0]), "iva": _q(fuera["reasignados"][1])},
         }
         if direccion == "acreditable":

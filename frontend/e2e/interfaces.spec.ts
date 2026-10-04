@@ -78,7 +78,7 @@ const ivaAnualInicio = {
   empresa_id: "empresa-demo",
   ejercicio: 2026,
   factor_prorrateo: 1,
-  iva_retenido_incluido: false,
+  iva_retenido_incluido: true,
   meses: Array.from({ length: 12 }, (_, i) => ({
     periodo: `2026-${String(i + 1).padStart(2, "0")}`,
     trasladado: { pue: 160 * (i + 1), ppd: 0, notas_credito: 0, total: 160 * (i + 1) },
@@ -86,7 +86,7 @@ const ivaAnualInicio = {
     resultado: { iva_retenido: 0, iva_por_pagar: 60 * (i + 1), saldo_a_cargo: 60 * (i + 1), saldo_a_favor: 0 },
   })),
   totales: { trasladado: 12480, acreditable: 7800, iva_retenido: 0, total_a_cargo: 4680, total_a_favor: 0 },
-  advertencias: [{ codigo: "retenciones", mensaje: "Aún no se incorporan las retenciones de IVA y el factor de prorrateo es 1.", cfdi: null }],
+  advertencias: [{ codigo: "prorrateo", mensaje: "El factor de prorrateo del acreditable es 1 (actividad 100 % gravada); la cédula de IVA acepta otro factor.", cfdi: null }],
 };
 const filasCfdi = [
   { uuid: "cfdi-demo-001", fecha_emision: "2026-09-01T10:00:00", folio: "001", contraparte: "Proveedor ficticio uno", total: 1250, estado: "vigente" },
@@ -310,7 +310,7 @@ test("el Inicio muestra ingresos y gastos, la gráfica de 12 meses y el IVA del 
   await expect(page.getByRole("table", { name: "Ingresos por mes" }).getByRole("row")).toHaveCount(14);
   await expect(page.getByRole("heading", { name: "IVA del ejercicio 2026" })).toBeVisible();
   await expect(page.getByRole("table", { name: "IVA trasladado cobrado por mes" })).toBeVisible();
-  await expect(page.getByRole("list", { name: "Advertencias del IVA" })).toContainText("factor de prorrateo es 1");
+  await expect(page.getByRole("list", { name: "Advertencias del IVA" })).toContainText("factor de prorrateo del acreditable es 1");
   await expect(page.getByText("Score fiscal del periodo")).toBeVisible();     // lo de riesgos se conserva
 });
 

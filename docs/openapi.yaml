@@ -1475,9 +1475,9 @@ paths:
       summary: IVA del ejercicio mes por mes (flujo de efectivo)
       description: |
         Trasladado cobrado, acreditable pagado y resultado de cada mes, calculados con
-        las mismas funciones que la cedula de IVA (`/cedula-iva/{periodo}`), por lo que
-        coinciden con ella. Hasta que se incorporen las retenciones el IVA retenido es 0
-        y el factor de prorrateo es 1 (`iva_retenido_incluido: false`). Con `periodo`,
+        el mismo motor (`iva_flujo`) que la cedula de IVA (`/cedula-iva/{periodo}`) y la
+        pantalla de IVA base flujo, por lo que coinciden con ellas. Incluye las retenciones de
+        IVA a favor (`iva_retenido_incluido: true`); el factor de prorrateo es 1. Con `periodo`,
         los meses posteriores salen en cero. `totales` trae `total_a_cargo` y `total_a_favor`
         por separado: no se compensa un mes a favor contra otro a cargo (LIVA 6).
       parameters:

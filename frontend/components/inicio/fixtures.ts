@@ -35,7 +35,7 @@ export const ivaAnual = (): InicioIvaAnual => ({
   empresa_id: "e1",
   ejercicio: 2026,
   factor_prorrateo: 1,
-  iva_retenido_incluido: false,
+  iva_retenido_incluido: true,
   meses: Array.from({ length: 12 }, (_, i) => {
     const traslado = 160 * (i + 1);
     const acred = 100 * (i + 1);
@@ -54,6 +54,6 @@ export const ivaAnual = (): InicioIvaAnual => ({
   totales: { trasladado: 160 * 78, acreditable: 100 * 78, iva_retenido: 0, total_a_cargo: 60 * 78, total_a_favor: 0 },
   advertencias: [
     { codigo: "pago_proporcion", mensaje: "El IVA de los cobros y pagos de facturas a crédito se estima por la proporción pagada.", cfdi: 3 },
-    { codigo: "retenciones", mensaje: "Aún no se incorporan las retenciones de IVA y el factor de prorrateo es 1.", cfdi: null },
+    { codigo: "prorrateo", mensaje: "El factor de prorrateo del acreditable es 1 (actividad 100 % gravada); la cédula de IVA acepta otro factor.", cfdi: null },
   ],
 });

@@ -178,62 +178,69 @@ def test_iva_anual_totales_suman_los_meses():
         "trasladado": D("210.00"), "acreditable": D("180.00"), "iva_retenido": D("5.00"),
         "total_a_cargo": D("60.00"), "total_a_favor": D("35.00"),
     }
-    assert r["iva_retenido_incluido"] is False and r["factor_prorrateo"] == D("1")
+    assert r["iva_retenido_incluido"] is True and r["factor_prorrateo"] == D("1")
 
 
-# ── Forma de lo que devuelve iva.py ──────────────────────────────────────────
+# ── Forma de lo que devuelve el motor iva_flujo ──────────────────────────────
 
-def test_aplanar_iva_toma_el_iva_de_cada_renglon_de_la_cedula():
-    traslado = {"pue": {"base": D("1000"), "iva": D("160")}, "ppd": {"cobrado": D("580"), "iva": D("80")},
-                "notas_credito": {"base": D("300"), "iva": D("48")}, "total": D("192")}
-    acreditable = {"pue": {"base": D("400"), "iva": D("64")}, "ppd": {"pagado": D("0"), "iva": D("0")},
-                   "notas_credito": {"base": D("50"), "iva": D("8")}, "excluido_efectivo": {"iva": D("5")},
-                   "bruto": D("56")}
-
-    r = inicio.aplanar_iva("2026-09", traslado, acreditable, D("56"), D("0"))
-
-    assert r["periodo"] == "2026-09"
-    assert r["trasladado"] == {"pue": D("160"), "ppd": D("80"), "notas_credito": D("48"), "total": D("192")}
-    assert r["acreditable"] == {"pue": D("64"), "ppd": D("0"), "notas_credito": D("8"),
-                                "excluido_efectivo": D("5"), "bruto": D("56"), "ajustado": D("56")}
-    assert r["iva_retenido"] == D("0")
+RFC_E = "AAA010101AAA"
 
 
-def test_el_resultado_del_aplanado_se_compone_sin_error():
-    traslado = {"pue": {"base": D("1000"), "iva": D("160")}, "ppd": {"cobrado": D("0"), "iva": D("0")},
-                "notas_credito": {"base": D("0"), "iva": D("0")}, "total": D("160")}
-    acreditable = {"pue": {"base": D("0"), "iva": D("0")}, "ppd": {"pagado": D("0"), "iva": D("0")},
-                   "notas_credito": {"base": D("0"), "iva": D("0")}, "excluido_efectivo": {"iva": D("0")}, "bruto": D("0")}
+def _doc_motor(uuid, emisor, receptor, fecha, base, **kw):
+    from backend import iva_flujo  # noqa: F401
+    iva_ = D(str(base)) * D("0.16")
+    d = dict(uuid=uuid, tipo_comprobante="I", metodo_pago="PUE", forma_pago="03", uso_cfdi="G03", estado="vigente",
+             es_anticipo_sat=False, rfc_emisor=emisor, nombre_emisor="E", rfc_receptor=receptor, nombre_receptor="R",
+             fecha_emision=fecha, subtotal=D(str(base)), descuento=D("0"), total=D(str(base)) + iva_,
+             iva_trasladado=iva_, iva_retenido=D("0"), moneda="MXN", tipo_cambio=D("1"), no_objeto=D("0"),
+             impuestos=[{"ambito": "traslado", "impuesto": "002", "tipo_factor": "Tasa", "tasa_o_cuota": D("0.16"),
+                         "base": D(str(base)), "importe": iva_}])
+    d.update(kw)
+    return d
 
-    r = inicio.componer_iva_anual(2026, [inicio.aplanar_iva("2026-01", traslado, acreditable, D("0"), D("0"))], None)
 
-    assert r["meses"][0]["resultado"]["iva_por_pagar"] == D("160.00")
-
-
-# ── Contra las funciones reales de iva.py (sin DB) ───────────────────────────
-
-def test_aplanar_iva_con_la_salida_real_de_iva_py():
+def _resumen_septiembre():
     from datetime import date
 
-    from backend import iva
+    from backend import iva_flujo
 
-    rfc = "AAA010101AAA"
-    cfdis = [
-        {"uuid": "U1", "tipo_comprobante": "I", "metodo_pago": "PUE", "estado": "vigente", "es_anticipo_sat": False,
-         "rfc_emisor": rfc, "rfc_receptor": "XAXX010101000", "forma_pago": "03", "fecha_emision": date(2026, 9, 10),
-         "subtotal": D("1000"), "descuento": D("0"), "total": D("1160"), "iva_trasladado": D("160")},
-        {"uuid": "U2", "tipo_comprobante": "I", "metodo_pago": "PUE", "estado": "vigente", "es_anticipo_sat": False,
-         "rfc_emisor": "PRO010101AAA", "rfc_receptor": rfc, "forma_pago": "03", "fecha_emision": date(2026, 9, 11),
-         "subtotal": D("400"), "descuento": D("0"), "total": D("464"), "iva_trasladado": D("64")},
-    ]
-    t = iva.iva_trasladado(cfdis, [], "2026-09", rfc)
-    a = iva.iva_acreditable(cfdis, [], "2026-09", rfc)
+    docs = [_doc_motor("U1", RFC_E, "XAXX010101000", date(2026, 9, 10), 1000),
+            _doc_motor("U2", "PRO010101AAA", RFC_E, date(2026, 9, 11), 400)]
+    eventos = [e for d in docs for e in iva_flujo.eventos_de_documento(d, RFC_E)]
+    return iva_flujo.resumen(eventos, "2026-09", {}, D("1"))
 
-    mes = inicio.aplanar_iva("2026-09", t, a, iva.aplicar_prorrateo(a["bruto"], D("1")), D("0"))
+
+def test_iva_mes_desde_motor_toma_el_iva_de_cada_origen():
+    mes = inicio.iva_mes_desde_motor(_resumen_septiembre())
+
+    assert mes["periodo"] == "2026-09"
+    assert mes["trasladado"]["pue"] == D("160.00") and mes["trasladado"]["total"] == D("160.00")
+    assert mes["acreditable"]["pue"] == D("64.00") and mes["acreditable"]["ajustado"] == D("64.00")
+    assert mes["iva_retenido"] == D("0.00")
+
+
+def test_el_mes_del_motor_se_compone_con_el_iva_anual():
+    mes = inicio.iva_mes_desde_motor(_resumen_septiembre())
     r = inicio.componer_iva_anual(2026, [mes], None)["meses"][8]
 
     assert r["trasladado"]["total"] == D("160.00") and r["acreditable"]["ajustado"] == D("64.00")
     assert r["resultado"]["iva_por_pagar"] == D("96.00")
+
+
+def test_advertencias_desde_motor_siempre_avisan_del_prorrateo():
+    a = inicio.advertencias_desde_motor([_resumen_septiembre()])
+
+    assert [x["codigo"] for x in a] == ["prorrateo"]
+    assert a[0]["cfdi"] is None and a[0]["mensaje"]
+
+
+def test_advertencias_desde_motor_suman_los_cfdi_de_cada_mes():
+    r1 = {"advertencias": [{"codigo": "moneda_extranjera", "mensaje": "m", "cfdi": 2}]}
+    r2 = {"advertencias": [{"codigo": "moneda_extranjera", "mensaje": "m", "cfdi": 3}]}
+
+    a = {x["codigo"]: x["cfdi"] for x in inicio.advertencias_desde_motor([r1, r2])}
+
+    assert a == {"moneda_extranjera": 5, "prorrateo": None}
 
 
 def test_siguiente_mes_cambia_de_ejercicio_en_diciembre():
@@ -260,32 +267,3 @@ def test_el_acumulado_suma_los_meses_ya_redondeados():
 
     assert [x["ingresos"]["neto"] for x in r["meses"][-3:]] == [D("0.01")] * 3
     assert r["ingresos"]["acumulado"]["neto"] == D("0.03")           # 3 × 0.01, no 0.015 redondeado a 0.02
-
-
-# ── Advertencias del IVA anual ───────────────────────────────────────────────
-
-def _c(**kw):
-    base = {"uuid": "U", "tipo_comprobante": "I", "estado": "vigente", "moneda": "MXN", "iva_trasladado": D("160"),
-            "es_anticipo_sat": False, "forma_pago": "03"}
-    base.update(kw)
-    return base
-
-
-def test_advertencias_siempre_avisa_de_retenciones_y_prorrateo():
-    a = inicio.advertencias_iva([], [])
-
-    assert [x["codigo"] for x in a] == ["retenciones"]
-    assert a[0]["cfdi"] is None and a[0]["mensaje"]
-
-
-def test_advertencias_por_pagos_a_credito_moneda_extranjera_y_anticipos():
-    cfdis = [
-        _c(uuid="U1", moneda="USD"), _c(uuid="U2", moneda="USD"), _c(uuid="U3", moneda="USD", iva_trasladado=D("0")),
-        _c(uuid="A1", es_anticipo_sat=True), _c(uuid="C1", tipo_comprobante="E", forma_pago="30"),
-        _c(uuid="X1", estado="cancelado", moneda="USD", es_anticipo_sat=True),
-    ]
-    pagos = [{"cfdi_uuid": "u9"}, {"cfdi_uuid": "U9"}, {"cfdi_uuid": "U8"}]
-
-    a = {x["codigo"]: x["cfdi"] for x in inicio.advertencias_iva(cfdis, pagos)}
-
-    assert a == {"pago_proporcion": 2, "moneda_extranjera": 2, "anticipos": 2, "retenciones": None}

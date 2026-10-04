@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from . import db, iva, inicio
+from . import db, inicio, iva_flujo, iva_flujo_datos
 
 
 def _siguiente_mes(periodo: str) -> str:
@@ -50,37 +50,10 @@ def cargar_agregados(empresa_id: str, rfc: str, periodo: str) -> list[dict]:
 
 
 def cargar_iva_ejercicio(empresa_id: str, rfc: str, ejercicio: int) -> tuple[list[dict], list[dict]]:
-    """IVA trasladado y acreditable de cada mes del ejercicio, calculados con las
-    mismas funciones y los mismos insumos que la cédula de IVA de un mes, para que
-    el Inicio nunca la contradiga. Devuelve los meses y las advertencias que aplican."""
-    desde, hasta = f"{ejercicio:04d}-01-01", f"{ejercicio + 1:04d}-01-01"
-    cfdis = db.query_all(
-        """
-        SELECT uuid, tipo_comprobante, metodo_pago, estado, es_anticipo_sat,
-               rfc_emisor, rfc_receptor, forma_pago, fecha_emision,
-               subtotal, descuento, total, iva_trasladado, moneda
-        FROM cfdi
-        WHERE empresa_id = %s
-          AND estado = 'vigente'
-          AND (metodo_pago = 'PPD' OR (fecha_emision >= %s::date AND fecha_emision < %s::date))
-        """,
-        (empresa_id, desde, hasta),
-    )
-    pagos = db.query_all(
-        """
-        SELECT pr.cfdi_uuid, pr.importe_pagado, p.fecha_pago
-        FROM pagos_cfdi p
-        JOIN pagos_relaciones pr ON pr.pago_id = p.id
-        JOIN cfdi cp ON cp.id = p.cfdi_id AND cp.estado = 'vigente'   -- un REP cancelado no produce efectos
-        WHERE p.empresa_id = %s AND p.fecha_pago >= %s::date AND p.fecha_pago < %s::date
-        """,
-        (empresa_id, desde, hasta),
-    )
-    meses = []
-    for mes in inicio.meses_del_ejercicio(ejercicio):
-        trasladado = iva.iva_trasladado(cfdis, pagos, mes, rfc)
-        acreditable = iva.iva_acreditable(cfdis, pagos, mes, rfc)
-        ajustado = iva.aplicar_prorrateo(acreditable["bruto"], Decimal("1"))
-        # v1 igual que la cédula: sin retenciones y factor de prorrateo 1; llegan con F5.
-        meses.append(inicio.aplanar_iva(mes, trasladado, acreditable, ajustado, Decimal("0.00")))
-    return meses, inicio.advertencias_iva(cfdis, pagos)
+    """IVA trasladado y acreditable de cada mes del ejercicio, calculados con el mismo motor
+    (``iva_flujo``) y los mismos ajustes que la cédula y la pantalla de IVA, para que el Inicio nunca
+    las contradiga. Lee los eventos del año una sola vez. Devuelve los meses y las advertencias."""
+    ajustes = iva_flujo_datos.cargar_ajustes(empresa_id)
+    eventos = iva_flujo_datos.cargar_eventos_ejercicio(empresa_id, rfc, ejercicio, ajustes)
+    resumenes = [iva_flujo.resumen(eventos, mes, ajustes, Decimal("1")) for mes in inicio.meses_del_ejercicio(ejercicio)]
+    return [inicio.iva_mes_desde_motor(r) for r in resumenes], inicio.advertencias_desde_motor(resumenes)

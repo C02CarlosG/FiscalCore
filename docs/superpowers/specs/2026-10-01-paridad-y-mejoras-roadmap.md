@@ -433,7 +433,7 @@ pausa.
 | F2 | B | F2.1 implementada, en revisión (PR #17: migración 031, `sat_sync.py`, reintentos, partición por volumen y por 5002); F2.2 (worker: `backend/worker.py`, `procesar_empresa`, candado por empresa, carga inicial y corrida diaria) implementada, en revisión; F2.3 a F2.5 pendientes. Pendiente de quien tenga acceso: documentar `FIEL_ENCRYPTION_KEY` y `SAT_SYNC_*` en `.env.example` (texto en el plan de F2.2) | `docs/superpowers/specs/2026-10-03-f2-descarga-automatica-design.md` (en PR #17) | un plan por entrega |
 | F3 | A | F3.1, F3.2, F3.3 (PR #21) y F3.4 (PR #24) integradas; F3.5a extracción v2 en curso; luego F3.5b | `docs/superpowers/specs/2026-10-02-f3-listado-cfdi-design.md` | `2026-10-02-f3-1-api-listado-cfdi.md`, `2026-10-03-f3-2-pantalla-cfdi.md`; un plan por entrega restante |
 | F4 | C | En revisión (PR #25); falta cuadrar con los CFDI reales de COPLASUR | `docs/superpowers/specs/2026-10-04-f4-inicio-design.md` | `docs/superpowers/plans/2026-10-04-f4-inicio.md` |
-| F5 | C | En curso (sin la parte de REP hasta que se integre F3.5a) | `docs/superpowers/specs/2026-10-04-f5-iva-base-flujo-design.md` (rama F5) | `docs/superpowers/plans/2026-10-04-f5-1-motor-iva-flujo.md` (rama F5) |
+| F5 | C | En curso: F5.1 motor y F5.2 pantalla entregados; F5.3 cédula e Inicio ya salen del motor (REP completo en F5.4) | `docs/superpowers/specs/2026-10-04-f5-iva-base-flujo-design.md` (rama F5) | `docs/superpowers/plans/2026-10-04-f5-1-motor-iva-flujo.md` (rama F5) |
 | F6, F7 | C | Pendiente | — | — |
 | F8 | D | En revisión (PR D·F8) | `docs/superpowers/specs/2026-10-04-f8-informacion-fiscal-design.md` | `docs/superpowers/plans/2026-10-04-f8-informacion-fiscal.md` |
 | M1, M4, M6 | A | Pendiente | — | — |
