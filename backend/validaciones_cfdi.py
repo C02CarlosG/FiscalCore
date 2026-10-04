@@ -91,7 +91,10 @@ class Configuracion:
         """Lectura tolerante: lo que falta o no se entiende toma el valor por defecto."""
         config = config if isinstance(config, dict) else {}
         inactivas = config.get("inactivas")
-        inactivas = frozenset(k for k in inactivas if k in POR_CLAVE) if isinstance(inactivas, list) else frozenset()
+        inactivas = (
+            frozenset(k for k in inactivas if isinstance(k, str) and k in POR_CLAVE)
+            if isinstance(inactivas, list) else frozenset()
+        )
         try:
             # Un valor guardado arriba del legal se lee como el legal.
             umbral = min(_a_umbral(config["umbral_efectivo"]), UMBRAL_MAXIMO.quantize(CENTAVOS))
@@ -112,7 +115,7 @@ class Configuracion:
 def validar_cambio(cuerpo: dict) -> Configuracion:
     """Valida lo que manda el usuario; a diferencia de la lectura, aquí se rechaza."""
     inactivas = cuerpo.get("inactivas", [])
-    if not isinstance(inactivas, list) or any(k not in POR_CLAVE for k in inactivas):
+    if not isinstance(inactivas, list) or any(not isinstance(k, str) or k not in POR_CLAVE for k in inactivas):
         raise ValidacionInvalida(f"inactivas debe ser una lista de: {', '.join(POR_CLAVE)}")
     umbral = cuerpo.get("umbral_efectivo", Configuracion.umbral_efectivo)
     try:
@@ -128,8 +131,8 @@ def validar_cambio(cuerpo: dict) -> Configuracion:
 
 def rangos(periodo: Any) -> tuple[date, date, date]:
     """(inicio del mes, inicio del mes siguiente, inicio del ejercicio)."""
-    if not isinstance(periodo, str) or not _PERIODO_RE.fullmatch(periodo):
-        raise ValidacionInvalida("periodo inválido; formato esperado YYYY-MM")
+    if not isinstance(periodo, str) or not _PERIODO_RE.fullmatch(periodo) or not 2000 <= int(periodo[:4]) <= 2100:
+        raise ValidacionInvalida("periodo inválido; formato esperado YYYY-MM (años 2000 a 2100)")
     # Mismo rango de mes que el listado de CFDI, para que la lista y el listado coincidan.
     inicio, siguiente = _rango_mes(periodo)
     return inicio, siguiente, date(inicio.year, 1, 1)

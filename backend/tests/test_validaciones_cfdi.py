@@ -108,3 +108,24 @@ def test_direccion_y_alcance():
     assert v.validar_validacion("no_bancarizado", "recibidos").clave == "no_bancarizado"
     with pytest.raises(v.ValidacionInvalida):
         v.validar_alcance("anual")
+
+
+@pytest.mark.parametrize("inactivas", [[{}], [[1]], [1], [None]])
+def test_inactivas_que_no_son_texto_se_rechazan(inactivas):
+    with pytest.raises(v.ValidacionInvalida):
+        v.validar_cambio({"inactivas": inactivas})
+
+
+def test_lectura_tolerante_con_inactivas_que_no_son_texto():
+    assert v.Configuracion.desde_json({"inactivas": [{}, ["x"], "pue_con_rep"]}).inactivas == frozenset({"pue_con_rep"})
+
+
+@pytest.mark.parametrize("periodo", ["0000-01", "1999-12", "2101-01", "9999-12"])
+def test_periodo_fuera_de_2000_a_2100(periodo):
+    with pytest.raises(v.ValidacionInvalida):
+        v.rangos(periodo)
+
+
+def test_periodos_en_los_extremos():
+    assert v.rangos("2000-01")[0] == date(2000, 1, 1)
+    assert v.rangos("2100-12")[1] == date(2101, 1, 1)
