@@ -31,6 +31,7 @@ el sistema visual propio de FiscalCore; no se copian marca, logotipo ni textos.
 | D6 | Preferencias de columnas | Se guardan en el servidor por usuario (no en el navegador) | F3 |
 | D7 | Descarga automática de XML | Proceso aparte (`worker`) que usa Postgres como cola; sin Redis ni Celery. Una corrida diaria por empresa, más la carga inicial al guardar la e.firma | F2 |
 | D8 | Uso desatendido de la e.firma | La descarga automática se activa por empresa con consentimiento explícito de quien guarda la e.firma; se puede pausar en cualquier momento | F2 |
+| D9 | Alta de usuarios en una empresa (decidido por Carlos, 2026-10-04) | Invitación con **doble confirmación**: la persona invitada acepta y queda "pendiente de aprobación" sin acceso, y un administrador de la empresa aprueba o rechaza. No se envían correos por ahora. La verificación de correo con enlace (junto con la recuperación de contraseña) es entrega del carril B **antes de abrir producción a clientes externos** | U1, B-seguridad |
 
 ## Forma de trabajo (igual en todas las fases)
 
@@ -410,6 +411,8 @@ pausa.
 |---|---|---|---|
 | 2026-10-04 | D → B | Agregar `"informacion-fiscal": "Información fiscal"` al mapa del breadcrumb de `layout/Header.tsx` (hoy muestra "Empresas" en `/empresas/{id}/informacion-fiscal`) y `"informacion-fiscal"` a `SUB_RUTAS` de `layout/EmpresaSwitcher.tsx` (para conservar la pantalla al cambiar de empresa) | Hecho en el PR #30 (F2.3) |
 | 2026-10-04 | D → B | Lo mismo para la pantalla de V1: `"validaciones": "Validaciones de CFDI"` en el breadcrumb de `Header.tsx` y `"validaciones"` en `SUB_RUTAS` de `EmpresaSwitcher.tsx` | Pendiente |
+| 2026-10-04 | D → B | Requisito de U1: normalizar correos a minúsculas al registrar e iniciar sesión, e índice único sobre `lower(email)`; la migración detecta duplicados y falla con mensaje claro, sin borrar cuentas | Autorizado por Carlos; después de F2.4 |
+| 2026-10-04 | Coordinación → B | Verificación de correo con enlace y recuperación de contraseña (requiere servicio de envío de correo) antes de abrir producción a clientes externos (D9) | Pendiente |
 
 ## Riesgos
 
@@ -431,17 +434,17 @@ pausa.
 |---|---|---|---|---|
 | F0 | B | Integrada salvo la carga de CFDI reales (se cierra con F2) | (no requiere) | (lista de verificación abajo) |
 | F1 | B (cierre) | Integrada. Falta el cierre con datos reales: reprocesar los CFDI de COPLASUR y cuadrar el IVA por tasa contra el encabezado | este documento, sección "Fases" y "Reglas comunes" | `docs/superpowers/plans/2026-10-01-fase1-detalle-fiscal-cfdi.md` |
-| F2 | B | F2.1 (base: migración 031, `sat_sync.py`, reintentos, partición por volumen y por 5002) y F2.2 (worker: `backend/worker.py`, `procesar_empresa`, candado por empresa, carga inicial y corrida diaria) integradas (PR #17); F2.3 (endpoints `sync/estado`, `sync/config`, `sync/ahora`, consentimiento y auditoría; borrar la e.firma desactiva la automatización) integrada (PR #30); F2.4 y F2.5 pendientes. Pendiente de quien tenga acceso: documentar `FIEL_ENCRYPTION_KEY` y `SAT_SYNC_*` en `.env.example` (texto en el plan de F2.2) | `docs/superpowers/specs/2026-10-03-f2-descarga-automatica-design.md` (en PR #17) | un plan por entrega |
-| F3 | A | F3.1, F3.2, F3.3 (PR #21), F3.4 (PR #24) y F3.5a extracción v2 (PR #27) integradas; siguen F3.5b (incluye el orden del nodo en la llave de `pagos_cfdi`, migración 041) y F3.6 | `docs/superpowers/specs/2026-10-02-f3-listado-cfdi-design.md` | `2026-10-02-f3-1-api-listado-cfdi.md`, `2026-10-03-f3-2-pantalla-cfdi.md`; un plan por entrega restante |
+| F2 | B | F2.4 (cancelaciones) en curso; después el bloque de seguridad autorizado por Carlos (correos en minúsculas con índice único, `token_version`, ProxyHeaders) y, antes de producción, la verificación de correo y la recuperación de contraseña (D9). F2.1 (base: migración 031, `sat_sync.py`, reintentos, partición por volumen y por 5002) y F2.2 (worker: `backend/worker.py`, `procesar_empresa`, candado por empresa, carga inicial y corrida diaria) integradas (PR #17); F2.3 (endpoints `sync/estado`, `sync/config`, `sync/ahora`, consentimiento y auditoría; borrar la e.firma desactiva la automatización) integrada (PR #30); F2.4 y F2.5 pendientes. Pendiente de quien tenga acceso: documentar `FIEL_ENCRYPTION_KEY` y `SAT_SYNC_*` en `.env.example` (texto en el plan de F2.2) | `docs/superpowers/specs/2026-10-03-f2-descarga-automatica-design.md` (en PR #17) | un plan por entrega |
+| F3 | A | F3.1, F3.2, F3.3 (PR #21), F3.4 (PR #24) y F3.5a extracción v2 (PR #27) integradas; F3.5b en revisión (PR #41: migración 041 con `pagos_cfdi.nodo` y `forma_pago`); luego F3.6 | `docs/superpowers/specs/2026-10-02-f3-listado-cfdi-design.md` | `2026-10-02-f3-1-api-listado-cfdi.md`, `2026-10-03-f3-2-pantalla-cfdi.md`; un plan por entrega restante |
 | F4 | C | Integrada (PR #25); falta cuadrar con los CFDI reales de COPLASUR | `docs/superpowers/specs/2026-10-04-f4-inicio-design.md` | `docs/superpowers/plans/2026-10-04-f4-inicio.md` |
-| F5 | C | F5.1 (motor, API y ajustes, PR #29) y F5.2 (pantalla y Excel, PR #32) integradas; F5.3 (cédula e Inicio al motor nuevo) en revisión; luego F5.4 (REP completo) | `docs/superpowers/specs/2026-10-04-f5-iva-base-flujo-design.md` | `docs/superpowers/plans/2026-10-04-f5-1-motor-iva-flujo.md`, `2026-10-04-f5-2-pantalla-iva-flujo.md` |
-| F6 | C | F6.1 (catálogo de proveedores, migración 051, PR #38) integrada; F6.2 (DIOT por flujo: motor por contraparte, clasificación por periodo y por CFDI, Excel; migración 054) en revisión, la pantalla después; F6.3 (archivo de carga) espera el layout oficial del SAT, que el entorno no puede consultar | `docs/superpowers/specs/2026-10-04-f6-proveedores-diot-design.md` | un plan por entrega |
-| F7 | C | Pendiente | — | — |
+| F5 | C | F5.1 (motor, API y ajustes, PR #29) y F5.2 (pantalla y Excel, PR #32) integradas; F5.3 (cédula e Inicio al motor nuevo, PR #35) integrada; F5.4 (REP completo, PR #37) en revisión | `docs/superpowers/specs/2026-10-04-f5-iva-base-flujo-design.md` | `docs/superpowers/plans/2026-10-04-f5-1-motor-iva-flujo.md`, `2026-10-04-f5-2-pantalla-iva-flujo.md` |
+| F6 | C | F6.1 (catálogo de proveedores, migración 051, PR #38) integrada; F6.2 (DIOT por flujo) en curso; F6.3 (archivo de carga) espera el layout oficial del SAT, que el entorno no puede consultar | `docs/superpowers/specs/2026-10-04-f6-proveedores-diot-design.md` | un plan por entrega |
+| F7 | C | F7.1 (motor ISR base flujo, migraciones 052–053, PR #39) en revisión, después de F5.4; F7.2 (pantalla y Excel) después de F6.2; F7.3 (pago provisional, Art. 106 y Art. 14 LISR) espera la tarifa oficial del Anexo 8 de la RMF | `docs/superpowers/specs/2026-10-04-f7-isr-base-flujo-design.md` (en PR #39) | un plan por entrega |
 | F8 | D | Integrada (PR #31); falta probar con PDF reales | `docs/superpowers/specs/2026-10-04-f8-informacion-fiscal-design.md` | `docs/superpowers/plans/2026-10-04-f8-informacion-fiscal.md` |
 | M1, M4, M6 | A | Pendiente | — | — |
 | M3 | B | Pendiente |
-| V1 | D | En revisión (PR D·V1) | `docs/superpowers/specs/2026-10-04-v1-validaciones-cfdi-design.md` | `docs/superpowers/plans/2026-10-04-v1-validaciones-cfdi.md` |
-| U1, M7 | D | Pendiente |
+| V1 | D | Integrada (PR #34); seguimiento con 3 menores (422 en entradas inválidas, CHECK de la 061 en bases existentes) | `docs/superpowers/specs/2026-10-04-v1-validaciones-cfdi-design.md` | `docs/superpowers/plans/2026-10-04-v1-validaciones-cfdi.md` |
+| U1, M7 | D | U1 (usuarios y perfil, PR #36) en revisión: invitaciones con doble confirmación (D9); depende del índice único sobre `lower(email)` del carril B. M7.1 (planes, límite de RFC, PR #40) en revisión |
 | F3.6 | A | Pendiente (después de F3.5b) | — | — |
 | Punto de control de paridad | Coordinación | Pendiente: al terminar F5–F7 se recorre FiscalCore con Playwright contra las capturas y se cuadran las cifras de control | — | — |
 | M2, M5 | C | Pendiente | — | — |
