@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
+import uuid as _uuid
 
 from . import db
 
@@ -22,7 +23,10 @@ _log = logging.getLogger(__name__)
 
 # Versión del extractor de detalle. Subirla cuando el parser extraiga algo nuevo
 # hace que reproceso.reprocesar_detalle vuelva a tomar los CFDI ya guardados.
-DETALLE_VERSION = 1
+# 1: impuestos por tasa, conceptos, encabezados y totales de nómina (migración 028).
+# 2: extracción v2 (migración 040): Totales e ImpuestosP del REP, ObjetoImpDR,
+#    ACuentaTerceros y nómina completa por percepción, deducción y otro pago.
+DETALLE_VERSION = 2
 
 
 def _tasa(valor):
@@ -70,16 +74,92 @@ def _sentencias_conceptos(cfdi_id: str, conceptos) -> list[tuple[str, tuple]]:
             cfdi_id, c.linea, c.clave_prod_serv, c.no_identificacion, str(c.cantidad),
             c.clave_unidad, c.unidad, c.descripcion, str(c.valor_unitario), str(c.importe),
             str(c.descuento), c.objeto_imp, c.cuenta_predial, json.dumps(impuestos),
+            c.rfc_a_cuenta_terceros, c.nombre_a_cuenta_terceros, c.regimen_a_cuenta_terceros,
         ]
     sentencias.append((
         """INSERT INTO cfdi_conceptos (
                cfdi_id, linea, clave_prod_serv, no_identificacion, cantidad,
                clave_unidad, unidad, descripcion, valor_unitario, importe,
-               descuento, objeto_imp, cuenta_predial, impuestos
+               descuento, objeto_imp, cuenta_predial, impuestos,
+               rfc_a_cuenta_terceros, nombre_a_cuenta_terceros, regimen_a_cuenta_terceros
            ) VALUES """
-        + ",".join(["(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"] * len(conceptos)),
+        + ",".join(["(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"] * len(conceptos)),
         tuple(params),
     ))
+    return sentencias
+
+
+def _txt(valor):
+    """Decimal, int o texto opcional como parámetro (None se conserva como NULL)."""
+    if valor is None:
+        return None
+    return valor if isinstance(valor, (int, str)) else str(valor)
+
+
+_TOTALES_REP = (
+    "monto_total_pagos", "total_retenciones_iva", "total_retenciones_isr", "total_retenciones_ieps",
+    "total_traslados_base_iva16", "total_traslados_iva16", "total_traslados_base_iva8", "total_traslados_iva8",
+    "total_traslados_base_iva0", "total_traslados_iva0", "total_traslados_base_exento",
+)
+
+
+def _sentencias_pagos_totales(cfdi_id: str, totales) -> list[tuple[str, tuple]]:
+    """pago20:Totales del REP: se reemplaza el renglón. Sin Totales (Pagos 1.0 o
+    un XML que no lo trae) no se guarda nada: NULL y "cero" no son lo mismo."""
+    sentencias: list[tuple[str, tuple]] = [("DELETE FROM cfdi_pagos_totales WHERE cfdi_id = %s", (cfdi_id,))]
+    if totales is None:
+        return sentencias
+    sentencias.append((
+        f"INSERT INTO cfdi_pagos_totales (cfdi_id, {', '.join(_TOTALES_REP)}) "
+        f"VALUES (%s, {', '.join(['%s'] * len(_TOTALES_REP))})",
+        (cfdi_id, *[_txt(getattr(totales, c)) for c in _TOTALES_REP]),
+    ))
+    return sentencias
+
+
+_COLUMNAS_NOMINA = (
+    "tipo_nomina", "fecha_pago", "fecha_inicial_pago", "fecha_final_pago", "num_dias_pagados",
+    "tipo_regimen", "num_empleado", "total_percepciones", "total_deducciones", "total_otros_pagos",
+    "total_sueldos", "total_separacion_indemnizacion", "total_jubilacion_pension_retiro",
+    "total_gravado", "total_exento", "total_otras_deducciones", "total_impuestos_retenidos",
+    "sep_total_pagado", "sep_anios_servicio", "sep_ultimo_sueldo_mens_ord", "sep_ingreso_acumulable",
+    "sep_ingreso_no_acumulable", "jub_total_una_exhibicion", "jub_total_parcialidad", "jub_monto_diario",
+    "jub_ingreso_acumulable", "jub_ingreso_no_acumulable",
+)
+_FECHAS_NOMINA = ("fecha_pago", "fecha_inicial_pago", "fecha_final_pago")
+
+
+def _sentencias_nominas(cfdi_id: str, nominas) -> list[tuple[str, tuple]]:
+    """Reemplaza el detalle de nómina del CFDI. Los ids se generan aquí para poder
+    enlazar los conceptos en la misma transacción (el borrado en cascada limpia
+    los conceptos viejos)."""
+    sentencias: list[tuple[str, tuple]] = [("DELETE FROM cfdi_nominas WHERE cfdi_id = %s", (cfdi_id,))]
+    for n in nominas:
+        nomina_id = str(_uuid.uuid4())
+        valores = [
+            (getattr(n, c).date() if getattr(n, c) is not None else None) if c in _FECHAS_NOMINA
+            else _txt(getattr(n, c))
+            for c in _COLUMNAS_NOMINA
+        ]
+        sentencias.append((
+            f"INSERT INTO cfdi_nominas (id, cfdi_id, nodo, {', '.join(_COLUMNAS_NOMINA)}) "
+            f"VALUES (%s, %s, %s, {', '.join(['%s'] * len(_COLUMNAS_NOMINA))})",
+            (nomina_id, cfdi_id, n.nodo, *valores),
+        ))
+        if n.conceptos:
+            params: list = []
+            for c in n.conceptos:
+                params += [
+                    nomina_id, c.categoria, c.linea, c.tipo, c.clave, c.concepto,
+                    _txt(c.importe_gravado), _txt(c.importe_exento), _txt(c.importe), _txt(c.subsidio_causado),
+                ]
+            sentencias.append((
+                """INSERT INTO cfdi_nomina_conceptos (
+                       nomina_id, categoria, linea, tipo, clave, concepto,
+                       importe_gravado, importe_exento, importe, subsidio_causado
+                   ) VALUES """ + ",".join(["(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"] * len(n.conceptos)),
+                tuple(params),
+            ))
     return sentencias
 
 
@@ -121,6 +201,8 @@ def guardar_detalle(empresa_id: str, resultado) -> bool:
         ),
         *_sentencias_impuestos("cfdi_impuestos", "cfdi_id", cfdi_id, resultado.resumen_impuestos),
         *_sentencias_conceptos(cfdi_id, resultado.conceptos),
+        *_sentencias_pagos_totales(cfdi_id, resultado.pagos_totales),
+        *_sentencias_nominas(cfdi_id, resultado.nominas),
     ])
     return True
 
@@ -193,7 +275,10 @@ def persistir_complemento_pago(empresa_id: str, resultado) -> None:
         if not pago_row:
             continue
         pago_db_id = str(pago_row["id"])
-        db.execute("UPDATE pagos_cfdi SET version_pago = %s WHERE id = %s", (pago.version, pago_db_id))
+        _en_transaccion([
+            ("UPDATE pagos_cfdi SET version_pago = %s WHERE id = %s", (pago.version, pago_db_id)),
+            *_sentencias_impuestos("pagos_impuestos", "pago_id", pago_db_id, pago.impuestos_p),
+        ])
 
         for docto in pago.doctos_relacionados:
             if not docto.uuid:
@@ -220,8 +305,9 @@ def persistir_complemento_pago(empresa_id: str, resultado) -> None:
                 relacion_id = str(relacion["id"])
                 _en_transaccion([
                     (
-                        "UPDATE pagos_relaciones SET moneda_dr = %s, equivalencia_dr = %s WHERE id = %s",
-                        (docto.moneda_dr, _tasa(docto.equivalencia_dr), relacion_id),
+                        "UPDATE pagos_relaciones SET moneda_dr = %s, equivalencia_dr = %s, objeto_imp_dr = %s "
+                        "WHERE id = %s",
+                        (docto.moneda_dr, _tasa(docto.equivalencia_dr), docto.objeto_imp_dr, relacion_id),
                     ),
                     *_sentencias_impuestos(
                         "pagos_relaciones_impuestos", "relacion_id", relacion_id, docto.impuestos),

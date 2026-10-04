@@ -223,18 +223,23 @@ reinicia, la descarga se pierde). F2 la vuelve desatendida.
 - Aplicabilidad por régimen (decisión D2): se determina en la spec de F7 con el
   catálogo de regímenes; el módulo por coeficiente de utilidad sigue disponible.
 
-### Pendientes de extracción detectados en la revisión fiscal de F1
+### Extracción v2 (F3.5a, migración 040, `DETALLE_VERSION` 2)
 
-F1 guarda lo necesario para listar y desglosar; estos datos los necesitan los cálculos
-y se extraen en la spec de la fase indicada subiendo `cfdi_store.DETALLE_VERSION` (el
-reproceso vuelve a leer el `xml_raw`, sin descargar nada):
+Lo que la revisión fiscal de F1 dejó pendiente de extraer **ya se guarda** (el reproceso
+relee `xml_raw` de los CFDI con versión menor; no descarga nada del SAT):
 
-| Dato | Para qué | Fase |
-|---|---|---|
-| `pago20:Totales` e `ImpuestosP` del REP | Cifra oficial en pesos del IVA cobrado por tasa y control de cuadre; `ImpuestosP` cuando un REP trae pagos de meses distintos | F5 |
-| `ObjetoImpDR` por documento pagado | Distinguir "no objeto" de "objeto sin desglose" y de un REP sin impuestos | F5 |
-| RFC de `ACuentaTerceros` por concepto | Excluir del ingreso y del IVA propios lo cobrado por cuenta de terceros | F5, F7 |
-| Nómina por percepción (`TipoPercepcion`, gravado/exento), `FechaPago`, `TipoNomina`, régimen del receptor, otros pagos por tipo (subsidio), separación y jubilación | Base correcta de la nómina exenta deducible (la PTU y los viáticos no entran) y mes de la deducción | F7 |
+| Dato | Dónde queda | Para qué | Fase que lo usa |
+|---|---|---|---|
+| `pago20:Totales` del REP | `cfdi_pagos_totales` (una fila por REP; NULL = el atributo no viene) | Cifra oficial en pesos del IVA cobrado por tasa y control de cuadre | F5 |
+| `ImpuestosP` de cada pago | `pagos_impuestos` (en la moneda del pago, 6 decimales) | Cuando un REP trae pagos de meses distintos | F5 |
+| `ObjetoImpDR` por documento pagado | `pagos_relaciones.objeto_imp_dr` | Distinguir "no objeto" de "objeto sin desglose" y de un REP sin impuestos | F5 |
+| RFC, nombre y régimen de `ACuentaTerceros` por concepto | `cfdi_conceptos.rfc_a_cuenta_terceros` y afines | Excluir del ingreso y del IVA propios lo cobrado por cuenta de terceros | F5, F7 |
+| Nómina: `TipoNomina`, `FechaPago`, fechas inicial y final, días pagados, `TipoRegimen`, número de empleado y los totales de percepciones, deducciones y otros pagos | `cfdi_nominas` (un renglón por nodo `Nomina`) | Mes de la deducción y régimen del receptor | F7 |
+| Nómina: cada percepción (`TipoPercepcion`, gravado, exento), deducción (`TipoDeduccion`) y otro pago (`TipoOtroPago`, `SubsidioCausado`) | `cfdi_nomina_conceptos`, con el tipo tal cual viene en el XML | Base de la nómina exenta deducible (la PTU y los viáticos no entran) y subsidio causado; qué tipo cuenta como qué lo decide el cálculo | F7 |
+| Nómina: separación/indemnización y jubilación/pensión/retiro | columnas `sep_*` y `jub_*` de `cfdi_nominas` | Ingreso acumulable y no acumulable | F7 |
+
+Lo que **no** se extrae, a propósito: la CURP y el NSS del trabajador (dato personal que
+ningún cálculo usa).
 
 Criterios que los cálculos deben respetar con lo ya guardado:
 
