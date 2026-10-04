@@ -34,4 +34,9 @@ describe("ParesTable", () => {
     expect(screen.getByText("Sin CFDI")).toBeInTheDocument();
     expect(screen.getByText("Depósito SPEI")).toBeInTheDocument();
   });
+
+  it("muestra la fecha del movimiento como dd/mm/aaaa", () => {
+    render(<ParesTable pares={[par]} />);
+    expect(screen.getByText("10/07/2026")).toBeInTheDocument();
+  });
 });

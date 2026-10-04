@@ -40,6 +40,7 @@ async def registrar(request: Request, data: RegisterRequest):
         "user_id":      str(usuario["id"]),
         "email":        data.email,
         "nombre":       data.nombre,
+        "rol":          usuario.get("rol") or "contador",
         "empresas":     [],
     }
 
@@ -75,6 +76,7 @@ async def login(request: Request, data: LoginRequest):
             "token_type":   "bearer",
             "user_id":      str(usuario["id"]),
             "nombre":       usuario.get("nombre"),
+            "rol":          usuario.get("rol") or "contador",
             "empresas":     [serializar(e) for e in empresas],
         }
     except HTTPException:

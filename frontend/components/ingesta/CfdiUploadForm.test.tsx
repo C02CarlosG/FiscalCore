@@ -95,6 +95,27 @@ describe("CfdiUploadForm", () => {
     );
   });
 
+  it("does not report an error after a successful upload and clears the periodo", async () => {
+    vi.mocked(apiFetch).mockResolvedValue({
+      mensaje: "507 CFDI procesados correctamente",
+      registros_procesados: 507,
+      errores: [],
+      periodo: "2026-09",
+    });
+    const user = userEvent.setup();
+    renderForm();
+
+    const file = new File(["<xml></xml>"], "cfdi.xml", { type: "text/xml" });
+    const input = screen.getByLabelText("Archivos XML");
+    await user.type(screen.getByLabelText("Periodo (YYYY-MM)"), "2026-09");
+    await user.upload(input, file);
+    await user.click(screen.getByRole("button", { name: /subir cfdi/i }));
+
+    expect(await screen.findByText("507 CFDI procesados correctamente")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Periodo (YYYY-MM)")).toHaveValue("");
+  });
+
   it("shows the backend error message on failure", async () => {
     vi.mocked(apiFetch).mockRejectedValue(
       new ApiError(400, "Archivo con extensión inválida"),

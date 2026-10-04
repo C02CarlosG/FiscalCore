@@ -18,7 +18,7 @@
 - Cada corrida automática deja `auditoria` con `usuario_id` nulo y `metadata.origen`.
 - Ninguna solicitud cubre más de un mes natural (ya garantizado por `ventanas_mensuales`).
 - Un reinicio del worker no repite trabajo ni duplica CFDI: el estado vive en `sat_solicitudes` y `sat_sync_config`.
-- Sin parámetros idénticos repetidos hacia el SAT (límite de por vida, código 5002): al replanear no se vuelven a pedir los meses cerrados ya `descargado`.
+- Sin parámetros idénticos repetidos hacia el SAT (límite de por vida, código 5002): al replanear no se vuelven a pedir los meses cerrados ya `descargado`; si el SAT responde 5002, `crear_solicitud_ventana` ya pide el periodo partido en dos rangos con otro corte.
 - Fuera de F2.2: cancelaciones (F2.4), endpoints `sync/*` y pausa por vencimiento visible en API (F2.3), pantalla (F2.5). La pausa por e.firma vencida **sí** se implementa aquí en el worker, porque sin ella el worker llamaría al SAT con una e.firma inútil.
 - Línea base: `python -m pytest` → 651 passed (71 con `-m db`).
 

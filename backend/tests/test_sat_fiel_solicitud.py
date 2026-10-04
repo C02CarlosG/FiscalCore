@@ -90,3 +90,31 @@ def test_rechazo_del_sat_conserva_el_codigo_en_la_excepcion(sat_falso, monkeypat
 
     assert exc.value.codigo == "5003"
     assert isinstance(exc.value, FIELError)
+
+
+def test_solicitar_descarga_con_solicitudes_agotadas_lanza_su_propio_error(sat_falso, monkeypatch):
+    """5002 tiene su propia excepción: con otras fechas todavía se puede pedir."""
+    monkeypatch.setattr(sat_falso, "respuesta", {
+        "IdSolicitud": "id-sat-1", "CodEstatus": "5002", "Mensaje": "Se agotó las solicitudes de por vida",
+    })
+
+    with pytest.raises(sat_fiel.SolicitudesAgotadasError, match="5002"):
+        sat_fiel.solicitar_descarga(
+            object(), "TEST010101AAA", "emitidos", date(2026, 9, 1), date(2026, 9, 30),
+        )
+
+
+def test_solicitudes_agotadas_es_un_rechazo_con_codigo_5002(sat_falso, monkeypatch):
+    from backend.sat_fiel import SolicitudRechazada, SolicitudesAgotadasError
+
+    monkeypatch.setattr(sat_falso, "respuesta", {
+        "IdSolicitud": "id-sat-1", "CodEstatus": "5002", "Mensaje": "Se agotó las solicitudes de por vida",
+    })
+
+    with pytest.raises(SolicitudRechazada) as exc:
+        sat_fiel.solicitar_descarga(
+            object(), "TEST010101AAA", "emitidos", date(2026, 9, 1), date(2026, 9, 30),
+        )
+
+    assert isinstance(exc.value, SolicitudesAgotadasError)
+    assert exc.value.codigo == "5002"

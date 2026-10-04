@@ -372,13 +372,15 @@ async def sync_completo_fiel(
     ultimo_dia = calendar.monthrange(int(año), int(mes))[1]
     fecha_fin = date(int(año), int(mes), ultimo_dia)
 
-    # Crear registros de solicitud
-    solicitud_ids = []
     try:
         creds = obtener_signer(db, empresa_id)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
 
+    # Cada tipo se pide por separado: si el SAT rechaza uno, el otro sigue.
+    solicitud_ids: list[dict] = []
+    errores: list[str] = []
+    en_curso: list[str] = []
     for t in tipos:
         try:
             filas = crear_solicitud_ventana(
@@ -386,13 +388,19 @@ async def sync_completo_fiel(
                 origen="manual", usuario_id=current_user["user_id"],
             )
         except SolicitudActiva:
+            en_curso.append(t)
+            errores.append(f"{t}: ya hay una descarga en curso para {periodo}")
+        except FIELError as exc:
+            errores.append(f"{t}: {exc}")
+        else:
+            solicitud_ids += [{"id": str(f["id"]), "tipo": t} for f in filas if f["estado"] == "solicitado"]
+    if not solicitud_ids:
+        if en_curso and len(en_curso) == len(tipos):
             raise HTTPException(
                 status_code=409,
-                detail=f"Ya hay una descarga de {t} en curso para {periodo}. Espera a que termine.",
+                detail=f"Ya hay una descarga en curso para {periodo}. Espera a que termine.",
             )
-        except FIELError as exc:
-            raise HTTPException(status_code=502, detail=f"Error SAT al solicitar {t}: {exc}")
-        solicitud_ids += [{"id": str(f["id"]), "tipo": t} for f in filas if f["estado"] == "solicitado"]
+        raise HTTPException(status_code=502, detail="Error SAT al solicitar " + "; ".join(errores))
 
     # Lanzar background task que verifica y descarga automáticamente
     background_tasks.add_task(
@@ -407,6 +415,7 @@ async def sync_completo_fiel(
         "solicitudes": solicitud_ids,
         "periodo": periodo,
         "tipos": tipos,
+        "errores": errores,
     }
 
 

@@ -30,15 +30,18 @@ const NAV_ITEMS = [
 
 const CFDI_GROUP = {
   slug: "cfdi",
-  label: "Gestión de CFDI",
+  label: "CFDIs",
   icon: FileSpreadsheet,
   children: [
-    { slug: "cfdi", label: "Visor SAT" },
-    { slug: "cfdi/emitidos", label: "CFDI Emitidos" },
-    { slug: "cfdi/recibidos", label: "CFDI Recibidos" },
-    { slug: "cfdi/nomina", label: "CFDI Nómina" },
+    { slug: "cfdi/emitidos", label: "Emitidos" },
+    { slug: "cfdi/recibidos", label: "Recibidos" },
   ],
 } as const;
+
+const ETIQUETA_ROL: Record<string, string> = {
+  admin: "Administrador",
+  contador: "Contador",
+};
 
 function isActive(pathname: string, slug: string): boolean {
   return pathname.includes(`/${slug}`);
@@ -221,9 +224,11 @@ function SidebarBody() {
             <span className="block truncate text-xs font-semibold">
               {session?.nombre ?? session?.email ?? "Usuario"}
             </span>
-            <span className="block truncate text-[11px] text-muted-foreground">
-              Contador
-            </span>
+            {session?.rol && ETIQUETA_ROL[session.rol] && (
+              <span className="block truncate text-[11px] text-muted-foreground">
+                {ETIQUETA_ROL[session.rol]}
+              </span>
+            )}
           </span>
           <button
             type="button"

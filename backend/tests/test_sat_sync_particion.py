@@ -37,7 +37,9 @@ class _BD:
             return dict(fila) if returning else None
         sol_id = params[-1]
         fila = self.filas[sol_id]
-        if "estado='fallo'" in s:
+        if "SET fecha_inicio=%s, fecha_fin=%s" in s:
+            fila["fecha_inicio"], fila["fecha_fin"] = params[0], params[1]
+        elif "estado='fallo'" in s:
             fila["estado"] = "fallo"
             fila["error_msg"] = params[0]
         elif "id_solicitud_sat=%s" in s and "estado='solicitado'" in s:
@@ -58,6 +60,14 @@ def bd(monkeypatch):
     fake = _BD()
     monkeypatch.setattr(db, "execute", fake.execute)
     return fake
+
+
+@pytest.fixture()
+def intentos_previos(monkeypatch):
+    """Cuántas solicitudes tiene ya el periodo (alimenta el corte del 5002)."""
+    valor = {"n": 1}
+    monkeypatch.setattr(db, "query_one", lambda sql, params=(): {"n": valor["n"]})
+    return valor
 
 
 def _sat(monkeypatch, respuestas):
@@ -146,7 +156,7 @@ def test_un_dia_que_sigue_rebasando_el_tope_queda_en_fallo_sin_bucle(bd, monkeyp
     assert "5003" in filas[0]["error_msg"]
 
 
-@pytest.mark.parametrize("codigo", ["5002", "5005", "301"])
+@pytest.mark.parametrize("codigo", ["5005", "301"])
 def test_otros_rechazos_del_sat_son_definitivos_y_no_se_parten(bd, monkeypatch, codigo):
     llamadas = _sat(monkeypatch, [SolicitudRechazada(f"rechazo {codigo}", codigo=codigo)])
 
@@ -158,7 +168,7 @@ def test_otros_rechazos_del_sat_son_definitivos_y_no_se_parten(bd, monkeypatch, 
 
 
 def test_rechazo_definitivo_sin_tolerancia_marca_fallo_y_relanza(bd, monkeypatch):
-    _sat(monkeypatch, [SolicitudRechazada("rechazo 5002", codigo="5002")])
+    _sat(monkeypatch, [SolicitudRechazada("rechazo 5005", codigo="5005")])
 
     with pytest.raises(SolicitudRechazada):
         _crear()
@@ -201,3 +211,71 @@ def test_la_fila_original_se_cierra_antes_de_insertar_las_mitades(bd, monkeypatc
     indice_fallo = next(i for i, q in enumerate(bd.sqls) if "estado='fallo'" in q)
     segundo_insert = [i for i, q in enumerate(bd.sqls) if q.startswith("INSERT")][1]
     assert indice_fallo < segundo_insert
+
+
+# ─── 5002: solicitudes agotadas → el periodo se pide partido en dos rangos ──────────
+
+def _agotada():
+    from backend.sat_fiel import SolicitudesAgotadasError
+    return SolicitudesAgotadasError("5002")
+
+
+def test_5002_pide_el_mes_en_dos_rangos_contiguos_con_corte_distinto_por_intento(bd, monkeypatch, intentos_previos):
+    from datetime import datetime
+
+    intentos_previos["n"] = 3
+    llamadas = _sat(monkeypatch, [_agotada(), "SAT-1", "SAT-2"])
+
+    filas = _crear()
+
+    assert [(c["inicio"], c["fin"]) for c in llamadas] == [
+        (date(2026, 9, 1), date(2026, 9, 30)),
+        (datetime(2026, 9, 1, 0, 0, 0), datetime(2026, 9, 15, 23, 59, 56)),
+        (datetime(2026, 9, 15, 23, 59, 57), datetime(2026, 9, 30, 23, 59, 59)),
+    ]
+    assert [f["estado"] for f in filas] == ["solicitado", "solicitado"]
+    assert [f["id"] for f in filas] == ["sol-1", "sol-2"]
+    # cada parte guarda su propia ventana (si no, chocarían en el índice único)
+    assert (bd.filas["sol-1"]["fecha_inicio"], bd.filas["sol-1"]["fecha_fin"]) == (date(2026, 9, 1), date(2026, 9, 15))
+    assert (bd.filas["sol-2"]["fecha_inicio"], bd.filas["sol-2"]["fecha_fin"]) == (date(2026, 9, 15), date(2026, 9, 30))
+
+
+def test_5002_el_corte_cambia_con_cada_intento(bd, monkeypatch, intentos_previos):
+    cortes = []
+    for previas in (1, 2):
+        bd.filas.clear()
+        intentos_previos["n"] = previas
+        llamadas = _sat(monkeypatch, [_agotada(), "a", "b"])
+        _crear()
+        cortes.append(llamadas[1]["fin"])
+    assert cortes[0] != cortes[1]
+
+
+def test_5002_con_las_dos_partes_agotadas_relanza_con_mensaje_claro(bd, monkeypatch, intentos_previos):
+    from backend.sat_fiel import SolicitudesAgotadasError
+
+    _sat(monkeypatch, [_agotada(), _agotada(), _agotada()])
+
+    with pytest.raises(SolicitudesAgotadasError, match="Descarga los XML desde el portal del SAT"):
+        _crear()
+
+    assert bd.filas["sol-1"]["error_msg"].startswith("Parte 1 de 2 (01/09/2026 00:00:00 a 15/09/2026 23:59:")
+    assert bd.filas["sol-2"]["error_msg"].startswith("Parte 2 de 2 (")
+    assert all(f["estado"] == "fallo" for f in bd.filas.values())
+
+
+def test_5002_con_las_dos_partes_agotadas_y_tolerancia_devuelve_las_filas_en_fallo(bd, monkeypatch, intentos_previos):
+    _sat(monkeypatch, [_agotada(), _agotada(), _agotada()])
+
+    filas = _crear(tolerar_transitorios=True)
+
+    assert [f["estado"] for f in filas] == ["fallo", "fallo"]
+
+
+def test_5002_con_una_parte_agotada_conserva_la_otra(bd, monkeypatch, intentos_previos):
+    _sat(monkeypatch, [_agotada(), "SAT-1", _agotada()])
+
+    filas = _crear()
+
+    assert [f["estado"] for f in filas] == ["solicitado", "fallo"]
+    assert bd.filas["sol-2"]["error_msg"].startswith("Parte 2 de 2 ")

@@ -155,9 +155,7 @@ export function DataTable<T>({
                       ? sort.dir === "asc" ? "ascending" : "descending"
                       : column.sortValue ? "none" : undefined
                   }
-                  className={`h-11 bg-muted/70 text-[11px] font-bold uppercase ${
-                    column.align === "right" ? "text-right" : ""
-                  }`}
+                  className={column.align === "right" ? "text-right" : ""}
                 >
                   {column.sortValue ? (
                     <button

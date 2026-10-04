@@ -1,17 +1,19 @@
 "use client";
 
 import { useParams } from "next/navigation";
-import { useState } from "react";
 import { useCedulaIva } from "@/hooks/useCedulaIva";
+import { usePeriodoGlobal } from "@/hooks/usePeriodoGlobal";
+import { usePeriodos } from "@/hooks/usePeriodos";
 import { CedulaIvaTable } from "@/components/cedula-iva/CedulaIvaTable";
 import { ErrorState } from "@/components/shared/ErrorState";
 import { PageHeader } from "@/components/shared/PageHeader";
-import { PeriodFilter } from "@/components/shared/PeriodFilter";
+import { PeriodSelector } from "@/components/shared/PeriodSelector";
 import { LoadingState } from "@/components/shared/LoadingState";
 
 export default function CedulaIvaPage() {
   const params = useParams<{ empresaId: string }>();
-  const [periodo, setPeriodo] = useState("");
+  const [periodo, setPeriodo] = usePeriodoGlobal(params.empresaId);
+  const periodos = usePeriodos(params.empresaId);
   const cedula = useCedulaIva(params.empresaId, periodo);
 
   return (
@@ -21,9 +23,13 @@ export default function CedulaIvaPage() {
         title="Cédula de IVA"
         description="Determinación mensual del impuesto trasladado, acreditable y resultado."
       />
-      <PeriodFilter id="cedula-periodo" value={periodo} onChange={setPeriodo} />
+      <PeriodSelector
+        id="cedula-periodo"
+        value={periodo}
+        onChange={setPeriodo}
+        periodosConDatos={periodos.data?.periodos ?? []}
+      />
 
-      {!periodo && <p className="text-sm text-muted-foreground">Selecciona un periodo para calcular la cédula.</p>}
       {cedula.isLoading && <LoadingState label="Calculando cédula de IVA" />}
       {cedula.isError && (
         <ErrorState

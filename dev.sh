@@ -62,7 +62,10 @@ fi
 echo "[2/4] Creando/validando .env desde .env.example..."
 if [ ! -f "${ROOT}/.env" ]; then
   cp "${ROOT}/.env.example" "${ROOT}/.env"
-  echo "       .env creado desde .env.example"
+  # El JWT_SECRET de la plantilla es público: cada .env local lleva el suyo, aleatorio.
+  JWT_LOCAL="$("$PYTHON" -c 'import secrets; print(secrets.token_urlsafe(64))')"
+  sed "s|^JWT_SECRET=.*|JWT_SECRET=${JWT_LOCAL}|" "${ROOT}/.env" > "${ROOT}/.env.tmp" && mv "${ROOT}/.env.tmp" "${ROOT}/.env"
+  echo "       .env creado desde .env.example (con un JWT_SECRET propio)"
 fi
 
 echo "[3/4] Iniciando backend (FastAPI puerto 8000)..."

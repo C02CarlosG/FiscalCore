@@ -2,6 +2,10 @@
 
 Backend FastAPI (FiscalCore) y frontend Next.js en `frontend/` (Next.js + TS + Tailwind + shadcn/ui + TanStack Query), reescritura del frontend original ya integrada a `main` — ver spec en `docs/superpowers/specs/2026-07-10-reescritura-frontend-design.md`. Detalles completos en `AGENTS.md`.
 
+## Trabajo en paralelo
+
+El plan maestro (`docs/superpowers/specs/2026-10-01-paridad-y-mejoras-roadmap.md`) se ejecuta en tres sesiones simultáneas (carriles A — CFDI, B — SAT, C — Cálculos). Antes de empezar, lee su sección "Trabajo en paralelo (3 sesiones)": toma solo la siguiente entrega de tu carril, edita solo los archivos de tu carril y usa solo tu rango de migraciones.
+
 ## Estructura
 
 - `backend/` — API Python. `backend/main_api.py` arma la app FastAPI; los routers viven en `backend/routers/`.

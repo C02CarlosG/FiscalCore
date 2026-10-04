@@ -131,3 +131,27 @@ def test_xlsx_con_celdas_de_fecha_y_extension_en_mayusculas(entorno):
         {"fecha": "2026-01-15", "monto": "1500.50"},
         {"fecha": "2026-01-16", "monto": "-300.00"},
     ]
+
+
+def test_si_falla_un_movimiento_no_queda_el_estado_de_cuenta_a_medias(entorno):
+    """Los movimientos se insertan en una sola transacción: un fallo a la mitad
+    deja la base como estaba, no con las primeras filas cargadas."""
+    from datetime import date
+    from decimal import Decimal
+
+    import psycopg2
+
+    from backend.banco_parser import MovimientoBancario
+    from backend.routers.ingesta import _insertar_movimientos_nuevos
+
+    db, client, headers, empresa_id = entorno
+    movimientos = [
+        MovimientoBancario(date(2026, 1, 5), "SPEI RECIBIDO", "R1", Decimal("100.00"), "deposito"),
+        MovimientoBancario(date(2026, 1, 6), "PAGO", "R2", Decimal("-50.00"), "cargo"),
+        MovimientoBancario(date(2026, 1, 7), "TIPO INVALIDO", "R3", Decimal("10.00"), "otro"),
+    ]
+
+    with pytest.raises(psycopg2.Error):
+        _insertar_movimientos_nuevos(empresa_id, "bbva", "enero.csv", movimientos)
+
+    assert _total(db, empresa_id) == 0

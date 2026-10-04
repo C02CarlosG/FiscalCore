@@ -169,9 +169,12 @@ detiene a las demás. Al arrancar no necesita reconciliar nada: lo pendiente sig
   **72 horas**; solo una solicitud activa por conjunto de parámetros.
 - **Códigos de rechazo**:
   - `5003` (tope máximo): se parte la ventana (`crear_solicitud_ventana`).
-  - `5002` (límite de **por vida** para los mismos parámetros): no se resuelve esperando.
-    Rechazo definitivo: la solicitud queda `fallo` con el mensaje del SAT. El worker
-    (F2.2) evita repetir parámetros idénticos (la corrida diaria cambia `fecha_fin`).
+  - `5002` (límite de **por vida** para los mismos parámetros: fechas y RFC): no se
+    resuelve esperando, pero con otras fechas todavía se puede pedir. Se vuelve a pedir
+    el periodo partido en dos rangos contiguos con un corte distinto en cada intento
+    (día 15 a las 23:59:59 menos N segundos, que cubren el mes segundo a segundo; arreglo
+    de `main`, integrado en `crear_solicitud_ventana`). Si ambas partes se rechazan, la
+    solicitud queda `fallo` con la indicación de subir los XML desde Ingesta.
   - `5005` (solicitud duplicada): rechazo definitivo; el índice único de ventana activa
     evita pedirla dos veces desde FiscalCore.
 - **Concurrencia hacia el SAT**: máximo `MAX_SOLICITUDES_EN_VUELO` (valor inicial 4) por
@@ -281,7 +284,7 @@ manual con COPLASUR):
    demás empresas siguen avanzando.
 8. Fallo del SAT: reintentos con la espera definida; al quinto fallo seguido queda `fallo` con el
    mensaje del SAT visible en el historial; `ultima_exitosa` no avanza.
-9. `5003` parte la ventana; `5002` y `5005` fallan de inmediato con el mensaje del SAT; `5004` cierra con cero CFDI.
+9. `5003` parte la ventana por la mitad; `5002` la pide en dos rangos con otro corte; `5005` falla de inmediato con el mensaje del SAT; `5004` cierra con cero CFDI.
 10. Desactivar detiene la creación y el avance; borrar la e.firma desactiva.
 11. Ningún texto de log, `error_msg` o `auditoria` contiene la contraseña ni bytes de la
     e.firma (prueba dedicada).

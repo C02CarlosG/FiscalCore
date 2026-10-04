@@ -36,6 +36,9 @@ export function BancoUploadForm({ empresaId }: { empresaId: string }) {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    // Se guarda antes del await: React deja event.currentTarget en null al
+    // terminar el manejador síncrono, y el reset() posterior tronaba.
+    const form = event.currentTarget;
     setFormError(null);
     setResultado(null);
 
@@ -63,7 +66,7 @@ export function BancoUploadForm({ empresaId }: { empresaId: string }) {
       setBancoSeleccionado("");
       setBancoLibre("");
       setPeriodo("");
-      event.currentTarget.reset();
+      form.reset();
     } catch (err) {
       if (err instanceof ApiError) {
         setFormError(err.message);

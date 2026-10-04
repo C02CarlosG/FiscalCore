@@ -20,15 +20,25 @@ monkeypatchean las funciones de background (`_importar_paquetes_bg`,
 `_sync_completo_bg`) directamente — el objetivo aquí es la capa de router
 (parseo/validación/respuesta), no los workers, que son otra unidad."""
 import backend.fiel_store as fiel_store
+import pytest
 from fastapi.testclient import TestClient
 
 import backend.main_api as main
 from backend import db, sat_sync
-from backend.deps import get_current_user
+from backend.deps import get_current_user, limiter
 from backend.routers import sat
 from backend.sat_fiel import FIELError
 
 client = TestClient(main.app)
+
+
+@pytest.fixture(autouse=True)
+def _reset_rate_limiter():
+    # /fiel/sync permite 10 llamadas por minuto: sin reiniciar el contador, las
+    # pruebas que lo llaman de seguido terminan en 429.
+    limiter.reset()
+    yield
+    limiter.reset()
 
 EMPRESA = "emp-1"
 
@@ -653,28 +663,172 @@ def test_sync_completo_exitoso_ambos_tipos_agenda_background(monkeypatch):
     assert len(llamadas_bg[0]["solicitudes"]) == 2
 
 
-def test_sync_completo_ventana_ya_en_curso_da_409(monkeypatch):
-    import psycopg2.errors
-
+def _preparar_sync(monkeypatch, respuestas_sat, solicitudes_previas=0):
+    """Mockea DB, FIEL y SAT para /fiel/sync. ``respuestas_sat`` es una lista
+    (en orden de llamada) de IDs del SAT o de excepciones a lanzar."""
     _auth(monkeypatch)
-    monkeypatch.setattr(db, "query_one", lambda *a, **k: {"rfc": "TEST010101AAA"})
     monkeypatch.setattr(fiel_store, "estado_fiel", lambda db_, eid: {"vencida": False})
     monkeypatch.setattr(fiel_store, "obtener_signer", lambda db_, eid: _FakeSigner())
+
+    def _query_one(sql, params=()):
+        if "COUNT(*)" in sql:
+            return {"n": solicitudes_previas}
+        return {"rfc": "TEST010101AAA"}
+    monkeypatch.setattr(db, "query_one", _query_one)
+
+    contador = {"n": 0}
+    actualizaciones = []
+
+    def _execute(sql, params=(), returning=False):
+        if returning:
+            contador["n"] += 1
+            return {"id": f"sol-{contador['n']}"}
+        actualizaciones.append((sql, params))
+        return None
+    monkeypatch.setattr(db, "execute", _execute)
+
+    pedidas = []
+    respuestas = iter(respuestas_sat)
+
+    def _solicitar(creds, rfc, tipo, desde, hasta, **kw):
+        pedidas.append((tipo, desde, hasta))
+        r = next(respuestas)
+        if isinstance(r, Exception):
+            raise r
+        return r
+    monkeypatch.setattr(sat_sync, "solicitar_descarga", _solicitar)
+    monkeypatch.setattr(sat, "_sync_completo_bg", lambda **kw: None)
+    return pedidas, actualizaciones
+
+
+def _sync(tipo, periodo="2026-09"):
+    try:
+        return client.post(
+            f"/api/v1/sat/empresas/{EMPRESA}/fiel/sync", data={"tipo": tipo, "periodo": periodo},
+        )
+    finally:
+        _teardown()
+
+
+def test_sync_con_solicitudes_agotadas_pide_el_mes_partido_en_dos(monkeypatch):
+    """5002 en el mes completo: se pide en dos rangos contiguos, sin perder ni un segundo."""
+    from datetime import date, datetime
+    from backend.sat_fiel import SolicitudesAgotadasError
+
+    pedidas, actualizaciones = _preparar_sync(
+        monkeypatch, [SolicitudesAgotadasError("5002"), "id-parte-1", "id-parte-2"],
+        solicitudes_previas=3,
+    )
+
+    r = _sync("emitidos")
+
+    assert r.status_code == 200
+    assert r.json()["solicitudes"] == [
+        {"id": "sol-1", "tipo": "emitidos"}, {"id": "sol-2", "tipo": "emitidos"},
+    ]
+    assert r.json()["errores"] == []
+    assert pedidas == [
+        ("emitidos", date(2026, 9, 1), date(2026, 9, 30)),
+        ("emitidos", datetime(2026, 9, 1, 0, 0, 0), datetime(2026, 9, 15, 23, 59, 56)),
+        ("emitidos", datetime(2026, 9, 15, 23, 59, 57), datetime(2026, 9, 30, 23, 59, 59)),
+    ]
+    registradas = [p for sql, p in actualizaciones if "estado='solicitado'" in sql]
+    assert registradas == [("id-parte-1", "sol-1"), ("id-parte-2", "sol-2")]
+
+
+def test_sync_cada_intento_partido_usa_un_corte_distinto(monkeypatch):
+    from backend.sat_fiel import SolicitudesAgotadasError
+
+    cortes = []
+    for previas in (1, 2):
+        pedidas, _ = _preparar_sync(
+            monkeypatch, [SolicitudesAgotadasError("5002"), "a", "b"], solicitudes_previas=previas,
+        )
+        _sync("recibidos")
+        cortes.append(pedidas[1][2])
+
+    assert cortes[0] != cortes[1]
+
+
+def test_sync_ambos_si_falla_emitidos_igual_pide_recibidos(monkeypatch):
+    pedidas, actualizaciones = _preparar_sync(monkeypatch, [FIELError("SAT no disponible"), "id-rec"])
+
+    r = _sync("ambos")
+
+    assert r.status_code == 200
+    assert [t for t, _, _ in pedidas] == ["emitidos", "recibidos"]
+    assert r.json()["solicitudes"] == [{"id": "sol-2", "tipo": "recibidos"}]
+    assert r.json()["errores"] == ["emitidos: SAT no disponible"]
+    assert any("estado='fallo'" in sql and p == ("SAT no disponible", "sol-1") for sql, p in actualizaciones)
+
+
+def test_sync_con_las_dos_partes_agotadas_da_502_con_mensaje_claro(monkeypatch):
+    from backend.sat_fiel import SolicitudesAgotadasError
+
+    agotada = SolicitudesAgotadasError("5002")
+    _, actualizaciones = _preparar_sync(monkeypatch, [agotada, agotada, agotada])
+
+    r = _sync("emitidos")
+
+    assert r.status_code == 502
+    assert "Descarga los XML desde el portal del SAT" in r.json()["detail"]
+    fallos = [p[0] for sql, p in actualizaciones if "estado='fallo'" in sql]
+    assert fallos[0].startswith("Parte 1 de 2 (01/09/2026 00:00:00 a 15/09/2026 23:59:59): ")
+    assert fallos[1].startswith("Parte 2 de 2 (16/09/2026 00:00:00 a 30/09/2026 23:59:59): ")
+
+
+def test_sync_con_una_parte_agotada_conserva_la_otra(monkeypatch):
+    from backend.sat_fiel import SolicitudesAgotadasError
+
+    _, actualizaciones = _preparar_sync(
+        monkeypatch, [SolicitudesAgotadasError("5002"), "id-parte-1", SolicitudesAgotadasError("5002")],
+    )
+
+    r = _sync("emitidos")
+
+    assert r.status_code == 200
+    assert r.json()["solicitudes"] == [{"id": "sol-1", "tipo": "emitidos"}]
+    fallos = [p[0] for sql, p in actualizaciones if "estado='fallo'" in sql]
+    assert len(fallos) == 1 and fallos[0].startswith("Parte 2 de 2 ")
+
+
+def test_sync_ventana_ya_en_curso_da_409(monkeypatch):
+    import psycopg2.errors
+
+    _preparar_sync(monkeypatch, [])
 
     def _execute(sql, params=(), returning=False):
         raise psycopg2.errors.UniqueViolation("duplicada")
     monkeypatch.setattr(db, "execute", _execute)
 
-    try:
-        r = client.post(
-            f"/api/v1/sat/empresas/{EMPRESA}/fiel/sync",
-            data={"tipo": "emitidos", "periodo": "2026-01"},
-        )
-    finally:
-        _teardown()
+    r = _sync("emitidos")
 
     assert r.status_code == 409
     assert "en curso" in r.json()["detail"]
+
+
+def test_sync_ambos_si_uno_ya_esta_en_curso_pide_el_otro(monkeypatch):
+    import psycopg2.errors
+
+    pedidas, _ = _preparar_sync(monkeypatch, ["id-rec"])
+    ejecutar = db.execute
+    llamadas = {"n": 0}
+
+    def _execute(sql, params=(), returning=False):
+        if sql.lstrip().startswith("INSERT"):
+            llamadas["n"] += 1
+            if llamadas["n"] == 1:
+                raise psycopg2.errors.UniqueViolation("duplicada")
+        return ejecutar(sql, params, returning)
+    monkeypatch.setattr(db, "execute", _execute)
+
+    r = _sync("ambos")
+
+    assert r.status_code == 200
+    assert [t for t, _, _ in pedidas] == ["recibidos"]
+    assert r.json()["errores"] == ["emitidos: ya hay una descarga en curso para 2026-09"]
+
+
 
 
 # ─── POST /sat/empresas/{id}/fiel/sync/avanzar ──────────────────────────────────

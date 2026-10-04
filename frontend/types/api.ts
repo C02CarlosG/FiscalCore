@@ -11,6 +11,8 @@ export interface LoginResponse {
   user_id: string;
   email: string;
   nombre: string | null;
+  /** Ausente en respuestas de versiones anteriores del servidor. */
+  rol?: "admin" | "contador";
   empresas: EmpresaResumen[];
 }
 
@@ -173,138 +175,6 @@ export interface ConciliacionesAccionables {
   pares: ParConciliacion[];
 }
 
-export interface CfdiEmitidoRow {
-  uuid: string;
-  serie_folio: string | null;
-  fecha: string;
-  rfc_receptor: string;
-  nombre_receptor: string | null;
-  subtotal: number;
-  descuento: number;
-  total: number;
-  iva: number;
-  metodo_pago: string | null;
-  forma_pago: string | null;
-  uso_cfdi: string | null;
-  moneda: string | null;
-  estado: string;
-  estado_pago: string | null;
-  es_anticipo: boolean;
-  es_factura_con_anticipo: boolean;
-}
-
-export interface EmitidosResumen {
-  subtotal: number;
-  iva_trasladado: number;
-  total_facturado: number;
-  vigentes: number;
-  canceladas: number;
-  total_cfdi_periodo: number;
-  ingreso_neto_periodo: number;
-  num_ingresos: number;
-  num_egresos: number;
-}
-
-export interface EmitidosResponse {
-  periodo: string;
-  empresa_rfc: string;
-  resumen: EmitidosResumen;
-  ingresos: {
-    ventas_servicios: CfdiEmitidoRow[];
-    anticipos: CfdiEmitidoRow[];
-    facturas_con_anticipo: CfdiEmitidoRow[];
-  };
-  egresos: {
-    notas_credito: CfdiEmitidoRow[];
-    aplicaciones_anticipo: CfdiEmitidoRow[];
-  };
-}
-
-export interface CfdiRecibidoRow {
-  uuid: string;
-  serie_folio: string | null;
-  fecha: string;
-  rfc_emisor: string;
-  nombre_emisor: string | null;
-  subtotal: number;
-  total: number;
-  iva: number;
-  estado: string;
-}
-
-export interface RecibidosResumen {
-  subtotal: number;
-  iva_acreditable: number;
-  total: number;
-  num_compras: number;
-  num_egresos: number;
-  vigentes: number;
-  canceladas: number;
-}
-
-export interface RecibidosResponse {
-  periodo: string;
-  resumen: RecibidosResumen;
-  compras: CfdiRecibidoRow[];
-  egresos: CfdiRecibidoRow[];
-}
-
-export interface CfdiVisorRow {
-  uuid: string;
-  tipo_comprobante: string;
-  serie_folio: string | null;
-  fecha: string;
-  rfc_emisor: string;
-  nombre_emisor: string | null;
-  rfc_receptor: string;
-  nombre_receptor: string | null;
-  total: number;
-  iva: number;
-  estado: string;
-  direccion: "emitido" | "recibido";
-}
-
-export interface VisorSatResumen {
-  total_cfdi: number;
-  emitidos: number;
-  recibidos: number;
-  vigentes: number;
-  canceladas: number;
-  monto_total: number;
-}
-
-export interface VisorSatResponse {
-  periodo: string;
-  empresa_rfc: string;
-  resumen: VisorSatResumen;
-  cfdi: CfdiVisorRow[];
-}
-
-export interface CfdiNominaRow {
-  uuid: string;
-  serie_folio: string | null;
-  fecha: string;
-  rfc_receptor: string;
-  nombre_receptor: string | null;
-  subtotal: number;
-  total: number;
-  estado: string;
-}
-
-export interface NominaResumen {
-  total_nomina: number;
-  num_recibos: number;
-  vigentes: number;
-  canceladas: number;
-}
-
-export interface NominaResponse {
-  periodo: string;
-  empresa_rfc: string;
-  resumen: NominaResumen;
-  recibos: CfdiNominaRow[];
-}
-
 export interface FielEstado {
   tiene_fiel: boolean;
   rfc_certificado?: string | null;
@@ -339,4 +209,70 @@ export interface SatSyncResponse {
   solicitudes: { id: string; tipo: string }[];
   periodo: string;
   tipos: string[];
+  // Tipos que el SAT rechazó cuando otro sí se aceptó ("emitidos: …").
+  errores?: string[];
+}
+
+// ─── Listado unificado de CFDI (F3) ──────────────────────────────────────────
+
+export type CfdiTipoComprobante = "I" | "E" | "T" | "N" | "P";
+
+export interface CfdiColumna {
+  clave: string;
+  etiqueta: string;
+  tipo_dato: "texto" | "fecha" | "fecha_hora" | "moneda" | "numero" | "booleano" | "catalogo" | "lista";
+  grupo: "encabezado" | "concepto";
+  visible_por_defecto: boolean;
+  ordenable: boolean;
+  filtrable: boolean;
+  opciones: string[];
+}
+
+export interface CfdiColumnasResponse {
+  encabezado: CfdiColumna[];
+  concepto: CfdiColumna[];
+}
+
+export type CfdiValor = string | number | boolean | null | string[];
+
+/** Una fila del listado: trae todas las columnas del catálogo, no solo las visibles. */
+export type CfdiFila = Record<string, CfdiValor>;
+
+export interface CfdiListadoResponse {
+  items: CfdiFila[];
+  total: number;
+  pagina: number;
+  por_pagina: number;
+}
+
+/** Cifras en pesos. Sin CFDI en el periodo, `conteo` es 0 y las demás van en null. */
+export interface CfdiTotalesBloque {
+  conteo: number;
+  retencion_iva: number | null;
+  retencion_ieps: number | null;
+  retencion_isr: number | null;
+  traslado_iva: number | null;
+  traslado_ieps: number | null;
+  traslado_isr: number | null;
+  total_retenciones: number | null;
+  subtotal: number | null;
+  descuento: number | null;
+  neto: number | null;
+  total: number | null;
+}
+
+export interface CfdiAdvertencia {
+  tipo: string;
+  uuid_factura: string;
+  mensaje: string;
+}
+
+export interface CfdiResumenResponse {
+  conteos: Record<CfdiTipoComprobante, number>;
+  totales: { periodo: CfdiTotalesBloque; acumulado: CfdiTotalesBloque };
+  advertencias: CfdiAdvertencia[];
+}
+
+export interface PeriodosResponse {
+  periodos: string[];
 }

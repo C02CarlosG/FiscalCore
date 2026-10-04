@@ -15,12 +15,15 @@ import logging
 import os
 import re
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 
 import psycopg2.errors
 
 from . import cfdi_store, db
-from .sat_fiel import FIELError, SolicitudRechazada, descargar_paquete, solicitar_descarga, verificar_solicitud
+from .sat_fiel import (
+    FIELError, SolicitudesAgotadasError, SolicitudRechazada, descargar_paquete, solicitar_descarga,
+    verificar_solicitud,
+)
 
 _log = logging.getLogger(__name__)
 
@@ -136,15 +139,41 @@ def registrar_solicitud_fallida(solicitud_id: str, mensaje: str) -> str:
 
 # Códigos de rechazo del servicio de Descarga Masiva (verificados contra la
 # documentación pública el 2026-10-03; ver "Dudas abiertas" de la spec de F2):
-#   5002  límite de por vida de solicitudes con los mismos parámetros. No se resuelve
-#         esperando: hay que pedir otra ventana. Rechazo definitivo.
-#   5003  tope máximo de CFDI (200,000) o metadatos (1,000,000) por solicitud: se parte.
+#   5002  límite de **por vida** de solicitudes con los mismos parámetros (fechas y RFC).
+#         No se resuelve esperando: con otras fechas todavía se puede pedir, así que se
+#         vuelve a pedir el periodo partido en dos rangos con un corte distinto.
+#   5003  tope máximo de CFDI (200,000) o metadatos (1,000,000) por solicitud: se parte
+#         la ventana por la mitad.
 #   5005  ya hay una solicitud activa con esos parámetros. Rechazo definitivo.
 CODIGO_TOPE_MAXIMO = "5003"
+CODIGO_SOLICITUDES_AGOTADAS = "5002"
+
+MENSAJE_AGOTADAS = (
+    "El SAT ya no acepta más solicitudes de este periodo (código 5002: se agotaron "
+    "las solicitudes de por vida). Descarga los XML desde el portal del SAT y súbelos en Ingesta."
+)
 
 
 class SolicitudActiva(Exception):
     """Ya hay una solicitud activa para esa ventana (índice uq_sat_solicitudes_ventana_activa)."""
+
+
+def rangos_partidos(inicio: date, fin: date, intento: int) -> list[tuple[datetime, datetime]]:
+    """Parte el periodo en dos rangos contiguos que lo cubren segundo a segundo.
+
+    El corte cae el día 15 a las 23:59:59 menos ``intento`` segundos, así cada
+    intento manda al SAT fechas distintas a las anteriores (el límite 5002 es por
+    parámetros idénticos) sin dejar fuera ningún CFDI del periodo.
+    """
+    corte = datetime.combine(inicio.replace(day=15), time(23, 59, 59)) - timedelta(seconds=intento)
+    return [
+        (datetime.combine(inicio, time.min), corte),
+        (corte + timedelta(seconds=1), datetime.combine(fin, time(23, 59, 59))),
+    ]
+
+
+def _a_fecha(valor: date | datetime) -> date:
+    return valor.date() if isinstance(valor, datetime) else valor
 
 
 def _marcar_fallo(fila: dict, mensaje: str) -> None:
@@ -154,6 +183,94 @@ def _marcar_fallo(fila: dict, mensaje: str) -> None:
     )
     fila["estado"] = "fallo"
     fila["error_msg"] = mensaje
+
+
+def _marcar_solicitada(fila: dict, id_sat: str) -> None:
+    db.execute(
+        "UPDATE sat_solicitudes SET id_solicitud_sat=%s, estado='solicitado', updated_at=NOW() WHERE id=%s",
+        (id_sat, str(fila["id"])),
+    )
+    fila["id_solicitud_sat"] = id_sat
+    fila["estado"] = "solicitado"
+
+
+def _insertar_solicitud(
+    empresa: dict, tipo: str, inicio: date | datetime, fin: date | datetime, *,
+    origen: str, estado_comprobante: str, tipo_solicitud: str, usuario_id: str | None,
+) -> dict:
+    """Inserta la fila ``pendiente`` de una ventana. ``SolicitudActiva`` si ya hay una en vuelo."""
+    try:
+        fila = db.execute(
+            """INSERT INTO sat_solicitudes
+               (empresa_id, usuario_id, tipo, periodo_inicio, periodo_fin, estado,
+                origen, estado_comprobante, tipo_solicitud, fecha_inicio, fecha_fin)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING *""",
+            (str(empresa["id"]), usuario_id, tipo, inicio.strftime("%Y-%m"), fin.strftime("%Y-%m"),
+             "pendiente", origen, estado_comprobante, tipo_solicitud, _a_fecha(inicio), _a_fecha(fin)),
+            returning=True,
+        )
+    except psycopg2.errors.UniqueViolation as exc:
+        raise SolicitudActiva(
+            f"Ya hay una solicitud activa de {tipo} para {_a_fecha(inicio)} a {_a_fecha(fin)}"
+        ) from exc
+    return dict(fila)
+
+
+def _pedir_en_dos_partes(
+    creds, empresa: dict, tipo: str, inicio: date, fin: date, fila: dict, *,
+    origen: str, estado_comprobante: str, tipo_solicitud: str, usuario_id: str | None,
+    tolerar_transitorios: bool,
+) -> list[dict]:
+    """5002 sobre el periodo completo: lo vuelve a pedir partido en dos rangos contiguos.
+
+    La primera parte reutiliza la fila ya creada; la segunda inserta una nueva. El
+    corte depende de cuántas solicitudes tiene ya el periodo, así nunca repite fechas
+    que el SAT ya vio. Devuelve todas las filas (aceptadas y fallidas); si ninguna se
+    aceptó, relanza el rechazo salvo que ``tolerar_transitorios``.
+    """
+    _log.info("Solicitud %s: el SAT agotó las del periodo %s completo; se pide en dos partes",
+              fila["id"], inicio.strftime("%Y-%m"))
+    intento = (db.query_one(
+        "SELECT COUNT(*) AS n FROM sat_solicitudes WHERE empresa_id=%s AND tipo=%s AND periodo_inicio=%s",
+        (str(empresa["id"]), tipo, inicio.strftime("%Y-%m")),
+    ) or {}).get("n") or 0
+
+    filas: list[dict] = []
+    ultimo_error: FIELError | None = None
+    for num, (desde, hasta) in enumerate(rangos_partidos(inicio, fin, intento)):
+        if num == 0:
+            parte = fila
+            db.execute(
+                "UPDATE sat_solicitudes SET fecha_inicio=%s, fecha_fin=%s, updated_at=NOW() WHERE id=%s",
+                (_a_fecha(desde), _a_fecha(hasta), str(fila["id"])),
+            )
+            parte["fecha_inicio"], parte["fecha_fin"] = _a_fecha(desde), _a_fecha(hasta)
+        else:
+            parte = _insertar_solicitud(
+                empresa, tipo, desde, hasta, origen=origen, estado_comprobante=estado_comprobante,
+                tipo_solicitud=tipo_solicitud, usuario_id=usuario_id,
+            )
+        filas.append(parte)
+        try:
+            id_sat = solicitar_descarga(
+                creds, empresa["rfc"], tipo, desde, hasta,
+                tipo_solicitud=tipo_solicitud, estado_comprobante=estado_comprobante,
+            )
+        except FIELError as exc:
+            ultimo_error = exc
+            _marcar_fallo(
+                parte,
+                f"Parte {num + 1} de 2 ({desde:%d/%m/%Y %H:%M:%S} a {hasta:%d/%m/%Y %H:%M:%S}): "
+                + (MENSAJE_AGOTADAS if isinstance(exc, SolicitudesAgotadasError) else str(exc)),
+            )
+            continue
+        _marcar_solicitada(parte, id_sat)
+
+    if all(f["estado"] == "fallo" for f in filas) and not tolerar_transitorios:
+        if isinstance(ultimo_error, SolicitudesAgotadasError):
+            raise SolicitudesAgotadasError(MENSAJE_AGOTADAS)
+        raise ultimo_error
+    return filas
 
 
 def crear_solicitud_ventana(
@@ -171,12 +288,13 @@ def crear_solicitud_ventana(
 ) -> list[dict]:
     """Registra una solicitud de la ventana ``[inicio, fin]`` y la envía al SAT.
 
-    Si el SAT la rechaza por volumen (5003), la fila se cierra como ``fallo`` y la
-    ventana se parte en dos mitades que se piden por separado (recursivamente, hasta
-    un día). Devuelve las filas resultantes: ``solicitado`` las aceptadas, ``fallo``
-    las rechazadas de forma definitiva.
+    - Rechazo por volumen (5003): la fila se cierra como ``fallo`` y la ventana se parte
+      en dos mitades por fecha que se piden por separado (recursivo, hasta un día).
+    - Solicitudes agotadas (5002): el periodo se vuelve a pedir partido en dos rangos
+      con un corte distinto (``_pedir_en_dos_partes``).
 
-    Un rechazo definitivo (5002, 5005, otros) o un error transitorio:
+    Devuelve las filas resultantes: ``solicitado`` las aceptadas, ``fallo`` las
+    rechazadas. Ante otro rechazo definitivo (5005, …) o un error transitorio:
     - ``tolerar_transitorios=False`` (endpoints): la fila queda en ``fallo`` y se
       relanza la excepción para que el endpoint responda 502.
     - ``tolerar_transitorios=True`` (worker): el rechazo definitivo queda en ``fallo``
@@ -185,20 +303,9 @@ def crear_solicitud_ventana(
 
     Levanta ``SolicitudActiva`` si esa ventana ya tiene una solicitud en vuelo.
     """
-    try:
-        fila = db.execute(
-            """INSERT INTO sat_solicitudes
-               (empresa_id, usuario_id, tipo, periodo_inicio, periodo_fin, estado,
-                origen, estado_comprobante, tipo_solicitud, fecha_inicio, fecha_fin)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING *""",
-            (str(empresa["id"]), usuario_id, tipo, inicio.strftime("%Y-%m"), fin.strftime("%Y-%m"),
-             "pendiente", origen, estado_comprobante, tipo_solicitud, inicio, fin),
-            returning=True,
-        )
-    except psycopg2.errors.UniqueViolation as exc:
-        raise SolicitudActiva(f"Ya hay una solicitud activa de {tipo} para {inicio} a {fin}") from exc
-
-    fila = dict(fila)
+    kw = dict(origen=origen, estado_comprobante=estado_comprobante,
+              tipo_solicitud=tipo_solicitud, usuario_id=usuario_id)
+    fila = _insertar_solicitud(empresa, tipo, inicio, fin, **kw)
     sol_id = str(fila["id"])
     try:
         id_sat = solicitar_descarga(
@@ -217,11 +324,11 @@ def crear_solicitud_ventana(
                 resultado: list[dict] = []
                 for ini, fi in mitades:
                     resultado += crear_solicitud_ventana(
-                        creds, empresa, tipo, ini, fi, origen=origen,
-                        estado_comprobante=estado_comprobante, tipo_solicitud=tipo_solicitud,
-                        usuario_id=usuario_id, tolerar_transitorios=tolerar_transitorios,
-                    )
+                        creds, empresa, tipo, ini, fi, tolerar_transitorios=tolerar_transitorios, **kw)
                 return resultado
+        elif exc.codigo == CODIGO_SOLICITUDES_AGOTADAS:
+            return _pedir_en_dos_partes(
+                creds, empresa, tipo, inicio, fin, fila, tolerar_transitorios=tolerar_transitorios, **kw)
         _marcar_fallo(fila, str(exc))
         if tolerar_transitorios:
             return [fila]
@@ -234,12 +341,7 @@ def crear_solicitud_ventana(
         _marcar_fallo(fila, str(exc))
         raise
 
-    db.execute(
-        "UPDATE sat_solicitudes SET id_solicitud_sat=%s, estado='solicitado', updated_at=NOW() WHERE id=%s",
-        (id_sat, sol_id),
-    )
-    fila["id_solicitud_sat"] = id_sat
-    fila["estado"] = "solicitado"
+    _marcar_solicitada(fila, id_sat)
     return [fila]
 
 

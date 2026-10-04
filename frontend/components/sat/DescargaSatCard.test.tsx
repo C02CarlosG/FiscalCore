@@ -96,6 +96,27 @@ describe("DescargaSatCard", () => {
     expect(await screen.findByText(/Solicitud enviada al SAT/)).toBeInTheDocument();
   });
 
+  it("shows which type the SAT rejected when the other one was accepted", async () => {
+    mockApi({ tiene_fiel: true, vencida: false });
+    const base = vi.mocked(apiFetch).getMockImplementation()!;
+    const rechazo = "emitidos: El SAT ya no acepta más solicitudes de este periodo (código 5002)";
+    vi.mocked(apiFetch).mockImplementation(async (path: string, options?: RequestInit) => {
+      if (path === SYNC_URL) {
+        return { mensaje: "ok", solicitudes: [{ id: "s2", tipo: "recibidos" }], periodo: "2026-09",
+          tipos: ["emitidos", "recibidos"], errores: [rechazo] };
+      }
+      return base(path, options);
+    });
+    const user = userEvent.setup();
+    renderCard();
+
+    await user.type(await screen.findByLabelText(/periodo/i), "2026-09");
+    await user.click(screen.getByRole("button", { name: /descargar del sat/i }));
+
+    expect(await screen.findByText(/Solicitud enviada al SAT/)).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent(rechazo);
+  });
+
   it("lists previous downloads with their status and imported count", async () => {
     mockApi({ tiene_fiel: true, vencida: false }, [solicitud]);
     renderCard();
@@ -104,6 +125,13 @@ describe("DescargaSatCard", () => {
     expect(screen.getByText("2026-09")).toBeInTheDocument();
     expect(screen.getByText("Descargado")).toBeInTheDocument();
     expect(screen.getByText("289 de 289")).toBeInTheDocument();
+  });
+
+  it("muestra la fecha de la solicitud como dd/mm/aaaa hh:mm", async () => {
+    mockApi({ tiene_fiel: true, vencida: false }, [{ ...solicitud, created_at: "2026-09-29T19:07:00" }]);
+    renderCard();
+
+    expect(await screen.findByText("29/09/2026 19:07")).toBeInTheDocument();
   });
 
   it("shows the SAT error of a failed download", async () => {

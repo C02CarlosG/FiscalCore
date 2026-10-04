@@ -153,6 +153,7 @@ paths:
                 token_type: bearer
                 user_id: "550e8400-e29b-41d4-a716-446655440000"
                 nombre: "Carlos Hernandez"
+                rol: contador
                 empresas:
                   - empresa_id: "a1b2c3d4-0001-0001-0001-000000000001"
                     rfc: XAXX010101000
@@ -1710,11 +1711,19 @@ paths:
 
         Todo ocurre en background. Requiere FIEL guardada y vigente.
 
-        **Tipo**: emitidos | recibidos | ambos
+        **Tipo**: emitidos | recibidos | ambos. Cada tipo se pide por separado:
+        si el SAT rechaza uno, el otro se sigue pidiendo y el rechazo llega en
+        `errores` (responde 502 solo si no se aceptó ninguno; 409 si todos los
+        tipos pedidos ya tienen una descarga en curso para ese periodo).
 
-        Si el SAT rechaza el mes por volumen (codigo 5003, mas de 200,000 CFDI),
-        la solicitud se parte en dos mitades que se piden por separado. Si ya hay
-        una descarga en curso para el mismo periodo y tipo, responde 409.
+        **Solicitudes agotadas (CodEstatus 5002)**: el SAT limita de por vida
+        las solicitudes con las mismas fechas y RFC. Si rechaza el mes
+        completo, se vuelve a pedir partido en dos rangos contiguos (corte el
+        dia 15, distinto en cada intento), que cubren el mes segundo a segundo;
+        el mes queda en dos solicitudes de ese tipo.
+
+        **Tope maximo (CodEstatus 5003, mas de 200,000 CFDI)**: la solicitud se
+        parte en dos mitades por fecha, recursivamente hasta un dia.
       parameters:
         - $ref: '#/components/parameters/EmpresaId'
       requestBody:
@@ -1750,6 +1759,7 @@ paths:
                     tipo: recibidos
                 periodo: "2024-01"
                 tipos: [emitidos, recibidos]
+                errores: []
         '400':
           $ref: '#/components/responses/BadRequestError'
         '401':
@@ -2612,6 +2622,10 @@ components:
         nombre:
           type: string
           nullable: true
+        rol:
+          type: string
+          enum: [admin, contador]
+          description: Rol del usuario; la interfaz lo muestra bajo su nombre.
         empresas:
           type: array
           items:
@@ -3612,5 +3626,10 @@ components:
           type: string
         tipos:
           type: array
+          items:
+            type: string
+        errores:
+          type: array
+          description: Tipos que el SAT rechazó cuando otro sí se aceptó ("emitidos - motivo").
           items:
             type: string

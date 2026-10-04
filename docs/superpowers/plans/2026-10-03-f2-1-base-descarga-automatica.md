@@ -24,7 +24,7 @@
 
 - La extracción no cambia el orden ni la atomicidad de los `UPDATE` condicionales de `_avanzar_solicitud` (dos pasadas no importan el mismo paquete) (Task 3).
 - El índice único parcial no hace fallar la migración cuando ya hay solicitudes activas repetidas (Task 1).
-- `5004` sigue siendo éxito con cero CFDI (Task 4). `5002`/`5005` son rechazos definitivos y `5003` parte la ventana (Task 5).
+- `5004` sigue siendo éxito con cero CFDI (Task 4). `5005` es un rechazo definitivo, `5003` parte la ventana por la mitad y `5002` la pide en dos rangos con otro corte (Task 5, integrado con el arreglo de `main`).
 - Las esperas de reintento son las del spec: 5 min, 15 min, 1 h, 6 h; al quinto fallo seguido (tras los 4 reintentos), `fallo` (Task 4).
 - La partición de ventanas nunca produce un rango vacío ni solapado (Task 2).
 
@@ -129,7 +129,7 @@ WHERE s.estado IN ('pendiente','solicitado','en_proceso','terminado')
 
 Reglas (del spec):
 - Error transitorio del SAT al **verificar** o **solicitar**: `intentos += 1`, `proximo_intento = now() + espera_reintento(intentos)`; tras 4 reintentos (quinto fallo seguido) → `fallo` con el mensaje del SAT.
-- Los rechazos del SAT al solicitar (`5002` límite de por vida, `5005` duplicada) **no** se reintentan: son definitivos (ver Task 5). Se verificó que `5002` no se resuelve esperando.
+- Los rechazos del SAT al solicitar (`5002` límite de por vida, `5005` duplicada) **no** se reintentan con espera (ver Task 5): `5002` se resuelve pidiendo otras fechas y `5005` es definitivo.
 - `5004` sigue siendo éxito con cero CFDI (ya cubierto; solo se agrega prueba de regresión).
 - Los reintentos de **paquete** conservan su mecanismo actual (3 intentos en `error_msg`); no se unifican en esta entrega.
 - `avanzar_solicitud` no toca solicitudes cuyo `proximo_intento` es futuro.
