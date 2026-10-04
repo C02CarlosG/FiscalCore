@@ -15,15 +15,21 @@ import logging
 from datetime import date
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Request, UploadFile
+from pydantic import BaseModel
 
 from .. import db
 from ..auditoria import registrar_evento
 from ..deps import get_current_user, validar_acceso_empresa, serializar, limiter
 from ..sat_fiel import FIELError, cargar_fiel, solicitar_descarga, verificar_solicitud
 from ..sat_sync import (
+    ConfigSyncInvalida,
     SolicitudActiva,
     crear_solicitud_ventana,
     ESTADOS_PENDIENTES as _ESTADOS_PENDIENTES,
+    configurar_sync,
+    desactivar_por_fiel_eliminada,
+    estado_sync,
+    forzar_corrida,
     avanzar_solicitud as _avanzar_solicitud,
     estado_sat as _estado_sat,
     importar_paquetes as _importar_paquetes_bg,
@@ -325,7 +331,62 @@ async def eliminar_fiel_empresa(
     validar_acceso_empresa(empresa_id, current_user)
     from ..fiel_store import eliminar_fiel
     eliminada = eliminar_fiel(db, empresa_id)
+    # Sin e.firma no hay descarga automática: se apaga en la misma operación.
+    desactivar_por_fiel_eliminada(empresa_id, current_user["user_id"])
     return {"eliminada": eliminada}
+
+
+# ---------------------------------------------------------------------------
+# Descarga automática (worker): estado, activación y "actualizar ahora"
+# ---------------------------------------------------------------------------
+
+class ConfigSyncBody(BaseModel):
+    activa: bool
+    consentimiento: bool = False
+
+
+def _o_http(resultado):
+    """Ejecuta una operación de sat_sync traduciendo sus errores a HTTP."""
+    try:
+        return resultado()
+    except ConfigSyncInvalida as exc:
+        raise HTTPException(status_code=exc.codigo, detail=exc.detalle)
+
+
+@router.get("/empresas/{empresa_id}/sync/estado")
+async def estado_sync_empresa(
+    empresa_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Estado de la descarga automática: configuración, última y próxima corrida, progreso."""
+    validar_acceso_empresa(empresa_id, current_user)
+    return estado_sync(empresa_id)
+
+
+@router.put("/empresas/{empresa_id}/sync/config")
+@limiter.limit("10/minute")
+async def configurar_sync_empresa(
+    request: Request,
+    empresa_id: str,
+    cuerpo: ConfigSyncBody,
+    current_user: dict = Depends(get_current_user),
+):
+    """Activa (con consentimiento explícito) o desactiva la descarga automática de la empresa."""
+    validar_acceso_empresa(empresa_id, current_user)
+    return _o_http(lambda: configurar_sync(
+        empresa_id, current_user["user_id"], activa=cuerpo.activa, consentimiento=cuerpo.consentimiento))
+
+
+@router.post("/empresas/{empresa_id}/sync/ahora")
+@limiter.limit("5/minute")
+async def sync_ahora_empresa(
+    request: Request,
+    empresa_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Fuerza una corrida: el worker la toma en su siguiente ciclo."""
+    validar_acceso_empresa(empresa_id, current_user)
+    return _o_http(lambda: forzar_corrida(empresa_id, current_user["user_id"]))
 
 
 @router.post("/empresas/{empresa_id}/fiel/sync")

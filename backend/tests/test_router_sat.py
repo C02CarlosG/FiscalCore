@@ -516,6 +516,8 @@ def test_estado_fiel_sin_fiel_guardada(monkeypatch):
 def test_eliminar_fiel_exitoso(monkeypatch):
     _auth(monkeypatch)
     monkeypatch.setattr(fiel_store, "eliminar_fiel", lambda db_, eid: True)
+    apagadas = []
+    monkeypatch.setattr(sat, "desactivar_por_fiel_eliminada", lambda eid, uid: apagadas.append((eid, uid)))
 
     try:
         r = client.delete(f"/api/v1/sat/empresas/{EMPRESA}/fiel")
@@ -524,11 +526,13 @@ def test_eliminar_fiel_exitoso(monkeypatch):
 
     assert r.status_code == 200
     assert r.json() == {"eliminada": True}
+    assert apagadas == [(EMPRESA, "u1")]          # sin e.firma se apaga la descarga automática
 
 
 def test_eliminar_fiel_no_existia(monkeypatch):
     _auth(monkeypatch)
     monkeypatch.setattr(fiel_store, "eliminar_fiel", lambda db_, eid: False)
+    monkeypatch.setattr(sat, "desactivar_por_fiel_eliminada", lambda eid, uid: False)
 
     try:
         r = client.delete(f"/api/v1/sat/empresas/{EMPRESA}/fiel")

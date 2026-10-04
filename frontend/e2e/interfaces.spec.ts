@@ -88,6 +88,33 @@ const ivaAnualInicio = {
   totales: { trasladado: 12480, acreditable: 7800, iva_retenido: 0, total_a_cargo: 4680, total_a_favor: 0 },
   advertencias: [{ codigo: "prorrateo", mensaje: "El factor de prorrateo del acreditable es 1 (actividad 100 % gravada); la cédula de IVA acepta otro factor.", cfdi: null }],
 };
+const bloqueIva = (iva16: number, cfdi = 0) => ({
+  cfdi, pagos: cfdi,
+  bases: { "16": iva16 / 0.16, "8": 0, "0": 0, exento: 0, otras: 0, no_objeto: 0 },
+  iva: { "16": iva16, "8": 0, otras: 0, total: iva16 }, retenciones: 0, total: iva16,
+});
+const resumenIvaFlujo = {
+  empresa_id: "empresa-demo", periodo: "2026-09", factor_prorrateo: 1,
+  trasladado: {
+    origenes: { contado: bloqueIva(1600, 2), credito: bloqueIva(800, 1), notas_credito: bloqueIva(0) },
+    total: bloqueIva(2400, 3), no_considerados: { cfdi: 0, iva: 0 }, reasignados: { cfdi: 0, iva: 0 },
+  },
+  acreditable: {
+    origenes: { contado: bloqueIva(400, 1), credito: bloqueIva(0), notas_credito: bloqueIva(0) },
+    total: bloqueIva(400, 1), no_considerados: { cfdi: 1, iva: 16 }, reasignados: { cfdi: 0, iva: 0 },
+    ajustado: 400, retenciones_no_acreditables: 0,
+  },
+  retenciones_a_enterar: 0,
+  resultado: { trasladado: 2400, acreditable: 400, retenciones_a_favor: 0, iva_por_pagar: 2000, saldo_a_cargo: 2000, saldo_a_favor: 0 },
+  advertencias: [{ codigo: "pago_v1", mensaje: "Hay cobros o pagos con complemento de pago versión 1.0: su IVA se aproxima.", cfdi: 1 }],
+};
+const renglonIva = (uuid: string, iva: number) => ({
+  uuid, tipo_comprobante: "I", fecha_emision: "2026-09-01T10:00:00", fecha_efecto: "2026-09-01T10:00:00", fecha_pago: null,
+  uuid_pago: null, parcialidad: null, origen: "contado", contraparte_rfc: "BBB010101BBB", contraparte: "Proveedor ficticio uno",
+  bases: { "16": iva / 0.16, "8": 0, "0": 0, exento: 0, otras: 0, no_objeto: 0 }, iva: { "16": iva, "8": 0, otras: 0, total: iva },
+  retencion: 0, iva_total: iva, total_documento: iva * 7.25, marcas: [], motivo: null, ajuste: null,
+});
+const filasIva = [renglonIva("cfdi-demo-001", 1000), renglonIva("cfdi-demo-002", 600)];
 const filasCfdi = [
   { uuid: "cfdi-demo-001", fecha_emision: "2026-09-01T10:00:00", folio: "001", contraparte: "Proveedor ficticio uno", total: 1250, estado: "vigente" },
   { uuid: "cfdi-demo-002", fecha_emision: "2026-09-02T11:30:00", folio: "002", contraparte: "Proveedor ficticio dos", total: 2500, estado: "vigente" },
@@ -216,6 +243,22 @@ test.beforeEach(async ({ page }) => {
         resultado: { iva_por_pagar: 0, saldo_a_cargo: 0, saldo_a_favor: 0 },
         comparativo_sat: { diot_iva_pagado: 0, diferencia: 0 },
       };
+    } else if (/\/iva-flujo\/ajustes$/.test(path)) {
+      body = route.request().method() === "GET" ? { items: [] } : { uuid: "cfdi-demo-001", accion: "excluir" };
+    } else if (/\/iva-flujo\/ajustes\/(trasladado|acreditable)\//.test(path)) {
+      await route.fulfill({ status: 204 });
+      return;
+    } else if (/\/iva-flujo\/[\d-]+\/exportar$/.test(path)) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        body: "PK",
+      });
+      return;
+    } else if (/\/iva-flujo\/[\d-]+\/detalle$/.test(path)) {
+      body = { items: filasIva, total: filasIva.length, pagina: 1, por_pagina: 50 };
+    } else if (/\/iva-flujo\/[\d-]+$/.test(path)) {
+      body = { ...resumenIvaFlujo, periodo: path.split("/").pop() };
     } else if (path.endsWith("/inicio/resumen")) {
       const periodo = new URL(route.request().url()).searchParams.get("periodo");
       body = { ...resumenInicio, periodo };
@@ -341,6 +384,59 @@ test("el Inicio sigue legible en móvil sin desbordar la página", async ({ page
 
   const desborda = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
   expect(desborda).toBe(false);
+});
+
+test("IVA base flujo muestra las tarjetas, el desglose por tasa y el detalle de lo que compone la cifra", async ({ page }) => {
+  await page.goto(`/empresas/${empresaId}/iva-flujo?periodo=2026-09`);
+
+  await expect(page.getByRole("heading", { name: "IVA base flujo" })).toBeVisible();
+  await expect(page.getByRole("tab", { name: /Trasladado/ })).toContainText("$2,400.00");
+  await expect(page.getByRole("tab", { name: /A cargo/ })).toContainText("$2,000.00");
+  await expect(page.getByRole("table", { name: "Bases e IVA por tasa" })).toBeVisible();
+  await expect(page.getByRole("list", { name: "Advertencias del IVA" })).toContainText("versión 1.0");
+  await expect(page.getByRole("cell", { name: /Proveedor ficticio uno/ }).first()).toBeVisible();
+
+  await page.getByRole("tab", { name: /Acreditable/ }).click();
+  await expect(page).toHaveURL(/vista=acreditable/);
+  await page.getByRole("button", { name: /No considerados/ }).click();
+  await expect(page).toHaveURL(/origen=no_considerados/);
+});
+
+test("IVA base flujo: no considerar un CFDI pide el motivo y lo guarda", async ({ page }) => {
+  await page.goto(`/empresas/${empresaId}/iva-flujo?periodo=2026-09`);
+  await page.getByRole("button", { name: /No considerar cfdi-demo-001/ }).click();
+
+  const dialogo = page.getByRole("dialog", { name: "No considerar CFDI" });
+  await expect(dialogo.getByRole("button", { name: "Guardar" })).toBeDisabled();
+  await dialogo.getByLabel("Motivo").fill("factura duplicada");
+  const peticion = page.waitForRequest((r) => r.url().endsWith("/iva-flujo/ajustes") && r.method() === "PUT");
+  await dialogo.getByRole("button", { name: "Guardar" }).click();
+
+  expect((await peticion).postDataJSON()).toEqual({
+    uuid: "cfdi-demo-001", direccion: "trasladado", accion: "excluir", motivo: "factura duplicada",
+  });
+  await expect(page.getByRole("dialog", { name: "No considerar CFDI" })).toHaveCount(0);
+});
+
+test("IVA base flujo exporta a Excel y abre el visor del CFDI", async ({ page }) => {
+  await page.goto(`/empresas/${empresaId}/iva-flujo?periodo=2026-09`);
+
+  const descarga = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Exportar" }).click();
+  expect((await descarga).suggestedFilename()).toBe("iva_trasladado_contado_2026-09.xlsx");
+
+  await page.getByRole("button", { name: /Ver CFDI cfdi-dem/ }).first().click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+});
+
+test("IVA base flujo está en el menú y sigue legible en móvil", async ({ page }) => {
+  await page.goto(`/empresas/${empresaId}/dashboard`);
+  await expect(page.getByRole("link", { name: "IVA base flujo" })).toBeVisible();
+
+  await page.setViewportSize({ width: 390, height: 800 });
+  await page.goto(`/empresas/${empresaId}/iva-flujo?periodo=2026-09`);
+  await expect(page.getByRole("tab", { name: /Trasladado/ })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)).toBe(false);
 });
 
 test("dashboard muestra skeleton mientras consulta", async ({ page }) => {

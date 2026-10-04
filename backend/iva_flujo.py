@@ -598,15 +598,10 @@ def _renglon(ev: dict, estado: tuple, ajuste: Optional[dict]) -> dict:
     }
 
 
-def detalle(eventos: list[dict], periodo: str, direccion: str, origen: str, ajustes: dict,
-            pagina: int = 1, por_pagina: int = 50) -> dict:
-    """Renglones que componen una cifra del resumen, por fecha de efecto. Sirve a la
-    pantalla, a la exportación y a la trazabilidad (cada renglón lleva su UUID)."""
+def renglones(eventos: list[dict], periodo: str, direccion: str, origen: str, ajustes: dict) -> list[dict]:
+    """Todos los renglones que componen una cifra, por fecha de efecto (sin paginar)."""
     if direccion not in DIRECCIONES or origen not in ORIGENES_DETALLE:
         raise ValueError("dirección u origen inválido")
-    if pagina < 1 or not 1 <= por_pagina <= MAX_POR_PAGINA:
-        raise ValueError("paginación inválida")
-
     filas = []
     for ev in eventos:
         if ev["direccion"] != direccion:
@@ -623,9 +618,18 @@ def detalle(eventos: list[dict], periodo: str, direccion: str, origen: str, ajus
         if incluir:
             filas.append((ev, estado, ajustes.get((llave(ev["uuid"]), direccion))))
     filas.sort(key=lambda t: (_iso(t[0]["fecha_efecto"]), t[0]["uuid"], t[0]["uuid_pago"] or ""))
+    return [_renglon(*t) for t in filas]
+
+
+def detalle(eventos: list[dict], periodo: str, direccion: str, origen: str, ajustes: dict,
+            pagina: int = 1, por_pagina: int = 50) -> dict:
+    """Una página de ``renglones``. Sirve a la pantalla y a la trazabilidad (cada renglón lleva su UUID)."""
+    if pagina < 1 or not 1 <= por_pagina <= MAX_POR_PAGINA:
+        raise ValueError("paginación inválida")
+    filas = renglones(eventos, periodo, direccion, origen, ajustes)
     inicio = (pagina - 1) * por_pagina
     return {
-        "items": [_renglon(*t) for t in filas[inicio:inicio + por_pagina]],
+        "items": filas[inicio:inicio + por_pagina],
         "total": len(filas),
         "pagina": pagina,
         "por_pagina": por_pagina,

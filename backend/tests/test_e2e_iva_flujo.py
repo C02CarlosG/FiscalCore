@@ -422,3 +422,34 @@ def test_si_la_auditoria_falla_el_ajuste_no_queda_guardado(entorno, monkeypatch)
     assert r.status_code == 500
     n = db.query_one("SELECT COUNT(*) AS n FROM iva_ajustes WHERE empresa_id = %s", (empresa_id,))
     assert n["n"] == 0                                           # el cambio se deshizo junto con la auditoría
+
+
+def test_exportar_trae_los_mismos_renglones_que_el_detalle_y_deja_auditoria(entorno):
+    import openpyxl
+    from io import BytesIO
+
+    db, client, headers, _empresa = entorno
+    detalle = _detalle(entorno, "2026-09", "trasladado", "contado", por_pagina=500)["items"]
+
+    r = client.get(_url(entorno, "2026-09/exportar"), headers=headers, params={"direccion": "trasladado", "origen": "contado"})
+
+    assert r.status_code == 200, r.text
+    ws = openpyxl.load_workbook(BytesIO(r.content))["Detalle"]
+    enc = [c.value for c in ws[1]]
+    uuids = [ws.cell(row=i, column=enc.index("UUID") + 1).value for i in range(2, ws.max_row + 1)]
+    assert uuids == [i["uuid"] for i in detalle]
+    iva = sum(ws.cell(row=i, column=enc.index("IVA total") + 1).value for i in range(2, ws.max_row + 1))
+    assert round(iva, 2) == round(sum(i["iva_total"] for i in detalle), 2)
+    n = db.query_one("SELECT COUNT(*) AS n FROM auditoria WHERE accion = 'iva_flujo_exportado'")
+    assert n["n"] >= 1
+
+
+def test_exportar_de_otra_empresa_es_403(entorno):
+    db, client, _h, empresa_id = entorno
+    db.execute("DELETE FROM usuarios WHERE email = %s", (EMAIL_AJENO,))
+    ajeno = headers_usuario_e2e(db, EMAIL_AJENO)
+
+    r = client.get(f"/api/v1/empresas/{empresa_id}/iva-flujo/2026-09/exportar", headers=ajeno,
+                   params={"direccion": "trasladado", "origen": "contado"})
+
+    assert r.status_code == 403

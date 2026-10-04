@@ -382,3 +382,96 @@ export interface InicioAdvertencia {
   mensaje: string;
   cfdi: number | null;
 }
+
+// ── IVA base flujo (F5.2) ────────────────────────────────────────────────────
+
+export type IvaDireccion = "trasladado" | "acreditable";
+export type IvaOrigen = "contado" | "credito" | "notas_credito";
+export type IvaOrigenDetalle = IvaOrigen | "no_considerados" | "reasignados";
+
+export interface IvaBases {
+  "16": number;
+  "8": number;
+  "0": number;
+  exento: number;
+  otras: number;
+  no_objeto: number;
+}
+
+export interface IvaMontos {
+  "16": number;
+  "8": number;
+  otras: number;
+  total: number;
+}
+
+export interface IvaBloque {
+  cfdi: number;
+  pagos: number;
+  bases: IvaBases;
+  iva: IvaMontos;
+  retenciones: number;
+  total: number;
+}
+
+export interface IvaDireccionResumen {
+  origenes: Record<IvaOrigen, IvaBloque>;
+  total: IvaBloque;
+  no_considerados: { cfdi: number; iva: number };
+  reasignados: { cfdi: number; iva: number };
+  /** Solo en acreditable: el IVA multiplicado por el factor de prorrateo. */
+  ajustado?: number;
+  retenciones_no_acreditables?: number;
+}
+
+export interface IvaFlujoResumen {
+  empresa_id: string;
+  periodo: string;
+  factor_prorrateo: number;
+  trasladado: IvaDireccionResumen;
+  acreditable: IvaDireccionResumen;
+  retenciones_a_enterar: number;
+  resultado: {
+    trasladado: number;
+    acreditable: number;
+    retenciones_a_favor: number;
+    iva_por_pagar: number;
+    saldo_a_cargo: number;
+    saldo_a_favor: number;
+  };
+  advertencias: InicioAdvertencia[];
+}
+
+export interface IvaAjuste {
+  accion: "excluir" | "reasignar";
+  periodo_destino: string | null;
+  motivo: string;
+}
+
+export interface IvaRenglon {
+  uuid: string;
+  tipo_comprobante: string;
+  fecha_emision: string | null;
+  fecha_efecto: string | null;
+  fecha_pago: string | null;
+  uuid_pago: string | null;
+  parcialidad: number | null;
+  origen: IvaOrigen;
+  contraparte_rfc: string | null;
+  contraparte: string | null;
+  bases: IvaBases;
+  iva: IvaMontos;
+  retencion: number;
+  iva_total: number;
+  total_documento: number;
+  marcas: string[];
+  motivo: string | null;
+  ajuste: IvaAjuste | null;
+}
+
+export interface IvaDetalle {
+  items: IvaRenglon[];
+  total: number;
+  pagina: number;
+  por_pagina: number;
+}
