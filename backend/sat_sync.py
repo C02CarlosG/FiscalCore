@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 
 import psycopg2.errors
+from zoneinfo import ZoneInfo
 
 from . import cfdi_store, db
 from .sat_fiel import (
@@ -687,3 +688,68 @@ def avanzar_solicitud(creds, solicitud: dict) -> str:
         (num_cfdi, sol_id),
     )
     return "en_proceso"
+
+
+# ---------------------------------------------------------------------------
+# Planeación de una corrida (pura)
+# ---------------------------------------------------------------------------
+
+TIPOS_DESCARGA = ("emitidos", "recibidos")
+_ZONA_CORRIDA = ZoneInfo("America/Mexico_City")
+
+
+@dataclass(frozen=True)
+class VentanaPlan:
+    """Una ventana por pedir: tipo, rango de fechas y origen de la solicitud."""
+    tipo: str
+    inicio: date
+    fin: date
+    origen: str
+
+
+def planear_corrida(
+    *,
+    hoy: date,
+    carga_inicial_ok: bool,
+    ultima_exitosa: date | None,
+    traslape_dias: int,
+    descargadas: set[tuple[str, date, date]],
+) -> list[VentanaPlan]:
+    """Decide qué ventanas hay que pedir al SAT en esta corrida.
+
+    - **Inicial** (aún no se hizo la carga, o no hay ``ultima_exitosa``): el ejercicio
+      anterior y el en curso, mes por mes, por tipo. Se omiten los meses cerrados
+      (``fin < hoy``) que ya están en ``descargadas``: repetir parámetros idénticos
+      gasta el límite de por vida del SAT (código 5002).
+    - **Diaria**: desde ``ultima_exitosa - traslape_dias`` hasta ``hoy``, por mes y por
+      tipo. El traslape evita perder CFDI timbrados con retraso.
+
+    El orden es determinista: por tipo y luego por fecha.
+    """
+    if carga_inicial_ok and ultima_exitosa is not None:
+        desde, origen = ultima_exitosa - timedelta(days=traslape_dias), "diaria"
+    else:
+        desde, origen = date(hoy.year - 1, 1, 1), "inicial"
+
+    plan: list[VentanaPlan] = []
+    for tipo in TIPOS_DESCARGA:
+        for inicio, fin in ventanas_mensuales(desde, hoy):
+            if origen == "inicial" and fin < hoy and (tipo, inicio, fin) in descargadas:
+                continue
+            plan.append(VentanaPlan(tipo, inicio, fin, origen))
+    return plan
+
+
+def proxima_corrida(ahora: datetime, hora_local: str) -> datetime:
+    """Siguiente ``hora_local`` (HH:MM, hora de la Ciudad de México) estrictamente
+    posterior a ``ahora``, en UTC. Una hora inválida cae a las 03:00."""
+    if not _HORA_RE.match(hora_local or ""):
+        hora_local = ConfigSync().hora_local
+    if ahora.tzinfo is None:
+        ahora = ahora.replace(tzinfo=timezone.utc)
+    local = ahora.astimezone(_ZONA_CORRIDA)
+    hh, mm = (int(x) for x in hora_local.split(":"))
+    candidata = local.replace(hour=hh, minute=mm, second=0, microsecond=0)
+    if candidata <= local:
+        candidata += timedelta(days=1)
+    return candidata.astimezone(timezone.utc)
