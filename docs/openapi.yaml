@@ -2873,8 +2873,9 @@ paths:
       tags: [Proveedores]
       summary: Catalogo de proveedores de la empresa
       description: |
-        Antes de listar agrega al catalogo los emisores de los CFDI recibidos vigentes que falten
-        (`agregados` dice cuantos). `q` busca en RFC y nombre.
+        **Escribe**: antes de listar agrega al catalogo los emisores de los CFDI recibidos vigentes que falten
+        (`agregados` dice cuantos; un RFC con formato invalido no entra y se cuenta en `omitidos`) y deja el evento
+        `proveedores_sincronizados` en la auditoria. `q` busca en RFC, nombre e ID fiscal.
       parameters:
         - $ref: '#/components/parameters/EmpresaId'
         - { name: q, in: query, schema: { type: string, maxLength: 100 } }
@@ -2888,6 +2889,7 @@ paths:
                 properties:
                   total: { type: integer }
                   agregados: { type: integer }
+                  omitidos: { type: integer }
                   items: { type: array, items: { $ref: '#/components/schemas/Proveedor' } }
         '401':
           $ref: '#/components/responses/UnauthorizedError'
@@ -2909,10 +2911,12 @@ paths:
               properties:
                 rfc: { type: string }
                 nombre: { type: string, maxLength: 300 }
-                tipo_tercero: { type: string, pattern: '^[0-9]{2}$', nullable: true }
-                tipo_operacion: { type: string, pattern: '^[0-9]{2}$', nullable: true }
-                pais: { type: string, maxLength: 60, nullable: true }
+                tipo_tercero: { type: string, enum: ['04', '05', '15'], nullable: true }
+                tipo_operacion: { type: string, enum: ['02', '03', '06', '07', '08', '85', '87'], nullable: true, description: "Por defecto 85" }
+                pais: { type: string, minLength: 3, maxLength: 3, nullable: true }
+                jurisdiccion_detalle: { type: string, maxLength: 300, nullable: true }
                 id_fiscal: { type: string, maxLength: 40, nullable: true }
+                efectos_fiscales: { type: boolean, nullable: true }
       responses:
         '201':
           description: Proveedor creado
@@ -2925,19 +2929,19 @@ paths:
         '403':
           $ref: '#/components/responses/ForbiddenError'
         '409':
-          description: El proveedor ya existe
+          description: El RFC (no generico) o el ID fiscal del extranjero ya existen
         '422':
-          description: RFC o codigos invalidos
+          description: RFC, codigos o reglas cruzadas invalidos (el 05 exige ID fiscal y pais; el 04 un RFC no generico; la 87 solo con el 15)
 
-  /api/v1/empresas/{empresa_id}/proveedores/{rfc}:
+  /api/v1/empresas/{empresa_id}/proveedores/{proveedor_id}:
     patch:
       operationId: editarProveedor
       tags: [Proveedores]
-      summary: Edita el nombre, tipo de tercero y de operacion de un proveedor
-      description: Solo cambia los campos enviados y queda en la auditoria. Editar el nombre impide que la alimentacion desde los CFDI lo pise.
+      summary: Edita un proveedor
+      description: Solo cambia los campos enviados y queda en la auditoria. Editar el nombre impide que la alimentacion desde los CFDI lo pise; `nombre_editado=false` la reactiva. `nombre` y `nombre_editado` no admiten null.
       parameters:
         - $ref: '#/components/parameters/EmpresaId'
-        - { name: rfc, in: path, required: true, schema: { type: string } }
+        - { name: proveedor_id, in: path, required: true, schema: { type: string, format: uuid } }
       requestBody:
         required: true
         content:
@@ -2946,10 +2950,13 @@ paths:
               type: object
               properties:
                 nombre: { type: string, maxLength: 300 }
-                tipo_tercero: { type: string, pattern: '^[0-9]{2}$', nullable: true }
-                tipo_operacion: { type: string, pattern: '^[0-9]{2}$', nullable: true }
-                pais: { type: string, maxLength: 60, nullable: true }
+                nombre_editado: { type: boolean }
+                tipo_tercero: { type: string, enum: ['04', '05', '15'], nullable: true }
+                tipo_operacion: { type: string, enum: ['02', '03', '06', '07', '08', '85', '87'], nullable: true }
+                pais: { type: string, minLength: 3, maxLength: 3, nullable: true }
+                jurisdiccion_detalle: { type: string, maxLength: 300, nullable: true }
                 id_fiscal: { type: string, maxLength: 40, nullable: true }
+                efectos_fiscales: { type: boolean, nullable: true }
       responses:
         '200':
           description: Proveedor actualizado
@@ -2963,8 +2970,10 @@ paths:
           $ref: '#/components/responses/ForbiddenError'
         '404':
           description: Proveedor no encontrado
+        '409':
+          description: Ya existe un extranjero con ese ID fiscal
         '422':
-          description: RFC o codigos invalidos
+          description: Codigos o reglas cruzadas invalidos
 
   /api/v1/empresas/{empresa_id}/cedula-iva/{periodo}:
     get:
@@ -3317,14 +3326,18 @@ components:
     Proveedor:
       type: object
       properties:
+        id: { type: string, format: uuid }
         rfc: { type: string }
         nombre: { type: string }
         nombre_editado: { type: boolean }
-        tipo_tercero: { type: string, nullable: true }
-        tipo_operacion: { type: string, nullable: true }
-        pais: { type: string, nullable: true }
+        tipo_tercero: { type: string, enum: ['04', '05', '15'], nullable: true, description: "Catalogo por confirmar contra el instructivo oficial del SAT" }
+        tipo_operacion: { type: string, enum: ['02', '03', '06', '07', '08', '85', '87'], nullable: true, description: "La 87 solo con tercero 15" }
+        pais: { type: string, minLength: 3, maxLength: 3, nullable: true, description: "ISO 3166-1 alfa-3" }
+        jurisdiccion_detalle: { type: string, nullable: true }
         id_fiscal: { type: string, nullable: true }
+        efectos_fiscales: { type: boolean, nullable: true }
         origen: { type: string, enum: [cfdi, manual] }
+        pendiente: { type: boolean, description: "Extranjero sin pais o sin ID fiscal" }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
 

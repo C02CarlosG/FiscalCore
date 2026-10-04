@@ -47,6 +47,10 @@ def entorno():
         _recibido(db, empresa_id, 2, nombre="NOMBRE NUEVO")                       # el más reciente manda
         _recibido(db, empresa_id, 3, rfc="OTR010101BBB", nombre="OTRO", estado="cancelado")   # cancelado: no entra
         _recibido(db, empresa_id, 4, rfc=RFC, nombre="YO MISMO")                  # autofactura: no es proveedor
+        _recibido(db, empresa_id, 6, rfc="XEXX010101000", nombre="ACME INC")      # extranjeros: comparten el RFC genérico
+        _recibido(db, empresa_id, 7, rfc="XEXX010101000", nombre="GLOBEX LLC")
+        _recibido(db, empresa_id, 8, rfc="XAXX010101000", nombre="PUBLICO")
+        _recibido(db, empresa_id, 9, rfc="no-es-rfc", nombre="BASURA")            # RFC con formato inválido: no entra
         yield db, client, headers, empresa_id
     finally:
         _limpiar(db)
@@ -60,43 +64,96 @@ def test_lista_se_alimenta_de_los_cfdi_recibidos_vigentes(entorno):
     r = entorno[1].get(_url(entorno), headers=entorno[2])
 
     assert r.status_code == 200, r.text
-    items = r.json()["items"]
-    assert [(i["rfc"], i["nombre"], i["origen"]) for i in items] == [(PROV, "NOMBRE NUEVO", "cfdi")]
-    assert r.json()["agregados"] == 1
-    assert entorno[1].get(_url(entorno), headers=entorno[2]).json()["agregados"] == 0     # idempotente
+    items = {(i["rfc"], i["nombre"]): i for i in r.json()["items"]}
+    assert set(items) == {(PROV, "NOMBRE NUEVO"), ("XEXX010101000", "ACME INC"), ("XEXX010101000", "GLOBEX LLC"),
+                          ("XAXX010101000", "PUBLICO")}
+    nacional = items[(PROV, "NOMBRE NUEVO")]
+    assert (nacional["tipo_tercero"], nacional["tipo_operacion"], nacional["origen"]) == ("04", "85", "cfdi")
+    extranjero = items[("XEXX010101000", "ACME INC")]
+    assert (extranjero["tipo_tercero"], extranjero["pendiente"]) == ("05", True)           # falta ID fiscal y país
+    assert items[("XAXX010101000", "PUBLICO")]["tipo_tercero"] == "15"
+    assert (r.json()["agregados"], r.json()["omitidos"]) == (4, 1)
+    again = entorno[1].get(_url(entorno), headers=entorno[2]).json()
+    assert (again["agregados"], again["omitidos"]) == (0, 1)                                # idempotente
+
+
+def test_sincronizar_deja_el_evento_en_la_auditoria(entorno):
+    aud = entorno[0].query_all("SELECT metadata FROM auditoria WHERE empresa_id = %s AND accion = 'proveedores_sincronizados'", (entorno[3],))
+
+    assert len(aud) == 1 and aud[0]["metadata"] == {"agregados": 4, "omitidos": 1}
+
+
+def _por_rfc(entorno, rfc, nombre=None):
+    items = entorno[1].get(_url(entorno), headers=entorno[2]).json()["items"]
+    return next(i for i in items if i["rfc"] == rfc and (nombre is None or i["nombre"] == nombre))
 
 
 def test_editar_audita_y_el_nombre_editado_no_se_pisa(entorno):
     db, client, headers = entorno[0], entorno[1], entorno[2]
+    pid = _por_rfc(entorno, PROV)["id"]
 
-    r = client.patch(_url(entorno, f"/{PROV.lower()}"), headers=headers,
-                     json={"nombre": "NOMBRE DEL CONTADOR", "tipo_tercero": "04", "tipo_operacion": "85"})
+    r = client.patch(_url(entorno, f"/{pid}"), headers=headers,
+                     json={"nombre": "NOMBRE DEL CONTADOR", "tipo_tercero": "04", "tipo_operacion": "06"})
 
     assert r.status_code == 200, r.text
-    assert (r.json()["nombre"], r.json()["tipo_tercero"], r.json()["nombre_editado"]) == ("NOMBRE DEL CONTADOR", "04", True)
+    assert (r.json()["nombre"], r.json()["tipo_operacion"], r.json()["nombre_editado"]) == ("NOMBRE DEL CONTADOR", "06", True)
     _recibido(db, entorno[3], 5, nombre="OTRO NOMBRE MAS RECIENTE", fecha="2026-09-20 10:00:00")
-    item = client.get(_url(entorno), headers=headers).json()["items"][0]
-    assert item["nombre"] == "NOMBRE DEL CONTADOR" and item["tipo_operacion"] == "85"
-    aud = db.query_all("SELECT accion, metadata FROM auditoria WHERE empresa_id = %s AND accion = 'proveedor_editado'", (entorno[3],))
-    assert len(aud) == 1 and aud[0]["metadata"]["despues"]["tipo_tercero"] == "04"
+    assert _por_rfc(entorno, PROV)["nombre"] == "NOMBRE DEL CONTADOR"
+    aud = db.query_all("SELECT metadata FROM auditoria WHERE empresa_id = %s AND accion = 'proveedor_editado'", (entorno[3],))
+    assert len(aud) == 1 and aud[0]["metadata"]["despues"]["tipo_operacion"] == "06"
 
 
-def test_alta_manual_y_duplicado(entorno):
+def test_nombre_editado_false_devuelve_el_nombre_a_la_alimentacion(entorno):
+    client, headers = entorno[1], entorno[2]
+    pid = _por_rfc(entorno, PROV)["id"]
+
+    assert client.patch(_url(entorno, f"/{pid}"), headers=headers, json={"nombre_editado": False}).json()["nombre_editado"] is False
+    assert _por_rfc(entorno, PROV)["nombre"] == "OTRO NOMBRE MAS RECIENTE"
+
+
+def test_varios_extranjeros_comparten_el_rfc_y_se_distinguen_por_id_fiscal(entorno):
+    client, headers = entorno[1], entorno[2]
+    acme, globex = _por_rfc(entorno, "XEXX010101000", "ACME INC"), _por_rfc(entorno, "XEXX010101000", "GLOBEX LLC")
+
+    r1 = client.patch(_url(entorno, f"/{acme['id']}"), headers=headers, json={"id_fiscal": "12-345", "pais": "usa", "tipo_tercero": "05"})
+    r2 = client.patch(_url(entorno, f"/{globex['id']}"), headers=headers, json={"id_fiscal": "12-345", "pais": "usa", "tipo_tercero": "05"})
+
+    assert r1.status_code == 200 and r1.json()["pais"] == "USA" and r1.json()["pendiente"] is False
+    assert r2.status_code == 409                                              # mismo ID fiscal
+    assert client.patch(_url(entorno, f"/{globex['id']}"), headers=headers,
+                        json={"id_fiscal": "98-765", "pais": "can", "tipo_tercero": "05"}).status_code == 200
+
+
+def test_alta_manual_de_otro_extranjero_y_duplicados(entorno):
     client, headers = entorno[1], entorno[2]
 
-    r = client.post(_url(entorno), headers=headers, json={"rfc": "xexx010101000", "nombre": "EXTRANJERO", "pais": "Estados Unidos",
-                                                           "id_fiscal": "12-3456789", "tipo_tercero": "05"})
+    r = client.post(_url(entorno), headers=headers, json={"rfc": "xexx010101000", "nombre": "INITECH", "pais": "gbr",
+                                                           "id_fiscal": "GB-1", "tipo_tercero": "05"})
     assert r.status_code == 201, r.text
-    assert r.json()["origen"] == "manual" and r.json()["rfc"] == "XEXX010101000"
-    assert client.post(_url(entorno), headers=headers, json={"rfc": "XEXX010101000"}).status_code == 409
-    assert [i["rfc"] for i in client.get(_url(entorno), headers=headers, params={"q": "extranj"}).json()["items"]] == ["XEXX010101000"]
+    assert (r.json()["origen"], r.json()["rfc"], r.json()["tipo_operacion"]) == ("manual", "XEXX010101000", "85")
+    assert client.post(_url(entorno), headers=headers, json={"rfc": "XEXX010101000", "pais": "gbr", "id_fiscal": "GB-1",
+                                                              "tipo_tercero": "05"}).status_code == 409
+    assert client.post(_url(entorno), headers=headers, json={"rfc": PROV}).status_code == 409
+    assert [i["nombre"] for i in client.get(_url(entorno), headers=headers, params={"q": "GB-1"}).json()["items"]] == ["INITECH"]
+
+
+def test_la_base_rechaza_codigos_fuera_del_catalogo(entorno):
+    import psycopg2
+
+    db = entorno[0]
+    for columna, valor in (("tipo_tercero", "ZZ"), ("tipo_operacion", "99")):
+        with pytest.raises(psycopg2.errors.CheckViolation):
+            db.execute(f"INSERT INTO proveedores (empresa_id, rfc, {columna}) VALUES (%s, 'AAA010101AAA', %s)", (entorno[3], valor))
+    with pytest.raises(psycopg2.errors.CheckViolation):
+        db.execute("INSERT INTO proveedores (empresa_id, rfc) VALUES (%s, 'aaa010101aaa')", (entorno[3],))
 
 
 def test_otra_empresa_recibe_403(entorno):
     db, client = entorno[0], entorno[1]
     db.execute("DELETE FROM usuarios WHERE email = %s", (EMAIL_AJENO,))
     ajeno = headers_usuario_e2e(db, EMAIL_AJENO)
+    pid = _por_rfc(entorno, PROV)["id"]
 
     assert client.get(_url(entorno), headers=ajeno).status_code == 403
     assert client.post(_url(entorno), headers=ajeno, json={"rfc": PROV}).status_code == 403
-    assert client.patch(_url(entorno, f"/{PROV}"), headers=ajeno, json={"nombre": "x"}).status_code == 403
+    assert client.patch(_url(entorno, f"/{pid}"), headers=ajeno, json={"nombre": "x"}).status_code == 403

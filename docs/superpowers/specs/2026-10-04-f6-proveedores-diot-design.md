@@ -25,27 +25,39 @@ que hoy devuelve `GET /diot/{periodo}` es provisional y se retira cuando exista 
 
 ## Modelo de datos (migraciones 051 y 052)
 
-**`proveedores`** (051): un renglón por tercero de la empresa.
+**`proveedores`** (051): un renglón por tercero de la empresa. Su `id` es la llave (el PATCH va por `id`, no por RFC).
 
 | Columna | Notas |
 |---|---|
-| `empresa_id`, `rfc` | único por empresa; el RFC en mayúsculas |
-| `nombre` | razón social; la toma del CFDI más reciente si el contador no la edita |
-| `tipo_tercero`, `tipo_operacion` | defaults del tercero; el contador los cambia (ver abajo) |
-| `pais`, `id_fiscal` | para extranjeros (sin RFC mexicano) |
-| `origen` | `cfdi` (alimentado automáticamente) o `manual` |
-| `nombre_editado` | `true` si el contador cambió el nombre: la alimentación ya no lo pisa |
+| `empresa_id`, `rfc` | RFC en mayúsculas (CHECK). **Único por empresa salvo los genéricos**: varios extranjeros comparten `XEXX010101000` y varias ventas al público `XAXX010101000` |
+| `nombre`, `nombre_editado` | razón social; la alimentación solo la actualiza si `nombre_editado = false` (`PATCH nombre_editado=false` devuelve el proveedor a la alimentación automática) |
+| `tipo_tercero` | `04` nacional, `05` extranjero, `15` global. CHECK en la base |
+| `tipo_operacion` | `02`, `03`, `06`, `07`, `08`, `85`, `87` (la `87` solo con tercero `15`). Por defecto `85`. CHECK en la base |
+| `pais` (CHAR(3), ISO 3166-1 alfa-3), `jurisdiccion_detalle`, `id_fiscal`, `efectos_fiscales` | extranjeros. `id_fiscal` es único por empresa entre extranjeros (`05`) |
+| `origen` | `cfdi` (alimentado) o `manual` |
 
-**`diot_terceros_periodo`** (052, F6.2): tipo de tercero y de operación **por periodo** (`empresa_id`, `periodo`, `rfc`), con
-auditoría. Si no hay renglón, aplica el default de `proveedores`.
+**Catálogos y reglas cruzadas** (`backend/diot_catalogos.py`): el `05` exige `id_fiscal` y `pais`; el `04` exige un RFC válido y no
+genérico; la `87` solo aplica al `15`. **Las claves de ambos catálogos deben confirmarse contra el instructivo oficial del SAT**:
+el revisor fiscal las tomó de memoria porque el entorno no puede consultarlo. Si difieren se corrigen en `diot_catalogos.py` y en los
+CHECK de la 051 (misma lista).
 
-Todo cambio del catálogo o del periodo queda en `auditoria` en la misma transacción (como los ajustes de IVA).
+**`diot_terceros_periodo`** (052, F6.2): tipo de tercero y de operación **por periodo**. Un tercero puede tener **varias operaciones en
+un mismo periodo**: la llave es `(empresa_id, periodo, proveedor_id, tipo_operacion)`. Si no hay renglón, aplica el default del catálogo.
+
+Todo cambio del catálogo o del periodo queda en `auditoria` en la misma transacción.
 
 ## Alimentación del catálogo
 
-`proveedores.sincronizar(empresa_id)` inserta los emisores de los CFDI recibidos vigentes que aún no están (idempotente,
-`INSERT … ON CONFLICT DO NOTHING`) y actualiza el nombre de los que no fueron editados. Se llama al consultar la lista y
-desde la DIOT; no depende del worker.
+`proveedores.sincronizar` (la llama el `GET`, **que por lo tanto escribe**) toma los emisores de los CFDI recibidos vigentes con
+`UPPER(TRIM(rfc))`:
+
+- RFC nacional válido → alta como `04`, operación `85`; si ya existe y el contador no editó el nombre, `DO UPDATE` del nombre con el del CFDI más reciente.
+- `XEXX010101000` → alta como `05`, marcada **pendiente** (falta ID fiscal y país); una por nombre de emisor, porque son terceros distintos.
+- `XAXX010101000` → alta como `15`.
+- RFC con formato inválido → no entra y se cuenta en `omitidos`.
+- Si agrega algo deja el evento `proveedores_sincronizados` en la auditoría.
+
+Es idempotente y no depende del worker.
 
 ## DIOT por flujo (F6.2)
 
@@ -57,12 +69,18 @@ ajustes del contador. Por tercero (`contraparte_rfc`):
 - **IVA acreditable** por tasa = el IVA de esos eventos, multiplicado por el factor de prorrateo del periodo.
 - **IVA no acreditable**: lo que el motor deja fuera, separado por motivo (efectivo mayor a $2,000, uso sin efectos fiscales)
   más el complemento del prorrateo.
+- **Devoluciones, descuentos y bonificaciones**: el valor y el IVA de las notas de crédito recibidas van en **su propia columna**
+  (no solo restados), porque la DIOT los declara aparte.
 - **Retenciones de IVA** que la empresa le hizo al tercero (`retencion`).
 - Los CFDI reasignados a otro periodo o excluidos a mano siguen la regla del motor: no suman en este periodo.
 
 La suma de IVA acreditable de todos los terceros **es** el acreditable de la cédula de IVA del mismo periodo (prueba de
 cuadre obligatoria). El comparativo de la cédula contra "IVA devengado (DIOT)" deja de leer `cfdi.iva_trasladado` y usa
 esta DIOT.
+
+**Trabajo de F6.2 dentro del motor `iva_flujo`** (no se calcula por fuera de él): la columna «no objeto», el IVA no acreditable
+por motivo y el 8 % por región (norte o sur) los tiene que producir el motor, por contraparte. La región no está en los datos hoy:
+se resuelve en F6.2 (p. ej. por el domicilio del proveedor o una captura por proveedor) o se quita de la DIOT.
 
 Regiones (zona norte/sur, importaciones) de la plataforma de referencia: solo se muestran cuando el motor distinga tasa
 fronteriza (8 %); importaciones quedan fuera de F6 (no hay pedimentos).
@@ -71,6 +89,7 @@ fronteriza (8 %); importaciones quedan fuera de F6 (no hay pedimentos).
 
 - Dinero en `Decimal`, medio hacia arriba, igual que el motor. Nunca `float` en el cálculo.
 - Un tercero sin RFC válido o sin tipo de tercero/operación aparece en la DIOT con una advertencia (no se omite).
+- Fundamento: la obligación de informar las operaciones con terceros es la de LIVA 32-VIII.
 - Endpoints nuevos documentados en `docs/openapi.yaml`; acceso con `validar_acceso_empresa`.
 
 ## Decisiones
@@ -80,4 +99,5 @@ fronteriza (8 %); importaciones quedan fuera de F6 (no hay pedimentos).
 | D-F6-1 | La DIOT se calcula **desde los eventos del motor**, no con SQL aparte | Reimplementar en SQL | Decidida (evita una segunda cifra de IVA) |
 | D-F6-2 | Tipo de tercero/operación por periodo con default en el catálogo | Un solo valor por tercero | Decidida (el SAT los pide por periodo) |
 | D-F6-3 | El archivo de carga espera el layout oficial | Construirlo de blogs | Decidida: no se inventa el layout |
+| D-F6-5 | El RFC genérico no es único: los extranjeros se distinguen por `id` y por ID fiscal | RFC único por empresa | Decidida (si no, solo cabría un extranjero) |
 | D-F6-4 | `GET /diot/{periodo}` (devengado) se conserva hasta F6.2 y luego delega a la DIOT por flujo | Quitarlo ya | Abierta |
