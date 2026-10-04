@@ -409,6 +409,7 @@ pausa.
 | Fecha | De → para | Qué se necesita | Estado |
 |---|---|---|---|
 | 2026-10-04 | D → B | Agregar `"informacion-fiscal": "Información fiscal"` al mapa del breadcrumb de `layout/Header.tsx` (hoy muestra "Empresas" en `/empresas/{id}/informacion-fiscal`) y `"informacion-fiscal"` a `SUB_RUTAS` de `layout/EmpresaSwitcher.tsx` (para conservar la pantalla al cambiar de empresa) | Hecho en el PR #30 (F2.3) |
+| 2026-10-04 | D → B | M7.1: en `POST /mis-empresas` (`empresas.py`), antes de crear la empresa, llamar a `suscripcion_datos.verificar_alta_rfc(current_user["user_id"])` y responder 403 con el mensaje de `LimiteRfcAlcanzado`. Mientras no esté, el límite de RFC se muestra pero no bloquea | Pendiente |
 
 ## Riesgos
 
@@ -440,6 +441,7 @@ pausa.
 | M3 | B | Pendiente |
 | V1 | D | En curso |
 | U1, M7 | D | Pendiente |
+| M7.1 | D | En revisión (PR D·M7.1): planes, límite de RFC y asignación manual, sin cobro en línea (decisiones de Carlos del 2026-10-04 en la spec); M7.2 cobro en línea pendiente | `docs/superpowers/specs/2026-10-04-m7-1-suscripcion-design.md` | `docs/superpowers/plans/2026-10-04-m7-1-suscripcion.md` |
 | F3.6 | A | Pendiente (después de F3.5b) | — | — |
 | Punto de control de paridad | Coordinación | Pendiente: al terminar F5–F7 se recorre FiscalCore con Playwright contra las capturas y se cuadran las cifras de control | — | — |
 | M2, M5 | C | Pendiente | — | — |
