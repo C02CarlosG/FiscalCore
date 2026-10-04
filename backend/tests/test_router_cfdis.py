@@ -3,7 +3,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import backend.main_api as main
-from backend import cfdi_listado, db
+from backend import cfdi_detalle, cfdi_listado, db
 from backend.deps import get_current_user
 from backend.routers import cfdis
 
@@ -112,3 +112,70 @@ def test_sin_acceso_a_la_empresa_responde_403(monkeypatch, ruta):
         main.app.dependency_overrides.clear()
 
     assert r.status_code == 403
+
+
+UUID = "1F3A0001-0000-4000-8000-000000000000"
+
+
+def test_detalle_delega_y_devuelve_el_cfdi(con_acceso, monkeypatch):
+    visto = {}
+
+    def _detalle(empresa_id, uuid):
+        visto.update(empresa_id=empresa_id, uuid=uuid)
+        return {"encabezado": {"uuid": uuid}, "conceptos": [], "total_conceptos": 0}
+
+    monkeypatch.setattr(cfdi_detalle, "detalle", _detalle)
+
+    r = client.get(f"{BASE}/{UUID}")
+
+    assert r.status_code == 200
+    assert r.json()["encabezado"]["uuid"] == UUID
+    assert visto == {"empresa_id": "emp-1", "uuid": UUID}
+
+
+def test_detalle_de_un_uuid_ajeno_o_inexistente_es_404(con_acceso, monkeypatch):
+    monkeypatch.setattr(cfdi_detalle, "detalle", lambda e, u: None)
+
+    assert client.get(f"{BASE}/{UUID}").status_code == 404
+
+
+def test_detalle_no_tapa_las_rutas_fijas(con_acceso, monkeypatch):
+    monkeypatch.setattr(cfdi_detalle, "detalle", lambda e, u: pytest.fail("no debía buscar un CFDI"))
+    monkeypatch.setattr(cfdi_listado, "resumen", lambda e, r, c: {"conteos": {}, "totales": {}, "advertencias": []})
+
+    assert client.get(f"{BASE}/resumen", params=OK).status_code == 200
+    assert client.get(f"{BASE}/columnas", params={"direccion": "emitidos"}).status_code == 200
+
+
+def test_xml_se_descarga_con_nombre_y_se_audita(con_acceso, monkeypatch):
+    eventos = []
+    monkeypatch.setattr(cfdi_detalle, "xml", lambda e, u: "<cfdi:Comprobante/>")
+    monkeypatch.setattr(cfdis, "registrar_evento", lambda *a, **k: eventos.append((a, k)))
+
+    r = client.get(f"{BASE}/{UUID}/xml")
+
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("application/xml")
+    assert f'filename="{UUID}.xml"' in r.headers["content-disposition"]
+    assert r.text == "<cfdi:Comprobante/>"
+    (args, kwargs) = eventos[0]
+    assert args[:2] == ("u1", "cfdi_xml_descargado")
+    assert kwargs["empresa_id"] == "emp-1" and kwargs["entidad_id"] == UUID
+
+
+def test_xml_inexistente_es_404_y_no_se_audita(con_acceso, monkeypatch):
+    eventos = []
+    monkeypatch.setattr(cfdi_detalle, "xml", lambda e, u: None)
+    monkeypatch.setattr(cfdis, "registrar_evento", lambda *a, **k: eventos.append(a))
+
+    assert client.get(f"{BASE}/{UUID}/xml").status_code == 404
+    assert eventos == []
+
+
+def test_xml_no_filtra_caracteres_raros_en_el_nombre(con_acceso, monkeypatch):
+    monkeypatch.setattr(cfdi_detalle, "xml", lambda e, u: "<x/>")
+    monkeypatch.setattr(cfdis, "registrar_evento", lambda *a, **k: None)
+
+    r = client.get(f"{BASE}/ab%22%0d%0aX-Evil:1/xml")
+
+    assert "X-Evil" not in r.headers and "\r" not in r.headers["content-disposition"]
