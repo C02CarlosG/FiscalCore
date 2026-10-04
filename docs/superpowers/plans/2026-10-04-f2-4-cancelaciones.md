@@ -91,9 +91,9 @@
 
 ### Task 5: Verificación y cierre
 
-- [x] `python -m pytest` completo y `npm test` en verde.
-- [x] Revisión del agente `dominio-fiscal` sobre el manejo de cancelaciones (efecto sobre cálculos, REP cancelado y `monto_cobrado`).
-- [x] Actualizar la spec (formato de metadatos y su validación pendiente), el plan maestro (fila de F2) y abrir el PR en borrador.
+- [ ] `python -m pytest` completo y `npm test` en verde.
+- [ ] Revisión del agente `dominio-fiscal` sobre el manejo de cancelaciones (efecto sobre cálculos, REP cancelado y `monto_cobrado`).
+- [ ] Actualizar la spec (formato de metadatos y su validación pendiente), el plan maestro (fila de F2) y abrir el PR en borrador.
 
 ## Fuera de esta entrega
 

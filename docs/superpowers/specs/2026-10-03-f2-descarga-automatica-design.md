@@ -188,16 +188,26 @@ detiene a las demás. Al arrancar no necesita reconciliar nada: lo pendiente sig
 
 ### Cancelaciones
 
-- La solicitud de cancelados pide metadatos (`Metadata`, `Cancelado`). Cada fila del
-  paquete trae UUID y estatus; para cada UUID existente de la empresa se hace
-  `UPDATE cfdi SET estado='cancelado'` (solo si estaba vigente) y se registra el cambio.
-- Si el CFDI cancelado pertenece a un periodo que ya tiene cédula de IVA calculada, se
-  guarda el dato (`cfdi.estado` + evento en `auditoria` con `accion =
-  'cfdi_cancelado_posterior'`) pero **no se recalcula nada**; la alerta es de M3.
-- El formato de los metadatos (paquete ZIP con `.txt` delimitado por `~`) lo lee un
-  parser nuevo `parsear_metadata` en `sat_fiel.py`. Qué trae exactamente el SAT en ese
-  paquete y si satcfdi lo expone se **verifica al empezar a implementar**; si no se
-  puede, el fallback es pedir `CFDI` + `Cancelado` (XML) y marcar por UUID.
+Implementado en F2.4 (plan `2026-10-04-f2-4-cancelaciones.md`).
+
+- La corrida diaria pide, por tipo, los **metadatos** (`tipo_solicitud='Metadata'`,
+  `estado_comprobante='Cancelado'`, origen `cancelados`) del mes en curso y los
+  `SAT_SYNC_MESES_CANCELACION` (3) anteriores. La carga inicial no los pide: baja XML vigentes y
+  no hay nada previo que cancelar.
+- El paquete es un ZIP con un `.txt` delimitado por `~`. `satcfdi` no trae lector, así que
+  `sat_fiel.parsear_metadata` lo lee guiándose por el **encabezado** (`Uuid` y `Estatus`
+  obligatorios; `Estatus` 1 = vigente, 0 = cancelado; tolera BOM, mayúsculas, columnas extra y
+  Latin-1). Si el encabezado no se reconoce falla y no se marca nada. **El formato sale de
+  descripciones públicas del SAT y debe validarse con un paquete real (COPLASUR).**
+- `sat_sync.marcar_cancelados` hace solo `vigente -> cancelado` de CFDI que ya existen (por UUID,
+  en la empresa); no crea CFDI, no des-cancela y no toca `sustituido`. Es idempotente y deja un
+  evento `cfdi_cancelado_posterior` por cada cambio (UUID, periodo, tipo, fechas, dirección).
+- **Sin recálculo silencioso**: no corre el pipeline y no modifica `monto_cobrado` de las facturas
+  que un REP cancelado había cobrado (`cfdi_store.recalcular_cobrado` no mira el estado del REP).
+  Los cálculos de IVA/ISR (F5/F7) deben filtrar por `estado`; la alerta es de M3.
+- Las cancelaciones son de **mejor esfuerzo**: una ventana de metadatos que falla no deja la
+  corrida en `error` ni detiene `ultima_exitosa`; se informa en `sync_corrida_fin`
+  (`cancelados_fallidas`, `cancelados_marcados`).
 
 ### Fallas y salud
 
