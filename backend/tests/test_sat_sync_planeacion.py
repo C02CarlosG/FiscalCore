@@ -80,6 +80,55 @@ def test_diaria_ultima_exitosa_futura_no_rompe():
         (date(2026, 10, 3), date(2026, 10, 4))]
 
 
+# ─── cancelados (metadatos) ──────────────────────────────────────────────────
+
+def _metadatos(plan):
+    return [v for v in plan if v.origen == "cancelados"]
+
+
+def test_la_carga_inicial_no_pide_cancelados():
+    assert _metadatos(_plan(meses_cancelacion=3)) == []
+
+
+def test_sin_meses_de_cancelacion_la_diaria_no_agrega_nada():
+    diaria = dict(carga_inicial_ok=True, ultima_exitosa=date(2026, 10, 2))
+    assert _plan(**diaria) == _plan(**diaria, meses_cancelacion=None)
+    assert _metadatos(_plan(**diaria)) == []
+
+
+def test_la_diaria_agrega_los_metadatos_de_cancelados_del_mes_abierto_y_los_anteriores():
+    plan = _plan(carga_inicial_ok=True, ultima_exitosa=date(2026, 10, 2), meses_cancelacion=3)
+
+    assert plan[:4] == _plan(carga_inicial_ok=True, ultima_exitosa=date(2026, 10, 2))      # primero los XML
+    esperado = [
+        (tipo, i, f)
+        for tipo in ("emitidos", "recibidos")
+        for i, f in [(date(2026, 7, 1), date(2026, 7, 31)), (date(2026, 8, 1), date(2026, 8, 31)),
+                     (date(2026, 9, 1), date(2026, 9, 30)), (date(2026, 10, 1), date(2026, 10, 4))]
+    ]
+    assert [(v.tipo, v.inicio, v.fin) for v in _metadatos(plan)] == esperado
+    assert {(v.tipo_solicitud, v.estado_comprobante) for v in _metadatos(plan)} == {("Metadata", "Cancelado")}
+    assert {(v.tipo_solicitud, v.estado_comprobante) for v in plan[:4]} == {("CFDI", "Vigente")}
+
+
+def test_cero_meses_de_cancelacion_es_solo_el_mes_abierto():
+    plan = _plan(carga_inicial_ok=True, ultima_exitosa=date(2026, 10, 2), meses_cancelacion=0)
+    assert [(v.tipo, v.inicio, v.fin) for v in _metadatos(plan)] == [
+        ("emitidos", date(2026, 10, 1), date(2026, 10, 4)), ("recibidos", date(2026, 10, 1), date(2026, 10, 4))]
+
+
+def test_los_meses_de_cancelacion_cruzan_de_anio():
+    plan = _plan(hoy=date(2027, 1, 15), carga_inicial_ok=True, ultima_exitosa=date(2027, 1, 14), meses_cancelacion=3)
+    emitidos = [(v.inicio, v.fin) for v in _metadatos(plan) if v.tipo == "emitidos"]
+    assert emitidos[0] == (date(2026, 10, 1), date(2026, 10, 31)) and emitidos[-1] == (date(2027, 1, 1), date(2027, 1, 15))
+    assert len(emitidos) == 4
+
+
+def test_una_ventana_de_metadatos_no_es_una_de_xml_aunque_tenga_las_mismas_fechas():
+    assert VentanaPlan("emitidos", date(2026, 9, 1), date(2026, 9, 30), "diaria") != \
+        VentanaPlan("emitidos", date(2026, 9, 1), date(2026, 9, 30), "cancelados", "Metadata", "Cancelado")
+
+
 # ─── proxima_corrida ─────────────────────────────────────────────────────────
 
 MX = ZoneInfo("America/Mexico_City")

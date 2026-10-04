@@ -182,3 +182,126 @@ def test_lista_vacia_no_hace_nada(empresa):
 
     _db, emp, _rfc = empresa
     assert sat_sync.marcar_cancelados(emp, []) == 0
+
+
+# ─── importar_paquetes_metadata ──────────────────────────────────────────────
+
+ENCABEZADO = ("Uuid~RfcEmisor~NombreEmisor~RfcReceptor~NombreReceptor~RfcPac~FechaEmision~"
+              "FechaCertificacionSat~Monto~EfectoComprobante~Estatus~FechaCancelacion")
+
+
+def _txt(*uuids, estatus="0"):
+    filas = [f"{u}~AAA010101AAA~E~BBB020202BBB~R~PAC010101AAA~2026-09-10T10:00:00~2026-09-10T10:01:00~116~I~{estatus}~2026-09-20T09:30:00"
+             for u in uuids]
+    return ("\n".join([ENCABEZADO, *filas]) + "\n").encode()
+
+
+def _solicitud(db, emp):
+    return str(db.execute(
+        "INSERT INTO sat_solicitudes (empresa_id, tipo, periodo_inicio, periodo_fin, estado, origen, tipo_solicitud, "
+        "estado_comprobante, fecha_inicio, fecha_fin, id_solicitud_sat, num_paquetes) "
+        "VALUES (%s,'emitidos','2026-09','2026-09','terminado','cancelados','Metadata','Cancelado',"
+        "'2026-09-01','2026-09-30','SAT-M', 2) RETURNING id", (emp,), returning=True)["id"])
+
+
+def _fila(db, sol):
+    return db.query_one("SELECT estado, error_msg, paquetes_descargados, cfdi_importados FROM sat_solicitudes WHERE id=%s", (sol,))
+
+
+def _importar(emp, sol, paquetes, desde=0):
+    from backend import sat_sync
+
+    return sat_sync.importar_paquetes_metadata(
+        object(), solicitud_id=sol, empresa_id=emp, periodo="2026-09", paquetes=paquetes, desde=desde)
+
+
+def test_importa_los_paquetes_marca_los_cfdi_y_cuenta_los_cancelados(empresa, monkeypatch):
+    from backend import sat_sync
+
+    db, emp, rfc = empresa
+    a, b, c = _uuid_nuevo(), _uuid_nuevo(), _uuid_nuevo()
+    for u in (a, b, c):
+        _cfdi(db, emp, rfc, u)
+    paquetes = {"p1": [_txt(a, b)], "p2": [_txt(c)]}
+    monkeypatch.setattr(sat_sync, "descargar_paquete", lambda creds, pid, extensiones=(".xml",): paquetes[pid])
+    sol = _solicitud(db, emp)
+
+    assert _importar(emp, sol, ["p1", "p2"]) == "descargado"
+
+    assert _fila(db, sol) == {"estado": "descargado", "error_msg": None, "paquetes_descargados": 2, "cfdi_importados": 3}
+    assert all(_estado(db, emp, u)["estado"] == "cancelado" for u in (a, b, c))
+
+
+def test_retoma_desde_el_paquete_indicado(empresa, monkeypatch):
+    from backend import sat_sync
+
+    db, emp, rfc = empresa
+    a, c = _uuid_nuevo(), _uuid_nuevo()
+    _cfdi(db, emp, rfc, a)
+    _cfdi(db, emp, rfc, c)
+    bajados = []
+    monkeypatch.setattr(sat_sync, "descargar_paquete",
+                        lambda creds, pid, extensiones=(".xml",): bajados.append(pid) or [_txt(c)])
+    sol = _solicitud(db, emp)
+
+    _importar(emp, sol, ["p1", "p2"], desde=1)
+
+    assert bajados == ["p2"]
+    assert _estado(db, emp, a)["estado"] == "vigente" and _estado(db, emp, c)["estado"] == "cancelado"
+
+
+def test_un_paquete_que_no_baja_deja_la_solicitud_para_reintentar(empresa, monkeypatch):
+    from backend import sat_sync
+    from backend.sat_fiel import FIELError
+
+    db, emp, rfc = empresa
+
+    def _falla(creds, pid, extensiones=(".xml",)):
+        raise FIELError("tiempo agotado")
+    monkeypatch.setattr(sat_sync, "descargar_paquete", _falla)
+    sol = _solicitud(db, emp)
+
+    assert _importar(emp, sol, ["p1"]) == "terminado"
+
+    fila = _fila(db, sol)
+    assert fila["estado"] == "terminado" and "intento 1 de 3" in fila["error_msg"] and "tiempo agotado" in fila["error_msg"]
+
+
+def test_un_archivo_ilegible_deja_fallo_y_no_marca_nada_de_ese_paquete(empresa, monkeypatch):
+    from backend import sat_sync
+
+    db, emp, rfc = empresa
+    a = _uuid_nuevo()
+    _cfdi(db, emp, rfc, a)
+    # el paquete trae un archivo válido y otro que no es de metadatos: no se marca ni el válido
+    monkeypatch.setattr(sat_sync, "descargar_paquete",
+                        lambda creds, pid, extensiones=(".xml",): [_txt(a), b"<html>error</html>"])
+    sol = _solicitud(db, emp)
+
+    assert _importar(emp, sol, ["p1"]) == "fallo"
+
+    fila = _fila(db, sol)
+    assert fila["estado"] == "fallo" and "Metadatos ilegibles en el paquete 1 de 1" in fila["error_msg"]
+    assert _estado(db, emp, a)["estado"] == "vigente" and _eventos(db, emp) == []
+
+
+def test_avanzar_solicitud_de_metadatos_usa_la_importacion_de_metadatos(empresa, monkeypatch):
+    """Una solicitud Metadata nunca pasa por el parser de XML ni por el pipeline."""
+    from backend import sat_sync
+
+    db, emp, rfc = empresa
+    a = _uuid_nuevo()
+    _cfdi(db, emp, rfc, a)
+    sol = str(db.execute(
+        "INSERT INTO sat_solicitudes (empresa_id, tipo, periodo_inicio, periodo_fin, estado, origen, tipo_solicitud, "
+        "estado_comprobante, fecha_inicio, fecha_fin, id_solicitud_sat) "
+        "VALUES (%s,'emitidos','2026-09','2026-09','solicitado','cancelados','Metadata','Cancelado',"
+        "'2026-09-01','2026-09-30','SAT-M') RETURNING id", (emp,), returning=True)["id"])
+    monkeypatch.setattr(sat_sync, "verificar_solicitud",
+                        lambda creds, id_sat: {"estado": 3, "num_cfdi": 1, "id_paquetes": ["p1"]})
+    monkeypatch.setattr(sat_sync, "descargar_paquete", lambda creds, pid, extensiones=(".xml",): [_txt(a)])
+    monkeypatch.setattr(sat_sync, "importar_paquetes", lambda **kw: pytest.fail("no debe usar la importación de XML"))
+
+    fila = db.query_one("SELECT * FROM sat_solicitudes WHERE id=%s", (sol,))
+    assert sat_sync.avanzar_solicitud(object(), fila) == "descargado"
+    assert _estado(db, emp, a)["estado"] == "cancelado"

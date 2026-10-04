@@ -45,13 +45,13 @@
 - `@dataclass(frozen=True) MetadataCFDI(uuid, rfc_emisor, rfc_receptor, efecto, estatus, fecha_cancelacion)` con `estatus` en `{'vigente', 'cancelado'}`.
 - `parsear_metadata(contenido: bytes) -> list[MetadataCFDI]`.
 
-- [ ] **Step 1: Pruebas que fallan**
+- [x] **Step 1: Pruebas que fallan**
   - Paquete ZIP con un `.txt` y un `.xml`: con `extensiones=(".txt",)` entrega solo el `.txt`; el valor por defecto sigue entregando solo XML.
   - Lector: encabezado completo; BOM UTF-8; mayúsculas distintas en el encabezado; columnas extra y en otro orden; `Estatus` `0`/`1` y también `Cancelado`/`Vigente`; `FechaCancelacion` vacía o con fecha; líneas vacías al final; UUID en minúsculas se entrega en mayúsculas; líneas con menos columnas se omiten con un aviso, no truenan el archivo.
   - Archivo sin `Uuid` o sin `Estatus` en el encabezado → `FIELError("Formato de metadatos no reconocido…")`; archivo vacío → lista vacía.
   - `Estatus` desconocido (`7`) o UUID mal formado → esa fila se omite, el resto sigue.
-- [ ] **Step 2–4:** fallar, implementar, verificar.
-- [ ] **Step 5: Commit** — `feat: descargar y leer paquetes de metadatos del SAT`.
+- [x] **Step 2–4:** fallar, implementar, verificar.
+- [x] **Step 5: Commit** — `feat: descargar y leer paquetes de metadatos del SAT`.
 
 ### Task 2: `marcar_cancelados`
 
@@ -59,15 +59,15 @@
 
 **Interfaces:** `marcar_cancelados(empresa_id, registros: list[MetadataCFDI]) -> int` (número de CFDI que pasaron a `cancelado`).
 
-- [ ] **Step 1: Pruebas que fallan** (Postgres real)
+- [x] **Step 1: Pruebas que fallan** (Postgres real)
   - Un CFDI `vigente` que viene `cancelado` pasa a `cancelado` y deja un evento `cfdi_cancelado_posterior` (usuario nulo, `metadata` con uuid, periodo, tipo de comprobante, `fecha_emision` y `fecha_cancelacion`).
   - Un registro `vigente` no cambia nada; un UUID inexistente no crea ni falla; un CFDI de otra empresa con el mismo UUID no se toca.
   - Segunda aplicación: ya estaba `cancelado` → cero cambios y cero eventos nuevos.
   - Un CFDI `sustituido` no se toca.
   - No modifica `monto_cobrado` ni `estado_pago` de ninguna factura.
   - Muchos registros (500) se procesan sin una consulta por fila.
-- [ ] **Step 2–4:** fallar, implementar (un `UPDATE … WHERE uuid = ANY(%s) AND estado = 'vigente' RETURNING …`), verificar.
-- [ ] **Step 5: Commit** — `feat: marcar como cancelados los CFDI que el SAT reporta cancelados`.
+- [x] **Step 2–4:** fallar, implementar (un `UPDATE … WHERE uuid = ANY(%s) AND estado = 'vigente' RETURNING …`), verificar.
+- [x] **Step 5: Commit** — `feat: marcar como cancelados los CFDI que el SAT reporta cancelados`.
 
 ### Task 3: Planeación de las ventanas de cancelados
 
@@ -75,9 +75,9 @@
 
 **Interfaces:** `VentanaPlan` gana `tipo_solicitud='CFDI'` y `estado_comprobante='Vigente'`; `planear_corrida(..., meses_cancelacion: int = 0)` agrega, solo en la corrida diaria, las ventanas `Metadata`/`Cancelado` (origen `cancelados`) de los últimos `meses_cancelacion + 1` meses por tipo.
 
-- [ ] **Step 1: Pruebas que fallan**: la carga inicial no pide cancelados; la diaria con `meses_cancelacion=3` pide 4 meses por tipo con `tipo_solicitud='Metadata'`, `estado_comprobante='Cancelado'`, origen `cancelados`; `meses_cancelacion=0` no agrega nada (compatibilidad); `_cubierta` distingue por `tipo_solicitud` y `estado_comprobante`; `descargadas` solo considera `tipo_solicitud='CFDI'`; `procesar_empresa` crea esas solicitudes con sus parámetros.
-- [ ] **Step 2–4:** fallar, implementar, verificar (las pruebas existentes de planeación no cambian).
-- [ ] **Step 5: Commit** — `feat: planear la descarga de metadatos de cancelados en la corrida diaria`.
+- [x] **Step 1: Pruebas que fallan**: la carga inicial no pide cancelados; la diaria con `meses_cancelacion=3` pide 4 meses por tipo con `tipo_solicitud='Metadata'`, `estado_comprobante='Cancelado'`, origen `cancelados`; `meses_cancelacion=0` no agrega nada (compatibilidad); `_cubierta` distingue por `tipo_solicitud` y `estado_comprobante`; `descargadas` solo considera `tipo_solicitud='CFDI'`; `procesar_empresa` crea esas solicitudes con sus parámetros.
+- [x] **Step 2–4:** fallar, implementar, verificar (las pruebas existentes de planeación no cambian).
+- [x] **Step 5: Commit** — `feat: planear la descarga de metadatos de cancelados en la corrida diaria`.
 
 ### Task 4: Importar paquetes de metadatos y cerrar la corrida
 
@@ -85,15 +85,15 @@
 
 **Interfaces:** `importar_paquetes_metadata(creds, solicitud_id, empresa_id, paquetes, desde=0, correr_pipeline=False) -> str`; `avanzar_solicitud` elige la importación según `solicitud["tipo_solicitud"]`.
 
-- [ ] **Step 1: Pruebas que fallan** (SAT simulado con un paquete de metadatos real en memoria): una solicitud `Metadata` baja su paquete, marca los CFDI y queda `descargado` con `cfdi_importados` = cancelados marcados; progreso por paquete y reintento de paquete como en XML; un archivo ilegible deja la solicitud en `fallo` con el motivo y **no marca nada**; el cierre de corrida no corre el pipeline por solicitudes de metadatos; una ventana de cancelados en `fallo` no deja la corrida en `error` y se informa en `sync_corrida_fin` (`cancelados_fallidas`); `_progreso` no cuenta esas fallas.
-- [ ] **Step 2–4:** fallar, implementar, verificar.
-- [ ] **Step 5: Commit** — `feat: importar metadatos de cancelados y cerrar la corrida sin frenar la descarga`.
+- [x] **Step 1: Pruebas que fallan** (SAT simulado con un paquete de metadatos real en memoria): una solicitud `Metadata` baja su paquete, marca los CFDI y queda `descargado` con `cfdi_importados` = cancelados marcados; progreso por paquete y reintento de paquete como en XML; un archivo ilegible deja la solicitud en `fallo` con el motivo y **no marca nada**; el cierre de corrida no corre el pipeline por solicitudes de metadatos; una ventana de cancelados en `fallo` no deja la corrida en `error` y se informa en `sync_corrida_fin` (`cancelados_fallidas`); `_progreso` no cuenta esas fallas.
+- [x] **Step 2–4:** fallar, implementar, verificar.
+- [x] **Step 5: Commit** — `feat: importar metadatos de cancelados y cerrar la corrida sin frenar la descarga`.
 
 ### Task 5: Verificación y cierre
 
-- [ ] `python -m pytest` completo y `npm test` en verde.
-- [ ] Revisión del agente `dominio-fiscal` sobre el manejo de cancelaciones (efecto sobre cálculos, REP cancelado y `monto_cobrado`).
-- [ ] Actualizar la spec (formato de metadatos y su validación pendiente), el plan maestro (fila de F2) y abrir el PR en borrador.
+- [x] `python -m pytest` completo y `npm test` en verde.
+- [x] Revisión del agente `dominio-fiscal` sobre el manejo de cancelaciones (efecto sobre cálculos, REP cancelado y `monto_cobrado`).
+- [x] Actualizar la spec (formato de metadatos y su validación pendiente), el plan maestro (fila de F2) y abrir el PR en borrador.
 
 ## Fuera de esta entrega
 

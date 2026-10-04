@@ -24,6 +24,7 @@ def entorno(monkeypatch):
     class _Sat:
         def __init__(self):
             self.pedidas = []            # (tipo, inicio, fin)
+            self.parametros = []         # kwargs de cada solicitud (tipo_solicitud, estado_comprobante)
             self.en_vuelo_al_pedir = []  # solicitudes activas de la empresa en cada llamada
             self.rechazos = {}           # (tipo, inicio) -> excepción a lanzar
             self.verificaciones = {}     # id_sat -> resultado de verificar_solicitud
@@ -35,6 +36,7 @@ def entorno(monkeypatch):
 
     def _solicitar(creds, rfc_, tipo, inicio, fin, **kw):
         sat.pedidas.append((tipo, inicio, fin))
+        sat.parametros.append(kw)
         sat.en_vuelo_al_pedir.append(db.query_one(
             "SELECT COUNT(*) AS n FROM sat_solicitudes WHERE empresa_id=%s AND estado IN "
             "('solicitado','en_proceso','terminado')", (empresa,))["n"])
@@ -52,6 +54,8 @@ def entorno(monkeypatch):
     monkeypatch.setattr(sat_sync, "solicitar_descarga", _solicitar)
     monkeypatch.setattr(sat_sync, "verificar_solicitud", _verificar)
     monkeypatch.setattr(sat_sync, "ESPERA_VERIFICACION_SEG", 0)
+    # paquetes de metadatos vacíos (sin cancelaciones): lo de cancelados se prueba en test_sat_sync_cancelados
+    monkeypatch.setattr(sat_sync, "descargar_paquete", lambda creds, id_paq, extensiones=(".xml",): [])
     monkeypatch.setattr(fiel_store, "estado_fiel", lambda db_, eid: {"tiene_fiel": True, "vencida": False})
     monkeypatch.setattr(fiel_store, "obtener_signer", lambda db_, eid: object())
     monkeypatch.setenv("SAT_SYNC_MAX_EN_VUELO", "3")
@@ -233,9 +237,12 @@ def test_corrida_diaria_pide_desde_ultima_exitosa_menos_traslape(entorno):
     assert _correr_hasta_terminar(empresa, ahora) == "al_dia"
 
     desde = hoy - timedelta(days=2) - timedelta(days=7)
-    assert min(i for _, i, _ in sat.pedidas) >= desde.replace(day=1) and min(i for _, i, _ in sat.pedidas) >= desde
-    assert {t for t, _, _ in sat.pedidas} == {"emitidos", "recibidos"}
-    assert {o["origen"] for o in db.query_all("SELECT origen FROM sat_solicitudes WHERE empresa_id=%s", (empresa,))} == {"diaria"}
+    xml = [p for p, kw in zip(sat.pedidas, sat.parametros) if kw["tipo_solicitud"] == "CFDI"]
+    assert min(i for _, i, _ in xml) >= desde
+    assert {t for t, _, _ in xml} == {"emitidos", "recibidos"}
+    por_origen = {(o["origen"], o["tipo_solicitud"]) for o in db.query_all(
+        "SELECT origen, tipo_solicitud FROM sat_solicitudes WHERE empresa_id=%s", (empresa,))}
+    assert por_origen == {("diaria", "CFDI"), ("cancelados", "Metadata")}
     assert _cfg(db, empresa)["ultima_exitosa"] > ahora - timedelta(seconds=1)
 
 
@@ -257,13 +264,14 @@ def test_pipeline_corre_una_vez_por_periodo_y_no_por_solicitud(entorno, monkeypa
         db.execute("UPDATE sat_solicitudes SET estado='descargado', cfdi_importados=5 WHERE id=%s", (solicitud_id,))
         return "descargado"
     monkeypatch.setattr(sat_sync, "importar_paquetes", _importar)
+    monkeypatch.setattr(sat_sync, "importar_paquetes_metadata", _importar)
     llamadas = []
     monkeypatch.setattr(ingesta, "_correr_pipeline", lambda e, p, r: llamadas.append(p))
 
     assert _correr_hasta_terminar(empresa, ahora) == "al_dia"
 
     periodos = {f["periodo_inicio"] for f in db.query_all(
-        "SELECT periodo_inicio FROM sat_solicitudes WHERE empresa_id=%s", (empresa,))}
+        "SELECT periodo_inicio FROM sat_solicitudes WHERE empresa_id=%s AND tipo_solicitud='CFDI'", (empresa,))}
     assert len(periodos) >= 2
     assert sorted(llamadas) == sorted(periodos)          # una vez por periodo, no por solicitud (hay 2 tipos)
 

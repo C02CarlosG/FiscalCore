@@ -535,6 +535,56 @@ def importar_paquetes(
     return estado_final
 
 
+def importar_paquetes_metadata(
+    creds,
+    solicitud_id: str,
+    empresa_id: str,
+    periodo: str,
+    paquetes: list[str],
+    desde: int = 0,
+    correr_pipeline: bool = False,
+) -> str:
+    """Descarga los paquetes de metadatos de una solicitud y marca los CFDI cancelados.
+
+    Mismo esquema que ``importar_paquetes``: empieza en el paquete ``desde``, guarda el avance
+    paquete por paquete y reintenta un paquete que no baja (``registrar_paquete_fallido``).
+    ``cfdi_importados`` cuenta los CFDI que pasaron a cancelado. Un archivo que no es de
+    metadatos deja la solicitud en ``fallo`` **sin marcar nada de ese paquete**.
+    ``periodo`` y ``correr_pipeline`` existen por compatibilidad: una cancelación nunca
+    dispara el pipeline.
+    """
+    for num_paq, id_paq in enumerate(paquetes[desde:], start=desde + 1):
+        try:
+            archivos = descargar_paquete(creds, id_paq, extensiones=(".txt",))
+        except FIELError as e:
+            _log.error("Error descargando paquete de metadatos %s: %s", id_paq, e)
+            return registrar_paquete_fallido(solicitud_id, num_paq, len(paquetes), e)
+
+        try:
+            registros = [r for contenido in archivos for r in parsear_metadata(contenido)]
+        except FIELError as e:
+            db.execute(
+                "UPDATE sat_solicitudes SET estado='fallo', error_msg=%s, updated_at=NOW() WHERE id=%s",
+                (f"Metadatos ilegibles en el paquete {num_paq} de {len(paquetes)}: {e}", solicitud_id),
+            )
+            return "fallo"
+
+        marcados = marcar_cancelados(empresa_id, registros)
+        db.execute(
+            """UPDATE sat_solicitudes
+               SET paquetes_descargados=%s, cfdi_importados=COALESCE(cfdi_importados, 0) + %s,
+                   updated_at=NOW()
+               WHERE id=%s""",
+            (num_paq, marcados, solicitud_id),
+        )
+
+    db.execute(
+        "UPDATE sat_solicitudes SET estado='descargado', error_msg=NULL, updated_at=NOW() WHERE id=%s",
+        (solicitud_id,),
+    )
+    return "descargado"
+
+
 MAX_INTENTOS_PAQUETE = 3
 
 
@@ -650,7 +700,8 @@ def avanzar_solicitud(creds, solicitud: dict, correr_pipeline: bool = True) -> s
                 (sol_id,),
             )
             return "descargado"
-        return importar_paquetes(
+        importar = importar_paquetes_metadata if solicitud.get("tipo_solicitud") == "Metadata" else importar_paquetes
+        return importar(
             creds=creds,
             solicitud_id=sol_id,
             empresa_id=str(solicitud["empresa_id"]),
@@ -707,11 +758,16 @@ _ZONA_CORRIDA = ZoneInfo("America/Mexico_City")
 
 @dataclass(frozen=True)
 class VentanaPlan:
-    """Una ventana por pedir: tipo, rango de fechas y origen de la solicitud."""
+    """Una ventana por pedir: tipo, rango de fechas, origen de la solicitud y qué se pide al SAT.
+
+    Por defecto son XML de CFDI vigentes; las ventanas de ``origen = 'cancelados'`` piden
+    los metadatos (``Metadata``) de los CFDI cancelados."""
     tipo: str
     inicio: date
     fin: date
     origen: str
+    tipo_solicitud: str = "CFDI"
+    estado_comprobante: str = "Vigente"
 
 
 def planear_corrida(
@@ -721,6 +777,7 @@ def planear_corrida(
     ultima_exitosa: date | None,
     traslape_dias: int,
     descargadas: set[tuple[str, date, date]],
+    meses_cancelacion: int | None = None,
 ) -> list[VentanaPlan]:
     """Decide qué ventanas hay que pedir al SAT en esta corrida.
 
@@ -731,7 +788,11 @@ def planear_corrida(
     - **Diaria**: desde ``ultima_exitosa - traslape_dias`` hasta ``hoy``, por mes y por
       tipo. El traslape evita perder CFDI timbrados con retraso.
 
-    El orden es determinista: por tipo y luego por fecha.
+    - **Cancelados**: solo en la corrida diaria y si ``meses_cancelacion`` no es ``None``: los
+      metadatos de cancelados del mes en curso y los ``meses_cancelacion`` anteriores. Un
+      CFDI cancelado después de descargarse solo se descubre así (el XML se pidió vigente).
+
+    El orden es determinista: primero los XML (por tipo y fecha) y luego los metadatos.
     """
     if carga_inicial_ok and ultima_exitosa is not None:
         desde, origen = ultima_exitosa - timedelta(days=traslape_dias), "diaria"
@@ -744,7 +805,19 @@ def planear_corrida(
             if origen == "inicial" and fin < hoy and (tipo, inicio, fin) in descargadas:
                 continue
             plan.append(VentanaPlan(tipo, inicio, fin, origen))
+
+    if origen == "diaria" and meses_cancelacion is not None:
+        primer_mes = _restar_meses(hoy.replace(day=1), meses_cancelacion)
+        for tipo in TIPOS_DESCARGA:
+            for inicio, fin in ventanas_mensuales(primer_mes, hoy):
+                plan.append(VentanaPlan(tipo, inicio, fin, "cancelados", "Metadata", "Cancelado"))
     return plan
+
+
+def _restar_meses(primero_de_mes: date, meses: int) -> date:
+    """Primer día del mes ``meses`` meses antes de ``primero_de_mes`` (que es día 1)."""
+    total = primero_de_mes.year * 12 + (primero_de_mes.month - 1) - meses
+    return date(total // 12, total % 12 + 1, 1)
 
 
 def proxima_corrida(ahora: datetime, hora_local: str) -> datetime:
@@ -844,8 +917,19 @@ def _cubierta(ventana: VentanaPlan, filas: list[dict]) -> bool:
     return any(
         f["tipo"] == ventana.tipo and f["fecha_inicio"] is not None
         and f["fecha_inicio"] >= ventana.inicio and f["fecha_fin"] <= ventana.fin
+        and f["tipo_solicitud"] == ventana.tipo_solicitud
+        and f["estado_comprobante"] == ventana.estado_comprobante
         for f in filas
     )
+
+
+def _es_falla(fila: dict) -> bool:
+    """Una solicitud fallida que cuenta como falla de la corrida.
+
+    No cuentan las ventanas que se partieron (sus partes sí) ni las de cancelados: son de
+    mejor esfuerzo y no deben impedir que la descarga de CFDI se dé por buena."""
+    return (fila["estado"] == "fallo" and fila.get("origen") != "cancelados"
+            and MARCA_PARTIDA not in (fila.get("error_msg") or ""))
 
 
 def _solicitudes_de_la_corrida(empresa_id: str) -> list[dict]:
@@ -863,7 +947,8 @@ def _plan_de_la_corrida(empresa_id: str, cfg: dict, ahora: datetime, config: Con
         (f["tipo"], f["fecha_inicio"], f["fecha_fin"])
         for f in db.query_all(
             "SELECT tipo, fecha_inicio, fecha_fin FROM sat_solicitudes "
-            "WHERE empresa_id=%s AND estado='descargado' AND fecha_inicio IS NOT NULL",
+            "WHERE empresa_id=%s AND estado='descargado' AND fecha_inicio IS NOT NULL "
+            "AND tipo_solicitud='CFDI'",
             (empresa_id,),
         )
     }
@@ -874,6 +959,7 @@ def _plan_de_la_corrida(empresa_id: str, cfg: dict, ahora: datetime, config: Con
         ultima_exitosa=ultima.astimezone(_ZONA_CORRIDA).date() if ultima else None,
         traslape_dias=config.traslape_dias,
         descargadas=descargadas,
+        meses_cancelacion=config.meses_cancelacion,
     )
     return plan, _solicitudes_de_la_corrida(empresa_id)
 
@@ -906,6 +992,7 @@ def _crear_ventanas_faltantes(creds, empresa: dict, cfg: dict, ahora: datetime, 
             filas = crear_solicitud_ventana(
                 creds, empresa, ventana.tipo, ventana.inicio, ventana.fin,
                 origen=ventana.origen, tolerar_transitorios=True,
+                estado_comprobante=ventana.estado_comprobante, tipo_solicitud=ventana.tipo_solicitud,
             )
         except SolicitudActiva:
             continue
@@ -917,11 +1004,17 @@ def _crear_ventanas_faltantes(creds, empresa: dict, cfg: dict, ahora: datetime, 
 def _cerrar_corrida(empresa_id: str, empresa: dict, cfg: dict, ahora: datetime, config: ConfigSync) -> str:
     """Cierra la corrida: pipeline una vez por periodo, siguiente corrida y auditoría."""
     filas = _solicitudes_de_la_corrida(empresa_id)
-    fallidas = [f for f in filas
-                if f["estado"] == "fallo" and MARCA_PARTIDA not in (f.get("error_msg") or "")]
-    importados = sum(f.get("cfdi_importados") or 0 for f in filas if f["estado"] == "descargado")
+    fallidas = [f for f in filas if _es_falla(f)]
+    metadatos = [f for f in filas if f.get("tipo_solicitud") == "Metadata"]
+    cancelados_fallidas = sum(1 for f in metadatos if f["estado"] == "fallo"
+                              and MARCA_PARTIDA not in (f.get("error_msg") or ""))
+    cancelados_marcados = sum(f.get("cfdi_importados") or 0 for f in metadatos if f["estado"] == "descargado")
+    xml = [f for f in filas if f.get("tipo_solicitud") != "Metadata"]
+    importados = sum(f.get("cfdi_importados") or 0 for f in xml if f["estado"] == "descargado")
 
-    periodos = sorted({f["periodo_inicio"] for f in filas
+    # El pipeline corre por los periodos con CFDI nuevos; una cancelación no lo dispara
+    # (no se recalcula en silencio: ver marcar_cancelados).
+    periodos = sorted({f["periodo_inicio"] for f in xml
                        if f["estado"] == "descargado" and (f.get("cfdi_importados") or 0) > 0})
     for periodo in periodos:
         try:
@@ -949,7 +1042,8 @@ def _cerrar_corrida(empresa_id: str, empresa: dict, cfg: dict, ahora: datetime, 
             (siguiente, ahora, empresa_id),
         )
     _auditar(empresa_id, "sync_corrida_fin", resultado=estado, solicitudes=len(filas),
-             cfdi_importados=importados, fallidas=len(fallidas), periodos=periodos)
+             cfdi_importados=importados, fallidas=len(fallidas), periodos=periodos,
+             cancelados_marcados=cancelados_marcados, cancelados_fallidas=cancelados_fallidas)
     return estado
 
 
@@ -1075,8 +1169,7 @@ def _progreso(empresa_id: str, cfg: dict) -> dict:
         return {"total": 0, "terminadas": 0, "fallidas": 0}
     filas = _solicitudes_de_la_corrida(empresa_id)
     terminadas = sum(1 for f in filas if f["estado"] == "descargado")
-    fallidas = sum(1 for f in filas
-                   if f["estado"] == "fallo" and MARCA_PARTIDA not in (f.get("error_msg") or ""))
+    fallidas = sum(1 for f in filas if _es_falla(f))
     activas = sum(1 for f in filas if f["estado"] in ESTADOS_ACTIVOS)
     por_crear = len(ventanas_por_crear(empresa_id, cfg, datetime.now(timezone.utc), config_sync()))
     return {"total": terminadas + fallidas + activas + por_crear, "terminadas": terminadas, "fallidas": fallidas}
