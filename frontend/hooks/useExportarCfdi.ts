@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation } from "@tanstack/react-query";
-import { apiDownload } from "@/lib/api-client";
+import { apiDescargar } from "@/lib/api-client";
 import { consultaApi, type CfdiEstadoUrl } from "@/lib/cfdi-url";
 
 /** Parámetros de `GET /cfdis/exportar`: los filtros de la pantalla, sin paginar, y las columnas visibles. */
@@ -33,11 +33,9 @@ export function useExportarCfdi(empresaId: string, direccion: "emitidos" | "reci
   return useMutation({
     mutationFn: async ({ estado, columnas }: { estado: CfdiEstadoUrl; columnas: string[] }) => {
       const consulta = consultaExportacion(estado, direccion, columnas).toString();
-      const { blob, nombre } = await apiDownload(
-        `/api/v1/empresas/${empresaId}/cfdis/exportar?${consulta}`,
-        `cfdi_${direccion}_${estado.tipo}_${estado.periodo}.xlsx`,
-      );
-      guardarArchivo(blob, nombre);
+      const blob = await apiDescargar(`/api/v1/empresas/${empresaId}/cfdis/exportar?${consulta}`);
+      // Mismo nombre que propone el servidor en Content-Disposition.
+      guardarArchivo(blob, `cfdi_${direccion}_${estado.tipo}_${estado.periodo}.xlsx`);
     },
   });
 }

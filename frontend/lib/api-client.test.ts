@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { apiDownload, apiFetch, ApiError } from "./api-client";
+import { apiDescargar, apiFetch, ApiError } from "./api-client";
 import { saveSession, getToken } from "./auth";
 import type { LoginResponse } from "@/types/api";
 
@@ -139,36 +139,33 @@ describe("apiFetch", () => {
   });
 });
 
-describe("apiDownload", () => {
+describe("apiDescargar", () => {
   beforeEach(() => {
     process.env.NEXT_PUBLIC_API_URL = "http://localhost:8000";
     window.localStorage.clear();
   });
-  afterEach(() => vi.unstubAllGlobals());
 
-  it("devuelve el archivo con el nombre del servidor y manda la sesión", async () => {
-    saveSession(loginResponse);
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      headers: new Headers({ "Content-Disposition": 'attachment; filename="cfdi_emitidos_I_2026-09.xlsx"' }),
-      blob: async () => new Blob(["x"]),
-    });
-    vi.stubGlobal("fetch", fetchMock);
-
-    const { blob, nombre } = await apiDownload("/api/x", "respaldo.xlsx");
-
-    expect(nombre).toBe("cfdi_emitidos_I_2026-09.xlsx");
-    expect(blob.size).toBe(1);
-    expect(fetchMock.mock.calls[0][1].headers.Authorization).toBe("Bearer token-123");
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
-  it("usa el nombre de respaldo y propaga el error del servidor", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce({
-      ok: true, status: 200, headers: new Headers(), blob: async () => new Blob([]),
-    }).mockResolvedValueOnce({ ...mockResponse(422, { detail: "Máximo 50,000" }), headers: new Headers() }));
+  it("pide el archivo con el token y devuelve el contenido", async () => {
+    saveSession(loginResponse);
+    const blob = new Blob(["<xml/>"], { type: "application/xml" });
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, blob: async () => blob });
+    vi.stubGlobal("fetch", fetchMock);
 
-    expect((await apiDownload("/api/x", "respaldo.xlsx")).nombre).toBe("respaldo.xlsx");
-    await expect(apiDownload("/api/x", "r.xlsx")).rejects.toMatchObject({ status: 422, message: "Máximo 50,000" });
+    const resultado = await apiDescargar("/api/v1/x/xml");
+
+    expect(resultado).toBe(blob);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("http://localhost:8000/api/v1/x/xml");
+    expect(init.headers.Authorization).toBe("Bearer token-123");
+  });
+
+  it("un 404 lanza ApiError con el detalle del servidor", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(mockResponse(404, { detail: "XML no disponible" })));
+
+    await expect(apiDescargar("/api/v1/x/xml")).rejects.toMatchObject({ status: 404, message: "XML no disponible" });
   });
 });

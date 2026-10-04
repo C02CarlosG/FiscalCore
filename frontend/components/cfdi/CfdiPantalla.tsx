@@ -18,6 +18,7 @@ import { EditorColumnas } from "@/components/cfdi/EditorColumnas";
 import { FiltroAvanzado } from "@/components/cfdi/FiltroAvanzado";
 import { CATALOGO_CIFRAS } from "@/components/cfdi/CfdiTotales";
 import { CfdiTabla } from "@/components/cfdi/CfdiTabla";
+import { CfdiVisor } from "@/components/cfdi/CfdiVisor";
 import { CfdiTabs } from "@/components/cfdi/CfdiTabs";
 import { CfdiToolbar } from "@/components/cfdi/CfdiToolbar";
 import { CfdiTotales } from "@/components/cfdi/CfdiTotales";
@@ -48,6 +49,7 @@ export function CfdiPantalla({ direccion }: { direccion: "emitidos" | "recibidos
   const [periodo, cambiarPeriodo] = usePeriodoGlobal(empresaId);
   const { params, actualizar } = useUrlParams();
   const estado = leerEstado(params, periodo);
+  const [uuidVisor, setUuidVisor] = useState<string | null>(null);
 
   const periodos = usePeriodos(empresaId);
   const columnas = useCfdiColumnas(empresaId, direccion, estado.tipo);
@@ -166,8 +168,10 @@ export function CfdiPantalla({ direccion }: { direccion: "emitidos" | "recibidos
       )}
 
       <CfdiTabla
+        empresaId={empresaId}
         columnas={columnas.data?.encabezado}
         preferencia={preferenciaTabla.data}
+        columnasConcepto={columnas.data?.concepto ?? []}
         datos={listado.data}
         cargando={listado.isFetching}
         error={listado.isError}
@@ -178,6 +182,7 @@ export function CfdiPantalla({ direccion }: { direccion: "emitidos" | "recibidos
         onOrdenar={(orden, dir) => cambiar({ orden, dir })}
         onPagina={(pagina) => cambiar({ pagina })}
         onPorPagina={(porPagina) => cambiar({ porPagina })}
+        onVer={setUuidVisor}
         onReintentar={() => listado.refetch()}
         onLimpiar={() =>
           cambiar({
@@ -217,6 +222,7 @@ export function CfdiPantalla({ direccion }: { direccion: "emitidos" | "recibidos
         filtros={estado.filtros}
         onAplicar={(filtros) => cambiar({ filtros })}
       />
+      <CfdiVisor empresaId={empresaId} uuid={uuidVisor} onCerrar={() => setUuidVisor(null)} />
     </main>
   );
 }

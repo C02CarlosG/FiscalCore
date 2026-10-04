@@ -1,57 +1,19 @@
 "use client";
 
-import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, SearchX } from "lucide-react";
+import { Fragment, useState } from "react";
+import { ArrowDown, ArrowUp, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Eye, SearchX } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { CfdiConceptos } from "@/components/cfdi/CfdiConceptos";
 import { ErrorState } from "@/components/shared/ErrorState";
-import { StatusBadge } from "@/components/shared/StatusBadge";
-import { formatearFecha, formatearFechaHora, formatearMoneda } from "@/lib/formato";
+import { CfdiCelda, alineadaALaDerecha } from "@/components/cfdi/CfdiCelda";
 import { POR_PAGINA, type CfdiEstadoUrl } from "@/lib/cfdi-url";
 import { columnasVisibles, type ColumnaPreferida } from "@/lib/columnas-preferidas";
 import type { CfdiColumna, CfdiFila, CfdiListadoResponse } from "@/types/api";
 
-const SIN_DATO = "—";
 const ENTERO = new Intl.NumberFormat("es-MX");
-
-const alineadaALaDerecha = (columna: CfdiColumna) =>
-  columna.tipo_dato === "moneda" || columna.tipo_dato === "numero";
-
-function Celda({ columna, fila }: { columna: CfdiColumna; fila: CfdiFila }) {
-  const valor = fila[columna.clave];
-
-  if (valor === null || valor === undefined) return <>{SIN_DATO}</>;
-
-  switch (columna.tipo_dato) {
-    case "moneda":
-      return <>{formatearMoneda(typeof valor === "number" ? valor : null)}</>;
-    case "fecha":
-      return <>{formatearFecha(String(valor))}</>;
-    case "fecha_hora":
-      return <>{formatearFechaHora(String(valor))}</>;
-    case "numero":
-      return <>{typeof valor === "number" ? ENTERO.format(valor) : String(valor)}</>;
-    case "booleano":
-      return <>{valor ? "Sí" : "No"}</>;
-    case "lista": {
-      const texto = Array.isArray(valor) ? valor.join(", ") : String(valor);
-      return texto ? (
-        <span title={texto} className="block max-w-[18rem] truncate">{texto}</span>
-      ) : (
-        <>{SIN_DATO}</>
-      );
-    }
-    case "catalogo":
-      if (columna.clave === "estado" || columna.clave === "categoria") {
-        return <StatusBadge status={String(valor)} />;
-      }
-      // El código del SAT; su descripción llega en la columna derivada `<clave>_desc`.
-      return <span title={String(fila[`${columna.clave}_desc`] ?? "") || undefined}>{String(valor)}</span>;
-    default:
-      return <>{String(valor) || SIN_DATO}</>;
-  }
-}
 
 function Esqueleto() {
   return (
@@ -69,8 +31,10 @@ function Esqueleto() {
  * pagina en el servidor. No guarda estado: todo llega por propiedades y sube por callbacks.
  */
 export function CfdiTabla({
+  empresaId,
   columnas,
   preferencia,
+  columnasConcepto,
   datos,
   cargando,
   error,
@@ -83,10 +47,13 @@ export function CfdiTabla({
   onPorPagina,
   onReintentar,
   onLimpiar,
+  onVer,
 }: {
+  empresaId: string;
   columnas: CfdiColumna[] | undefined;
   /** Orden y visibilidad del usuario; sin ella, el catálogo manda. */
   preferencia?: ColumnaPreferida[] | null;
+  columnasConcepto: CfdiColumna[];
   datos: CfdiListadoResponse | undefined;
   cargando: boolean;
   error: boolean;
@@ -99,7 +66,17 @@ export function CfdiTabla({
   onPorPagina: (porPagina: CfdiEstadoUrl["porPagina"]) => void;
   onReintentar: () => void;
   onLimpiar: () => void;
+  onVer: (uuid: string) => void;
 }) {
+  // Filas con los conceptos desplegados (por uuid; se conserva al paginar y volver).
+  const [abiertas, setAbiertas] = useState<ReadonlySet<string>>(new Set());
+  const alternar = (uuid: string) =>
+    setAbiertas((previas) => {
+      const siguientes = new Set(previas);
+      if (!siguientes.delete(uuid)) siguientes.add(uuid);
+      return siguientes;
+    });
+
   if (error && !datos) {
     return <ErrorState message="No se pudieron cargar los CFDI." onRetry={onReintentar} />;
   }
@@ -130,6 +107,9 @@ export function CfdiTabla({
         <Table aria-busy={cargando}>
           <TableHeader>
             <TableRow>
+              <TableHead className="w-0">
+                <span className="sr-only">Acciones</span>
+              </TableHead>
               {visibles.map((columna) => {
                 const activa = columna.clave === orden;
                 return (
@@ -160,18 +140,56 @@ export function CfdiTabla({
             </TableRow>
           </TableHeader>
           <TableBody>
-            {datos.items.map((fila) => (
-              <TableRow key={String(fila.uuid)}>
-                {visibles.map((columna) => (
-                  <TableCell
-                    key={columna.clave}
-                    className={`whitespace-nowrap ${alineadaALaDerecha(columna) ? "text-right font-mono tabular-nums" : ""}`}
-                  >
-                    <Celda columna={columna} fila={fila} />
-                  </TableCell>
-                ))}
-              </TableRow>
-            ))}
+            {datos.items.map((fila) => {
+              const uuid = String(fila.uuid);
+              const abierta = abiertas.has(uuid);
+              return (
+                <Fragment key={uuid}>
+                  <TableRow>
+                    <TableCell className="whitespace-nowrap py-1">
+                      <div className="flex items-center gap-0.5">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7"
+                          aria-expanded={abierta}
+                          aria-label={abierta ? "Ocultar conceptos" : "Ver conceptos"}
+                          onClick={() => alternar(uuid)}
+                        >
+                          {abierta ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7"
+                          aria-label="Abrir visor del CFDI"
+                          onClick={() => onVer(uuid)}
+                        >
+                          <Eye className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </TableCell>
+                    {visibles.map((columna) => (
+                      <TableCell
+                        key={columna.clave}
+                        className={`whitespace-nowrap ${alineadaALaDerecha(columna) ? "text-right font-mono tabular-nums" : ""}`}
+                      >
+                        <CfdiCelda columna={columna} fila={fila} />
+                      </TableCell>
+                    ))}
+                  </TableRow>
+                  {abierta && (
+                    <TableRow className="bg-muted/30 hover:bg-muted/30">
+                      <TableCell colSpan={visibles.length + 1} className="p-3">
+                        <CfdiConceptos empresaId={empresaId} uuid={uuid} columnas={columnasConcepto} />
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </Fragment>
+              );
+            })}
           </TableBody>
         </Table>
       </div>

@@ -35,11 +35,11 @@ function parseFieldErrors(detail: unknown): Record<string, string> | undefined {
   return Object.keys(fieldErrors).length > 0 ? fieldErrors : undefined;
 }
 
-async function pedir(path: string, options: RequestInit): Promise<Response> {
+async function pedir(path: string, options: RequestInit, json: boolean): Promise<Response> {
   const token = getToken();
   const isFormData = options.body instanceof FormData;
   const headers: Record<string, string> = {
-    ...(isFormData ? {} : { "Content-Type": "application/json" }),
+    ...(isFormData || !json ? {} : { "Content-Type": "application/json" }),
     ...((options.headers as Record<string, string>) ?? {}),
   };
   if (token) {
@@ -67,7 +67,6 @@ async function pedir(path: string, options: RequestInit): Promise<Response> {
     const message = typeof detail === "string" ? detail : "Solicitud inválida";
     throw new ApiError(response.status, message, fieldErrors);
   }
-
   return response;
 }
 
@@ -75,7 +74,7 @@ export async function apiFetch<T>(
   path: string,
   options: RequestInit = {},
 ): Promise<T> {
-  const response = await pedir(path, options);
+  const response = await pedir(path, options, true);
 
   if (response.status === 204) {
     return undefined as T;
@@ -84,13 +83,8 @@ export async function apiFetch<T>(
   return (await response.json()) as T;
 }
 
-/** Descarga un archivo (con la sesión). Devuelve el contenido y el nombre que propone el servidor. */
-export async function apiDownload(
-  path: string,
-  nombreFallback: string,
-): Promise<{ blob: Blob; nombre: string }> {
-  const response = await pedir(path, {});
-  const disposicion = response.headers.get("Content-Disposition") ?? "";
-  const nombre = /filename="?([^";]+)"?/.exec(disposicion)?.[1] ?? nombreFallback;
-  return { blob: await response.blob(), nombre };
+/** Descarga un archivo (con el token de la sesión) y devuelve su contenido. */
+export async function apiDescargar(path: string): Promise<Blob> {
+  const response = await pedir(path, {}, false);
+  return response.blob();
 }
