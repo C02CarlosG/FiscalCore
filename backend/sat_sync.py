@@ -801,9 +801,10 @@ ESTADOS_ACTIVOS = ("pendiente", "solicitado", "en_proceso", "terminado")
 ESPERA_VERIFICACION_SEG = 20
 
 
-def _auditar(empresa_id: str, accion: str, **metadata) -> None:
-    registrar_evento(None, accion, empresa_id=empresa_id, entidad="sat_sync",
-                     metadata={"origen": "automatico", **metadata})
+def _auditar(empresa_id: str, accion: str, *, usuario_id: str | None = None, **metadata) -> None:
+    """Auditoría de la descarga automática. Sin ``usuario_id`` es una acción del worker."""
+    registrar_evento(usuario_id, accion, empresa_id=empresa_id, entidad="sat_sync",
+                     metadata={"origen": "usuario" if usuario_id else "automatico", **metadata})
 
 
 def _pausar(empresa_id: str, cfg: dict, motivo: str) -> str:
@@ -856,11 +857,8 @@ def _solicitudes_de_la_corrida(empresa_id: str) -> list[dict]:
     )
 
 
-def _crear_ventanas_faltantes(creds, empresa: dict, cfg: dict, ahora: datetime, config: ConfigSync) -> bool:
-    """Crea las solicitudes de la corrida que aún no existen, sin pasar de ``max_en_vuelo``.
-
-    Devuelve True si quedan ventanas por crear (se completarán en vueltas siguientes)."""
-    empresa_id = str(empresa["id"])
+def _plan_de_la_corrida(empresa_id: str, cfg: dict, ahora: datetime, config: ConfigSync):
+    """Ventanas que planea la corrida y solicitudes ya creadas en ella."""
     descargadas = {
         (f["tipo"], f["fecha_inicio"], f["fecha_fin"])
         for f in db.query_all(
@@ -877,7 +875,21 @@ def _crear_ventanas_faltantes(creds, empresa: dict, cfg: dict, ahora: datetime, 
         traslape_dias=config.traslape_dias,
         descargadas=descargadas,
     )
-    de_la_corrida = _solicitudes_de_la_corrida(empresa_id)
+    return plan, _solicitudes_de_la_corrida(empresa_id)
+
+
+def ventanas_por_crear(empresa_id: str, cfg: dict, ahora: datetime, config: ConfigSync) -> list[VentanaPlan]:
+    """Ventanas planeadas de la corrida en curso que todavía no tienen solicitud."""
+    plan, de_la_corrida = _plan_de_la_corrida(empresa_id, cfg, ahora, config)
+    return [v for v in plan if not _cubierta(v, de_la_corrida)]
+
+
+def _crear_ventanas_faltantes(creds, empresa: dict, cfg: dict, ahora: datetime, config: ConfigSync) -> bool:
+    """Crea las solicitudes de la corrida que aún no existen, sin pasar de ``max_en_vuelo``.
+
+    Devuelve True si quedan ventanas por crear (se completarán en vueltas siguientes)."""
+    empresa_id = str(empresa["id"])
+    plan, de_la_corrida = _plan_de_la_corrida(empresa_id, cfg, ahora, config)
     en_vuelo = db.query_one(
         "SELECT COUNT(*) AS n FROM sat_solicitudes WHERE empresa_id=%s AND estado = ANY(%s)",
         (empresa_id, list(ESTADOS_ACTIVOS)),
@@ -1031,3 +1043,147 @@ def _procesar_con_candado(empresa_id: str, ahora: datetime, config: ConfigSync) 
     if quedan or activas_corrida:
         return "sincronizando"
     return _cerrar_corrida(empresa_id, empresa, cfg, ahora, config)
+
+
+# ---------------------------------------------------------------------------
+# Configuración de la descarga automática (lo que exponen los endpoints sync/*)
+# ---------------------------------------------------------------------------
+
+
+class ConfigSyncInvalida(Exception):
+    """La petición no se puede atender; ``codigo`` es el HTTP que le corresponde."""
+
+    def __init__(self, codigo: int, detalle: str):
+        super().__init__(detalle)
+        self.codigo = codigo
+        self.detalle = detalle
+
+
+def _iso(valor):
+    return valor.isoformat() if valor is not None else None
+
+
+def _leer_config(empresa_id: str) -> dict | None:
+    return db.query_one("SELECT * FROM sat_sync_config WHERE empresa_id=%s", (empresa_id,))
+
+
+def _progreso(empresa_id: str, cfg: dict) -> dict:
+    """Avance de la corrida en curso: terminadas, fallidas y total (incluye lo que aún no se pide).
+
+    Las ventanas que se partieron por volumen no cuentan como fallas: sus partes sí cuentan."""
+    if cfg.get("corrida_inicio") is None:
+        return {"total": 0, "terminadas": 0, "fallidas": 0}
+    filas = _solicitudes_de_la_corrida(empresa_id)
+    terminadas = sum(1 for f in filas if f["estado"] == "descargado")
+    fallidas = sum(1 for f in filas
+                   if f["estado"] == "fallo" and MARCA_PARTIDA not in (f.get("error_msg") or ""))
+    activas = sum(1 for f in filas if f["estado"] in ESTADOS_ACTIVOS)
+    por_crear = len(ventanas_por_crear(empresa_id, cfg, datetime.now(timezone.utc), config_sync()))
+    return {"total": terminadas + fallidas + activas + por_crear, "terminadas": terminadas, "fallidas": fallidas}
+
+
+def estado_sync(empresa_id: str) -> dict:
+    """Estado de la descarga automática de una empresa, listo para serializar a JSON.
+
+    Nunca incluye datos de la e.firma. Sin configuración devuelve el estado "inactiva"."""
+    empresa_id = str(empresa_id)
+    cfg = _leer_config(empresa_id)
+    if not cfg:
+        return {
+            "activa": False, "estado": "inactiva", "motivo_pausa": None, "ultima_exitosa": None,
+            "proxima_corrida": None, "carga_inicial_ok": False, "consentimiento_por": None,
+            "consentimiento_el": None, "progreso": {"total": 0, "terminadas": 0, "fallidas": 0},
+        }
+    return {
+        "activa": bool(cfg["activa"]),
+        "estado": cfg["estado"],
+        "motivo_pausa": cfg["motivo_pausa"],
+        "ultima_exitosa": _iso(cfg["ultima_exitosa"]),
+        "proxima_corrida": _iso(cfg["proxima_corrida"]),
+        "carga_inicial_ok": bool(cfg["carga_inicial_ok"]),
+        "consentimiento_por": str(cfg["consentimiento_por"]) if cfg["consentimiento_por"] else None,
+        "consentimiento_el": _iso(cfg["consentimiento_el"]),
+        "progreso": _progreso(empresa_id, cfg),
+    }
+
+
+def _exigir_efirma_vigente(empresa_id: str) -> None:
+    info = fiel_store.estado_fiel(db, empresa_id)
+    if not info:
+        raise ConfigSyncInvalida(422, "No hay e.firma guardada para esta empresa. Guárdala primero.")
+    if info.get("vencida"):
+        raise ConfigSyncInvalida(422, "La e.firma guardada está vencida. Actualízala.")
+
+
+def configurar_sync(empresa_id: str, usuario_id: str, *, activa: bool, consentimiento: bool = False) -> dict:
+    """Activa o desactiva la descarga automática de la empresa.
+
+    Activar exige el consentimiento explícito de quien lo pide (la e.firma se usará sin
+    intervención humana) y una e.firma guardada y vigente; si algo falta no se escribe nada.
+    La empresa queda lista para que el siguiente ciclo del worker cree la carga inicial.
+    Activar una empresa que ya está activa (y no pausada) no reinicia nada.
+    """
+    empresa_id = str(empresa_id)
+    cfg = _leer_config(empresa_id)
+
+    if not activa:
+        if cfg and cfg["activa"]:
+            db.execute(
+                """UPDATE sat_sync_config
+                   SET activa=FALSE, estado='inactiva', corrida_inicio=NULL, motivo_pausa=NULL, updated_at=NOW()
+                   WHERE empresa_id=%s""",
+                (empresa_id,),
+            )
+            _auditar(empresa_id, "sync_desactivada", usuario_id=usuario_id)
+        return estado_sync(empresa_id)
+
+    if not consentimiento:
+        raise ConfigSyncInvalida(
+            422,
+            "Para activar la descarga automática se requiere el consentimiento explícito: "
+            "el sistema usará la e.firma guardada sin intervención de una persona.",
+        )
+    _exigir_efirma_vigente(empresa_id)
+    if cfg and cfg["activa"] and cfg["estado"] != "pausada":
+        return estado_sync(empresa_id)
+
+    db.execute(
+        """INSERT INTO sat_sync_config
+               (empresa_id, activa, consentimiento_por, consentimiento_el, estado, proxima_corrida, motivo_pausa)
+           VALUES (%s, TRUE, %s, NOW(), 'sincronizando', NOW(), NULL)
+           ON CONFLICT (empresa_id) DO UPDATE SET
+               activa=TRUE, consentimiento_por=EXCLUDED.consentimiento_por, consentimiento_el=NOW(),
+               estado='sincronizando', proxima_corrida=NOW(), motivo_pausa=NULL, corrida_inicio=NULL,
+               updated_at=NOW()""",
+        (empresa_id, usuario_id),
+    )
+    _auditar(empresa_id, "sync_activada", usuario_id=usuario_id)
+    return estado_sync(empresa_id)
+
+
+def forzar_corrida(empresa_id: str, usuario_id: str) -> dict:
+    """"Actualizar ahora": adelanta la próxima corrida para que el worker la tome en su siguiente ciclo."""
+    empresa_id = str(empresa_id)
+    cfg = _leer_config(empresa_id)
+    if not cfg or not cfg["activa"]:
+        raise ConfigSyncInvalida(422, "La descarga automática no está activa para esta empresa. Actívala primero.")
+    _exigir_efirma_vigente(empresa_id)
+    if cfg["corrida_inicio"] is not None:
+        raise ConfigSyncInvalida(409, "Ya hay una corrida en curso para esta empresa.")
+    db.execute("UPDATE sat_sync_config SET proxima_corrida=NOW(), updated_at=NOW() WHERE empresa_id=%s", (empresa_id,))
+    _auditar(empresa_id, "sync_ahora", usuario_id=usuario_id)
+    return estado_sync(empresa_id)
+
+
+def desactivar_por_fiel_eliminada(empresa_id: str, usuario_id: str | None = None) -> bool:
+    """Sin e.firma no hay descarga automática: se apaga en la misma operación que borra la e.firma."""
+    empresa_id = str(empresa_id)
+    apagada = db.execute(
+        """UPDATE sat_sync_config
+           SET activa=FALSE, estado='inactiva', corrida_inicio=NULL, motivo_pausa=NULL, updated_at=NOW()
+           WHERE empresa_id=%s AND activa RETURNING empresa_id""",
+        (empresa_id,), returning=True,
+    )
+    if apagada:
+        _auditar(empresa_id, "sync_desactivada", usuario_id=usuario_id, motivo="e.firma eliminada")
+    return bool(apagada)
