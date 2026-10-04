@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { CfdiPantalla } from "./CfdiPantalla";
-import { useCfdiColumnas, useCfdiListado, useCfdiResumen } from "@/hooks/useCfdis";
+import { useCfdiColumnas, useCfdiDetalle, useCfdiListado, useCfdiResumen } from "@/hooks/useCfdis";
 import { periodoRecordado } from "@/lib/periodo";
 import type { CfdiColumna, CfdiResumenResponse, CfdiTotalesBloque } from "@/types/api";
 
@@ -18,6 +18,7 @@ vi.mock("next/navigation", () => ({
 
 vi.mock("@/hooks/useCfdis", () => ({
   useCfdiColumnas: vi.fn(),
+  useCfdiDetalle: vi.fn(),
   useCfdiListado: vi.fn(),
   useCfdiResumen: vi.fn(),
 }));
@@ -30,7 +31,10 @@ const col = (clave: string, etiqueta: string, tipo_dato: CfdiColumna["tipo_dato"
   clave, etiqueta, tipo_dato, grupo: "encabezado", visible_por_defecto: true, ordenable: true, filtrable: true, opciones: [],
 });
 
-const catalogo = { encabezado: [col("fecha_emision", "Fecha de expedición", "fecha"), col("total", "Total", "moneda")], concepto: [] };
+const catalogo = {
+  encabezado: [col("fecha_emision", "Fecha de expedición", "fecha"), col("total", "Total", "moneda")],
+  concepto: [{ ...col("descripcion", "Descripción", "texto"), grupo: "concepto" as const }],
+};
 
 const bloque = (conteo: number, total: number | null): CfdiTotalesBloque => ({
   conteo, retencion_iva: null, retencion_ieps: null, retencion_isr: null, traslado_iva: null, traslado_ieps: null,
@@ -54,6 +58,7 @@ function preparar({ listado = listadoCon([{ uuid: "U1", fecha_emision: "2026-09-
   vi.mocked(useCfdiColumnas).mockReturnValue(consulta(catalogo));
   vi.mocked(useCfdiListado).mockReturnValue(listado);
   vi.mocked(useCfdiResumen).mockReturnValue(res);
+  vi.mocked(useCfdiDetalle).mockReturnValue(consulta(undefined, { isLoading: true }));
 }
 
 describe("CfdiPantalla", () => {
@@ -210,5 +215,31 @@ describe("CfdiPantalla", () => {
 
     expect(screen.getByRole("alert")).toHaveTextContent("No se pudieron cargar los totales.");
     expect(screen.getByText("05/09/2026")).toBeInTheDocument();
+  });
+
+  describe("conceptos y visor", () => {
+    it("desplegar una fila pide el detalle de su CFDI", async () => {
+      const user = userEvent.setup();
+      render(<CfdiPantalla direccion="emitidos" />);
+      expect(useCfdiDetalle).not.toHaveBeenCalledWith("e1", "U1");
+
+      await user.click(screen.getByRole("button", { name: "Ver conceptos" }));
+
+      expect(useCfdiDetalle).toHaveBeenCalledWith("e1", "U1");
+    });
+
+    it("el botón del visor abre la ventana del CFDI y cerrarla la quita", async () => {
+      const user = userEvent.setup();
+      render(<CfdiPantalla direccion="emitidos" />);
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+      await user.click(screen.getByRole("button", { name: "Abrir visor del CFDI" }));
+
+      expect(screen.getByRole("dialog")).toBeInTheDocument();
+      expect(useCfdiDetalle).toHaveBeenCalledWith("e1", "U1");
+
+      await user.click(screen.getByRole("button", { name: "Cerrar" }));
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
   });
 });

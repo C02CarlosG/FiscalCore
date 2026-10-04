@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { apiFetch, ApiError } from "./api-client";
+import { apiDescargar, apiFetch, ApiError } from "./api-client";
 import { saveSession, getToken } from "./auth";
 import type { LoginResponse } from "@/types/api";
 
@@ -136,5 +136,36 @@ describe("apiFetch", () => {
     expect((options.headers as Record<string, string>)["Content-Type"]).toBe(
       "application/json",
     );
+  });
+});
+
+describe("apiDescargar", () => {
+  beforeEach(() => {
+    process.env.NEXT_PUBLIC_API_URL = "http://localhost:8000";
+    window.localStorage.clear();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("pide el archivo con el token y devuelve el contenido", async () => {
+    saveSession(loginResponse);
+    const blob = new Blob(["<xml/>"], { type: "application/xml" });
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, blob: async () => blob });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const resultado = await apiDescargar("/api/v1/x/xml");
+
+    expect(resultado).toBe(blob);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("http://localhost:8000/api/v1/x/xml");
+    expect(init.headers.Authorization).toBe("Bearer token-123");
+  });
+
+  it("un 404 lanza ApiError con el detalle del servidor", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(mockResponse(404, { detail: "XML no disponible" })));
+
+    await expect(apiDescargar("/api/v1/x/xml")).rejects.toMatchObject({ status: 404, message: "XML no disponible" });
   });
 });
