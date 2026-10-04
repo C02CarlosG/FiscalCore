@@ -35,14 +35,11 @@ function parseFieldErrors(detail: unknown): Record<string, string> | undefined {
   return Object.keys(fieldErrors).length > 0 ? fieldErrors : undefined;
 }
 
-export async function apiFetch<T>(
-  path: string,
-  options: RequestInit = {},
-): Promise<T> {
+async function pedir(path: string, options: RequestInit, json: boolean): Promise<Response> {
   const token = getToken();
   const isFormData = options.body instanceof FormData;
   const headers: Record<string, string> = {
-    ...(isFormData ? {} : { "Content-Type": "application/json" }),
+    ...(isFormData || !json ? {} : { "Content-Type": "application/json" }),
     ...((options.headers as Record<string, string>) ?? {}),
   };
   if (token) {
@@ -70,10 +67,24 @@ export async function apiFetch<T>(
     const message = typeof detail === "string" ? detail : "Solicitud inválida";
     throw new ApiError(response.status, message, fieldErrors);
   }
+  return response;
+}
+
+export async function apiFetch<T>(
+  path: string,
+  options: RequestInit = {},
+): Promise<T> {
+  const response = await pedir(path, options, true);
 
   if (response.status === 204) {
     return undefined as T;
   }
 
   return (await response.json()) as T;
+}
+
+/** Descarga un archivo (con el token de la sesión) y devuelve su contenido. */
+export async function apiDescargar(path: string): Promise<Blob> {
+  const response = await pedir(path, {}, false);
+  return response.blob();
 }

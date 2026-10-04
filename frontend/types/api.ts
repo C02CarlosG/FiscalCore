@@ -277,6 +277,53 @@ export interface PeriodosResponse {
   periodos: string[];
 }
 
+/** Concepto del detalle: importes como número y los impuestos desplegados por columna. */
+export type CfdiConcepto = Record<string, string | number | null>;
+
+export interface CfdiParte {
+  rfc: string;
+  nombre: string | null;
+  regimen: string | null;
+  regimen_desc: string | null;
+  domicilio_fiscal?: string | null;
+}
+
+export interface CfdiImpuestoDetalle {
+  ambito: "traslado" | "retencion";
+  impuesto: string;
+  tipo_factor: string;
+  tasa_o_cuota: number | null;
+  base: number | null;
+  importe: number | null;
+}
+
+export interface CfdiPagoDetalle {
+  uuid_pago: string;
+  fecha_pago: string;
+  parcialidad: number | null;
+  importe_pagado: number | null;
+  saldo_anterior: number | null;
+  saldo_restante: number | null;
+}
+
+export interface CfdiRelacionado {
+  tipo_relacion: string;
+  descripcion: string | null;
+  uuids: string[];
+}
+
+export interface CfdiDetalle {
+  encabezado: Record<string, string | number | null>;
+  emisor: CfdiParte;
+  receptor: CfdiParte;
+  impuestos: CfdiImpuestoDetalle[];
+  conceptos: CfdiConcepto[];
+  total_conceptos: number;
+  pagos: CfdiPagoDetalle[];
+  relacionados: CfdiRelacionado[];
+  tiene_xml: boolean;
+}
+
 // ── Inicio (F4) ──────────────────────────────────────────────────────────────
 
 export interface InicioIngresos {

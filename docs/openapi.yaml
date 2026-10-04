@@ -1264,6 +1264,67 @@ paths:
         '422':
           description: direccion o tipo invalido
 
+  /api/v1/empresas/{empresa_id}/cfdis/{uuid}:
+    get:
+      operationId: detalleCfdi
+      tags: [CFDI]
+      summary: Detalle de un CFDI (visor y conceptos desplegables)
+      description: |
+        Encabezado completo (con descripciones de catalogo y saldo), emisor y
+        receptor, impuestos por tasa, conceptos (hasta 500; `total_conceptos`
+        indica el total real), pagos que lo liquidan y CFDI relacionados.
+        Las fechas viajan en ISO 8601 sin zona (hora local del comprobante).
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - { name: uuid, in: path, required: true, schema: { type: string, maxLength: 36 } }
+      responses:
+        '200':
+          description: Detalle del CFDI
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  encabezado: { type: object, additionalProperties: true }
+                  emisor: { type: object, additionalProperties: true }
+                  receptor: { type: object, additionalProperties: true }
+                  impuestos: { type: array, items: { type: object, additionalProperties: true } }
+                  conceptos: { type: array, items: { type: object, additionalProperties: true } }
+                  total_conceptos: { type: integer }
+                  pagos: { type: array, items: { type: object, additionalProperties: true } }
+                  relacionados: { type: array, items: { type: object, additionalProperties: true } }
+                  tiene_xml: { type: boolean }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          description: El UUID no pertenece a la empresa
+
+  /api/v1/empresas/{empresa_id}/cfdis/{uuid}/xml:
+    get:
+      operationId: xmlCfdi
+      tags: [CFDI]
+      summary: Descarga el XML guardado del CFDI
+      description: |
+        Responde `application/xml` como adjunto `<uuid>.xml`. Cada descarga
+        queda registrada en la auditoria (`cfdi_xml_descargado`).
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - { name: uuid, in: path, required: true, schema: { type: string, maxLength: 36 } }
+      responses:
+        '200':
+          description: XML del comprobante
+          content:
+            application/xml:
+              schema: { type: string }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          description: No pertenece a la empresa o no hay XML guardado
+
   /api/v1/empresas/{empresa_id}/inicio/resumen:
     get:
       operationId: resumenInicio
