@@ -1432,6 +1432,83 @@ paths:
         '404':
           description: No pertenece a la empresa o no hay XML guardado
 
+  /api/v1/empresas/{empresa_id}/inicio/resumen:
+    get:
+      operationId: resumenInicio
+      tags: [Inicio]
+      summary: Ingresos y gastos netos del periodo y del ejercicio, y los ultimos 12 meses
+      description: |
+        Lo facturado (devengado por fecha de emision), sin IVA: CFDI vigentes de tipo
+        Ingreso menos notas de credito (Egreso), sin anticipos SAT, convertidos a pesos
+        con el tipo de cambio del comprobante. Ingresos son los emitidos por la empresa
+        y gastos los recibidos; la nomina emitida va aparte (`gastos.nomina`) y no se
+        suma a `gastos.neto`. El acumulado va de enero del ejercicio al periodo.
+        `meses` trae siempre 12 elementos terminando en el periodo.
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - { name: periodo, in: query, required: true, schema: { type: string, pattern: '^20[0-9]{2}-(0[1-9]|1[0-2])$' } }
+      responses:
+        '200':
+          description: Resumen del Inicio
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  empresa_id: { type: string }
+                  periodo: { type: string }
+                  ejercicio: { type: integer }
+                  ingresos: { type: object, additionalProperties: true }
+                  gastos: { type: object, additionalProperties: true }
+                  meses: { type: array, items: { type: object, additionalProperties: true } }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '422':
+          description: periodo mal formado
+
+  /api/v1/empresas/{empresa_id}/inicio/iva-anual:
+    get:
+      operationId: ivaAnualInicio
+      tags: [Inicio]
+      summary: IVA del ejercicio mes por mes (flujo de efectivo)
+      description: |
+        Trasladado cobrado, acreditable pagado y resultado de cada mes, calculados con
+        las mismas funciones que la cedula de IVA (`/cedula-iva/{periodo}`), por lo que
+        coinciden con ella. Hasta que se incorporen las retenciones el IVA retenido es 0
+        y el factor de prorrateo es 1 (`iva_retenido_incluido: false`). Con `periodo`,
+        los meses posteriores salen en cero. `totales` trae `total_a_cargo` y `total_a_favor`
+        por separado: no se compensa un mes a favor contra otro a cargo (LIVA 6).
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - { name: ejercicio, in: query, required: true, schema: { type: integer, minimum: 2000, maximum: 2099 } }
+        - { name: periodo, in: query, schema: { type: string, pattern: '^20[0-9]{2}-(0[1-9]|1[0-2])$' } }
+      responses:
+        '200':
+          description: IVA anual
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  empresa_id: { type: string }
+                  ejercicio: { type: integer }
+                  factor_prorrateo: { type: number }
+                  iva_retenido_incluido: { type: boolean }
+                  meses: { type: array, items: { type: object, additionalProperties: true } }
+                  totales: { type: object, additionalProperties: true }
+                  advertencias:
+                    type: array
+                    description: Limitaciones del calculo que aplican a los datos del ejercicio (`cfdi` es null en las que no dependen de ellos)
+                    items: { type: object, additionalProperties: true }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '422':
+          description: ejercicio o periodo invalido
+
   # ============================================================
   # DASHBOARD
   # ============================================================
@@ -1881,13 +1958,17 @@ paths:
 
         **Tipo**: emitidos | recibidos | ambos. Cada tipo se pide por separado:
         si el SAT rechaza uno, el otro se sigue pidiendo y el rechazo llega en
-        `errores` (responde 502 solo si no se aceptó ninguno).
+        `errores` (responde 502 solo si no se aceptó ninguno; 409 si todos los
+        tipos pedidos ya tienen una descarga en curso para ese periodo).
 
         **Solicitudes agotadas (CodEstatus 5002)**: el SAT limita de por vida
         las solicitudes con las mismas fechas y RFC. Si rechaza el mes
         completo, se vuelve a pedir partido en dos rangos contiguos (corte el
         dia 15, distinto en cada intento), que cubren el mes segundo a segundo;
         el mes queda en dos solicitudes de ese tipo.
+
+        **Tope maximo (CodEstatus 5003, mas de 200,000 CFDI)**: la solicitud se
+        parte en dos mitades por fecha, recursivamente hasta un dia.
       parameters:
         - $ref: '#/components/parameters/EmpresaId'
       requestBody:
@@ -1940,6 +2021,8 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
               example:
                 detail: "No hay FIEL guardada para esta empresa. Guardala primero."
+        '409':
+          $ref: '#/components/responses/ConflictError'
         '502':
           $ref: '#/components/responses/GatewayError'
 
