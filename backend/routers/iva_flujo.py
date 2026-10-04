@@ -7,10 +7,14 @@ import re
 from decimal import Decimal
 from typing import Literal, Optional
 
+from io import BytesIO
+
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 
-from .. import db, iva_flujo, iva_flujo_datos
+from .. import db, iva_flujo, iva_flujo_datos, iva_flujo_exportacion
+from ..auditoria import registrar_evento
 from ..deps import empresa_or_404, get_current_user, validar_acceso_empresa
 
 router = APIRouter(tags=["IVA por flujo"])
@@ -18,6 +22,7 @@ router = APIRouter(tags=["IVA por flujo"])
 _BASE = "/api/v1/empresas/{empresa_id}/iva-flujo"
 _PERIODO_RE = re.compile(r"20[0-9]{2}-(0[1-9]|1[0-2])")
 _UUID_MAX = 36
+MAX_FILAS_EXPORTACION = 50_000
 
 
 class AjusteIn(BaseModel):
@@ -156,3 +161,39 @@ async def detalle_iva_flujo(
         return iva_flujo.detalle(eventos, periodo, direccion, origen, ajustes, pagina, por_pagina)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
+
+
+@router.get(_BASE + "/{periodo}/exportar")
+async def exportar_iva_flujo(
+    empresa_id: str,
+    periodo: str,
+    direccion: str = Query(..., description="trasladado | acreditable"),
+    origen: str = Query(..., description="contado | credito | notas_credito | no_considerados | reasignados"),
+    factor: float = Query(1.0),
+    current_user: dict = Depends(get_current_user),
+):
+    """Excel con el detalle de una cifra (todos sus renglones) y el resumen del periodo.
+    Si pasa de 50,000 renglones se pide acotar. Queda en la auditoría."""
+    validar_acceso_empresa(empresa_id, current_user)
+    _periodo_o_422(periodo)
+    factor_dec = _factor_o_422(factor)
+    empresa = empresa_or_404(empresa_id)
+    ajustes = iva_flujo_datos.cargar_ajustes(empresa_id)
+    eventos = iva_flujo_datos.cargar_eventos(empresa_id, empresa["rfc"], periodo, ajustes)
+    try:
+        filas = iva_flujo.renglones(eventos, periodo, direccion, origen, ajustes)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    if len(filas) > MAX_FILAS_EXPORTACION:
+        raise HTTPException(status_code=422, detail=f"son {len(filas)} renglones; el máximo es {MAX_FILAS_EXPORTACION}")
+    contenido = iva_flujo_exportacion.construir(
+        periodo, direccion, origen, filas, iva_flujo.resumen(eventos, periodo, ajustes, factor_dec))
+    registrar_evento(
+        current_user["user_id"], "iva_flujo_exportado", empresa_id=empresa_id,
+        metadata={"periodo": periodo, "direccion": direccion, "origen": origen, "filas": len(filas)},
+    )
+    return StreamingResponse(
+        BytesIO(contenido),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="iva_{direccion}_{origen}_{periodo}.xlsx"'},
+    )

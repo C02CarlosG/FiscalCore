@@ -1655,6 +1655,35 @@ paths:
         '422':
           description: periodo, direccion, origen o paginacion invalidos
 
+  /api/v1/empresas/{empresa_id}/iva-flujo/{periodo}/exportar:
+    get:
+      operationId: exportarIvaFlujo
+      tags: [IVA por flujo]
+      summary: Excel con el detalle de una cifra del IVA por flujo y el resumen del periodo
+      description: |
+        Hoja `Detalle` con todos los renglones de la tarjeta (bases e IVA por tasa, fecha de
+        pago, UUID del REP, marcas, motivo y ajuste) y hoja `Resumen` con los origenes y el
+        resultado del mes. Si la tarjeta pasa de 50,000 renglones responde 422 pidiendo acotar.
+        Queda en la auditoria (`iva_flujo_exportado`).
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - { name: periodo, in: path, required: true, schema: { type: string, pattern: '^20[0-9]{2}-(0[1-9]|1[0-2])$' } }
+        - { name: direccion, in: query, required: true, schema: { type: string, enum: [trasladado, acreditable] } }
+        - { name: origen, in: query, required: true, schema: { type: string, enum: [contado, credito, notas_credito, no_considerados, reasignados] } }
+        - { name: factor, in: query, schema: { type: number, minimum: 0, maximum: 1, default: 1 } }
+      responses:
+        '200':
+          description: Libro de Excel
+          content:
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema: { type: string, format: binary }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '422':
+          description: periodo, direccion, origen o factor invalidos, o mas de 50,000 renglones
+
   # ============================================================
   # DASHBOARD
   # ============================================================
