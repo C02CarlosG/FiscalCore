@@ -25,6 +25,8 @@ tags:
     description: Constancia de situación fiscal y opinión de cumplimiento por empresa (F8)
   - name: Cuenta
     description: Contraseña del usuario y usuarios de cada empresa con su rol (U1)
+  - name: Validaciones de CFDI
+    description: CFDI con posibles situaciones incorrectas, por periodo y acumulado (V1)
   - name: Preferencias
     description: Orden y visibilidad de columnas de las tablas, por usuario
   - name: Sistema
@@ -3116,6 +3118,121 @@ paths:
         '404':
           $ref: '#/components/responses/NotFoundError'
 
+  /api/v1/validaciones-cfdi/empresas/{empresa_id}:
+    get:
+      operationId: resumenValidacionesCfdi
+      tags: [Validaciones de CFDI]
+      summary: Conteo del periodo y del acumulado por validación, en emitidos y recibidos
+      description: |
+        Solo CFDI vigentes. Validaciones: pue_forma_99, pue_con_rep, egreso_sin_relacion
+        (emitidos y recibidos) y no_bancarizado (solo recibidos). Una validación
+        inactiva trae conteos null. V1, carril D.
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - { name: periodo, in: query, required: true, schema: { type: string, pattern: '^\d{4}-(0[1-9]|1[0-2])$' } }
+      responses:
+        '200':
+          description: Tarjetas por dirección
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  periodo: { type: string }
+                  configuracion: { $ref: '#/components/schemas/ConfiguracionValidacionesCfdi' }
+                  emitidos: { type: array, items: { $ref: '#/components/schemas/TarjetaValidacionCfdi' } }
+                  recibidos: { type: array, items: { $ref: '#/components/schemas/TarjetaValidacionCfdi' } }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '422':
+          $ref: '#/components/responses/UnprocessableError'
+
+  /api/v1/validaciones-cfdi/empresas/{empresa_id}/cfdis:
+    get:
+      operationId: cfdisValidacionCfdi
+      tags: [Validaciones de CFDI]
+      summary: CFDI que componen una tarjeta (hasta 500)
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - { name: periodo, in: query, required: true, schema: { type: string } }
+        - { name: direccion, in: query, required: true, schema: { type: string, enum: [emitidos, recibidos] } }
+        - { name: validacion, in: query, required: true, schema: { type: string, enum: [pue_forma_99, pue_con_rep, egreso_sin_relacion, no_bancarizado] } }
+        - { name: alcance, in: query, required: false, schema: { type: string, enum: [periodo, acumulado], default: periodo } }
+      responses:
+        '200':
+          description: CFDI por fecha de emisión y total de filas
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total_filas: { type: integer }
+                  cfdis:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        uuid: { type: string }
+                        fecha_emision: { type: string, format: date-time }
+                        serie: { type: string, nullable: true }
+                        folio: { type: string, nullable: true }
+                        rfc: { type: string, description: RFC de la contraparte }
+                        nombre: { type: string, nullable: true }
+                        total: { type: number }
+                        moneda: { type: string }
+                        forma_pago: { type: string, nullable: true }
+                        metodo_pago: { type: string, nullable: true }
+                        tipo_comprobante: { type: string }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '422':
+          $ref: '#/components/responses/UnprocessableError'
+
+  /api/v1/validaciones-cfdi/empresas/{empresa_id}/configuracion:
+    get:
+      operationId: leerConfiguracionValidacionesCfdi
+      tags: [Validaciones de CFDI]
+      summary: Validaciones apagadas y umbral de efectivo de la empresa
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+      responses:
+        '200':
+          description: Configuración vigente (con valores por defecto)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConfiguracionValidacionesCfdi' }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+    put:
+      operationId: guardarConfiguracionValidacionesCfdi
+      tags: [Validaciones de CFDI]
+      summary: Guardar validaciones apagadas y umbral de efectivo
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ConfiguracionValidacionesCfdi' }
+      responses:
+        '200':
+          description: Configuración guardada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConfiguracionValidacionesCfdi' }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '422':
+          description: Clave de validación desconocida o umbral fuera de 0 a 2,000
+
   /api/v1/cuenta/contrasena:
     post:
       operationId: cambiarContrasena
@@ -4632,6 +4749,26 @@ components:
           nullable: true
           enum: [sentido_no_positivo, sentido_no_identificado, sin_fecha, vencida, null]
           description: Por qué la opinión no está vigente.
+
+    ConfiguracionValidacionesCfdi:
+      type: object
+      properties:
+        inactivas:
+          type: array
+          items: { type: string, enum: [pue_forma_99, pue_con_rep, egreso_sin_relacion, no_bancarizado] }
+        umbral_efectivo:
+          type: string
+          description: Importe en pesos con dos decimales, de 0 a 2,000; por defecto "2000.00" (art. 27-III LISR fija $2,000, solo se puede bajar).
+
+    TarjetaValidacionCfdi:
+      type: object
+      properties:
+        clave: { type: string }
+        titulo: { type: string }
+        descripcion: { type: string }
+        activa: { type: boolean }
+        periodo: { type: integer, nullable: true }
+        acumulado: { type: integer, nullable: true }
 
     UsuarioEmpresa:
       type: object

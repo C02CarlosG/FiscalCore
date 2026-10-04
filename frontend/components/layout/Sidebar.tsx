@@ -9,6 +9,7 @@ import {
   Calculator,
   CloudDownload,
   FileCheck2,
+  ListChecks,
   FileSpreadsheet,
   FileText,
   GitBranch,
@@ -32,6 +33,7 @@ const NAV_ITEMS = [
   { slug: "iva-flujo", label: "IVA base flujo", icon: Calculator },
   { slug: "sat", label: "Conexión SAT", icon: CloudDownload },
   { slug: "informacion-fiscal", label: "Información fiscal", icon: FileCheck2 },
+  { slug: "validaciones", label: "Validaciones", icon: ListChecks },
   { slug: "usuarios", label: "Usuarios", icon: Users },
 ] as const;
 
