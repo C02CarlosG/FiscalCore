@@ -293,7 +293,7 @@ Detalle de las entregas que cambian respecto a las specs de su fase:
 
 | Carril | Sesión | Qué hace ahora |
 |---|---|---|
-| A | "F3.2 work" | F3.5a (extracción v2). F3.4 integrada (PR #24). Antes del PR trae `main`: su versión de F3.2 (PR #19) se cerró y la integrada es la del PR #20. El PR #21 (F3.3) ya está en `main`; el PR #24 (F3.4) lo trae con merge antes de marcarse listo: los dos tocan `routers/cfdis.py`, los componentes de `components/cfdi/` y `api-client.ts` |
+| A | "F3.2 work" | F3.5a (extracción v2) en una rama nueva desde `main`. F3.4 integrada (PR #24) |
 | B | "Cambios en ezaudita" | F2.1 en el PR #17; sigue F2.2 (worker) |
 | C | "Acceso al proyecto" | F4 (Inicio). Antes de pasar al carril C dejó F3.3 hecha en el PR #21 |
 | D | "Carril D — Información fiscal" (abierta el 2026-10-04) | F8 |
