@@ -2174,6 +2174,125 @@ paths:
         '502':
           $ref: '#/components/responses/GatewayError'
 
+  /api/v1/sat/empresas/{empresa_id}/sync/estado:
+    get:
+      operationId: estadoSyncSAT
+      tags: [SAT FIEL]
+      summary: Estado de la descarga automatica de la empresa
+      description: |
+        Estado de la descarga automatica de XML del SAT: si esta activa, en que
+        estado esta (inactiva, sincronizando, al_dia, pausada, error), ultima y
+        proxima corrida, quien dio el consentimiento y el progreso de la corrida
+        en curso. Sin configuracion devuelve el estado "inactiva". Nunca incluye
+        datos de la e.firma.
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+      responses:
+        '200':
+          description: Estado de la descarga automatica
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SyncEstadoResponse'
+              example:
+                activa: true
+                estado: sincronizando
+                motivo_pausa: null
+                ultima_exitosa: null
+                proxima_corrida: "2026-10-04T02:10:00+00:00"
+                carga_inicial_ok: false
+                consentimiento_por: "6f1c7a58-0b7e-4f0e-9d63-8a3a3d1d2a11"
+                consentimiento_el: "2026-10-04T02:10:00+00:00"
+                progreso: {total: 44, terminadas: 12, fallidas: 0}
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+
+  /api/v1/sat/empresas/{empresa_id}/sync/config:
+    put:
+      operationId: configurarSyncSAT
+      tags: [SAT FIEL]
+      summary: Activar o desactivar la descarga automatica
+      description: |
+        Activa o desactiva la descarga automatica de la empresa. **Activar exige
+        `consentimiento: true`**: el sistema usara la e.firma guardada sin
+        intervencion de una persona. Tambien exige una e.firma guardada y vigente.
+        Quien activa y cuando queda registrado, y cada cambio en `auditoria`.
+        Activar una empresa que ya esta activa no reinicia la corrida en curso.
+        La carga inicial (ejercicio anterior y en curso) la crea el worker en su
+        siguiente ciclo. Limite: 10 por minuto.
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [activa]
+              properties:
+                activa:
+                  type: boolean
+                consentimiento:
+                  type: boolean
+                  default: false
+                  description: Obligatorio en true para activar
+            example:
+              activa: true
+              consentimiento: true
+      responses:
+        '200':
+          description: Estado resultante
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SyncEstadoResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '422':
+          description: Falta el consentimiento, o no hay e.firma guardada y vigente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                detail: "La e.firma guardada esta vencida. Actualizala."
+
+  /api/v1/sat/empresas/{empresa_id}/sync/ahora:
+    post:
+      operationId: syncAhoraSAT
+      tags: [SAT FIEL]
+      summary: Actualizar ahora (forzar una corrida)
+      description: |
+        Adelanta la proxima corrida para que el worker la tome en su siguiente
+        ciclo. Requiere la descarga automatica activa y una e.firma vigente; si ya
+        hay una corrida en curso responde 409. Queda en `auditoria`. Limite: 5 por
+        minuto.
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+      responses:
+        '200':
+          description: Estado resultante
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SyncEstadoResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '409':
+          $ref: '#/components/responses/ConflictError'
+        '422':
+          description: La descarga automatica no esta activa, o no hay e.firma vigente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /api/v1/sat/empresas/{empresa_id}/fiel/sync/avanzar:
     post:
       operationId: avanzarSyncFIEL
@@ -4131,6 +4250,46 @@ components:
         vencida:
           type: boolean
           nullable: true
+
+    SyncEstadoResponse:
+      type: object
+      properties:
+        activa:
+          type: boolean
+        estado:
+          type: string
+          enum: [inactiva, al_dia, sincronizando, pausada, error]
+        motivo_pausa:
+          type: string
+          nullable: true
+        ultima_exitosa:
+          type: string
+          format: date-time
+          nullable: true
+        proxima_corrida:
+          type: string
+          format: date-time
+          nullable: true
+        carga_inicial_ok:
+          type: boolean
+        consentimiento_por:
+          type: string
+          format: uuid
+          nullable: true
+        consentimiento_el:
+          type: string
+          format: date-time
+          nullable: true
+        progreso:
+          type: object
+          description: Avance de la corrida en curso (en cero si no hay ninguna)
+          properties:
+            total:
+              type: integer
+            terminadas:
+              type: integer
+            fallidas:
+              type: integer
 
     SyncIniciadoResponse:
       type: object

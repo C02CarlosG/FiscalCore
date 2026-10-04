@@ -51,6 +51,17 @@ describe("EmpresaSwitcher", () => {
     expect(pushMock).toHaveBeenCalledWith("/empresas/e2/cfdi/emitidos");
   });
 
+  it("conserva la pantalla de Informacion fiscal al cambiar de empresa", async () => {
+    mockPathname.mockReturnValue("/empresas/e1/informacion-fiscal");
+    const user = userEvent.setup();
+    render(<EmpresaSwitcher />);
+
+    await user.click(screen.getByRole("button"));
+    await user.click(screen.getByRole("menuitem", { name: /Beta SA de CV/ }));
+
+    expect(pushMock).toHaveBeenCalledWith("/empresas/e2/informacion-fiscal");
+  });
+
   it("navega a dashboard cuando no hay sub-ruta reconocible", async () => {
     mockPathname.mockReturnValue("/empresas");
     const user = userEvent.setup();
