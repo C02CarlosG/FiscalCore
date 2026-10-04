@@ -409,6 +409,7 @@ pausa.
 | Fecha | De → para | Qué se necesita | Estado |
 |---|---|---|---|
 | 2026-10-04 | D → B | Agregar `"informacion-fiscal": "Información fiscal"` al mapa del breadcrumb de `layout/Header.tsx` (hoy muestra "Empresas" en `/empresas/{id}/informacion-fiscal`) y `"informacion-fiscal"` a `SUB_RUTAS` de `layout/EmpresaSwitcher.tsx` (para conservar la pantalla al cambiar de empresa) | Hecho en el PR #30 (F2.3) |
+| 2026-10-04 | D → B | U1: (1) `POST /mis-empresas` (`empresas.py`) vincula al creador con `rol = 'administrador'` (hoy usa el valor por defecto; U1 lo compensa al leer). (2) Breadcrumb de `Header.tsx` para `/perfil` ("Mi perfil") y `usuarios` ("Usuarios"); `"usuarios"` en `SUB_RUTAS` de `EmpresaSwitcher.tsx`. (3) Opcional: obligar a cambiar la contraseña temporal en el primer acceso (login en `auth.py`) | Pendiente |
 
 ## Riesgos
 
@@ -439,7 +440,8 @@ pausa.
 | M1, M4, M6 | A | Pendiente | — | — |
 | M3 | B | Pendiente |
 | V1 | D | En curso |
-| U1, M7 | D | Pendiente |
+| U1 | D | En revisión (PR D·U1) | `docs/superpowers/specs/2026-10-04-u1-usuarios-perfil-design.md` | `docs/superpowers/plans/2026-10-04-u1-usuarios-perfil.md` |
+| M7 | D | Pendiente |
 | F3.6 | A | Pendiente (después de F3.5b) | — | — |
 | Punto de control de paridad | Coordinación | Pendiente: al terminar F5–F7 se recorre FiscalCore con Playwright contra las capturas y se cuadran las cifras de control | — | — |
 | M2, M5 | C | Pendiente | — | — |
