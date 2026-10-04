@@ -61,6 +61,13 @@ describe("Header", () => {
     expect(screen.getByText("CFDI Recibidos")).toBeInTheDocument();
   });
 
+  it("shows the Información fiscal breadcrumb and not Empresas on its route", () => {
+    mockPathname.mockReturnValue("/empresas/e1/informacion-fiscal");
+    render(<Header onMenuClick={() => {}} />);
+    expect(screen.getByText("Información fiscal")).toBeInTheDocument();
+    expect(screen.queryByText("Empresas")).not.toBeInTheDocument();
+  });
+
   it("has no notifications button until it does something", () => {
     render(<Header onMenuClick={() => {}} />);
     expect(screen.queryByRole("button", { name: "Notificaciones" })).not.toBeInTheDocument();

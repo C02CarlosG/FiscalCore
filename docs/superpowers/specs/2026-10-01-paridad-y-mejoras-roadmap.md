@@ -408,7 +408,7 @@ pausa.
 
 | Fecha | De → para | Qué se necesita | Estado |
 |---|---|---|---|
-| 2026-10-04 | D → B | Agregar `"informacion-fiscal": "Información fiscal"` al mapa del breadcrumb de `layout/Header.tsx` (hoy muestra "Empresas" en `/empresas/{id}/informacion-fiscal`) y `"informacion-fiscal"` a `SUB_RUTAS` de `layout/EmpresaSwitcher.tsx` (para conservar la pantalla al cambiar de empresa) | Pendiente |
+| 2026-10-04 | D → B | Agregar `"informacion-fiscal": "Información fiscal"` al mapa del breadcrumb de `layout/Header.tsx` (hoy muestra "Empresas" en `/empresas/{id}/informacion-fiscal`) y `"informacion-fiscal"` a `SUB_RUTAS` de `layout/EmpresaSwitcher.tsx` (para conservar la pantalla al cambiar de empresa) | Hecho en el PR #30 (F2.3) |
 
 ## Riesgos
 
