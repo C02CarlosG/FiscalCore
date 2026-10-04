@@ -2,7 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { CfdiTabla } from "./CfdiTabla";
+import { useCfdiDetalle } from "@/hooks/useCfdis";
 import type { CfdiColumna, CfdiFila, CfdiListadoResponse } from "@/types/api";
+
+vi.mock("@/hooks/useCfdis", () => ({ useCfdiDetalle: vi.fn() }));
 
 const col = (clave: string, etiqueta: string, tipo_dato: CfdiColumna["tipo_dato"], extra: Partial<CfdiColumna> = {}): CfdiColumna => ({
   clave, etiqueta, tipo_dato, grupo: "encabezado", visible_por_defecto: true, ordenable: true, filtrable: true, opciones: [], ...extra,
@@ -16,6 +19,10 @@ const columnas: CfdiColumna[] = [
   col("metodo_pago", "Método de pago", "catalogo"),
   col("estado", "Estado", "catalogo"),
   col("uuid", "UUID", "texto", { visible_por_defecto: false }),
+];
+
+const columnasConcepto: CfdiColumna[] = [
+  col("descripcion", "Descripción", "texto", { grupo: "concepto", ordenable: false }),
 ];
 
 const fila = (extra: Partial<CfdiFila> = {}): CfdiFila => ({
@@ -37,10 +44,17 @@ const datos = (items: CfdiFila[], total = items.length, pagina = 1, por_pagina =
 function renderTabla(props: Partial<React.ComponentProps<typeof CfdiTabla>> = {}) {
   const acciones = {
     onOrdenar: vi.fn(), onPagina: vi.fn(), onPorPagina: vi.fn(), onReintentar: vi.fn(), onLimpiar: vi.fn(),
+    onVer: vi.fn(),
   };
+  vi.mocked(useCfdiDetalle).mockReturnValue({
+    data: { conceptos: [{ linea: 1, descripcion: "Servicio de consultoría" }], total_conceptos: 1 },
+    isError: false, refetch: vi.fn(),
+  } as never);
   render(
     <CfdiTabla
+      empresaId="e1"
       columnas={columnas}
+      columnasConcepto={columnasConcepto}
       datos={datos([fila()])}
       cargando={false}
       error={false}
@@ -61,7 +75,7 @@ describe("CfdiTabla", () => {
 
     const encabezados = screen.getAllByRole("columnheader").map((h) => h.textContent);
     expect(encabezados).toEqual([
-      "Fecha de expedición", "RFC", "Total", "CFDIs de pago relacionados", "Método de pago", "Estado",
+      "Acciones", "Fecha de expedición", "RFC", "Total", "CFDIs de pago relacionados", "Método de pago", "Estado",
     ]);
   });
 
@@ -210,6 +224,43 @@ describe("CfdiTabla", () => {
       await user.click(screen.getByRole("button", { name: "Limpiar filtros" }));
 
       expect(onLimpiar).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("acciones de la fila", () => {
+    it("desplegar muestra los conceptos del CFDI y volver a pulsar los oculta", async () => {
+      const user = userEvent.setup();
+      renderTabla();
+      expect(screen.queryByText("Servicio de consultoría")).not.toBeInTheDocument();
+
+      await user.click(screen.getByRole("button", { name: "Ver conceptos" }));
+
+      expect(useCfdiDetalle).toHaveBeenCalledWith("e1", "U1");
+      expect(screen.getByText("Servicio de consultoría")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Ocultar conceptos" })).toHaveAttribute("aria-expanded", "true");
+
+      await user.click(screen.getByRole("button", { name: "Ocultar conceptos" }));
+      expect(screen.queryByText("Servicio de consultoría")).not.toBeInTheDocument();
+    });
+
+    it("cada fila se despliega por separado", async () => {
+      const user = userEvent.setup();
+      renderTabla({ datos: datos([fila(), fila({ uuid: "U2" })]) });
+
+      await user.click(screen.getAllByRole("button", { name: "Ver conceptos" })[1]);
+
+      expect(useCfdiDetalle).toHaveBeenCalledWith("e1", "U2");
+      expect(screen.getAllByRole("button", { name: "Ver conceptos" })).toHaveLength(1);
+      expect(screen.getAllByRole("button", { name: "Ocultar conceptos" })).toHaveLength(1);
+    });
+
+    it("el botón del visor avisa con el uuid de su fila", async () => {
+      const user = userEvent.setup();
+      const { onVer } = renderTabla({ datos: datos([fila({ uuid: "U9" })]) });
+
+      await user.click(screen.getByRole("button", { name: "Abrir visor del CFDI" }));
+
+      expect(onVer).toHaveBeenCalledWith("U9");
     });
   });
 });

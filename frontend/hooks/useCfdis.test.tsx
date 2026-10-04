@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { useCfdiColumnas, useCfdiListado, useCfdiResumen } from "./useCfdis";
+import { useCfdiColumnas, useCfdiDetalle, useCfdiListado, useCfdiResumen } from "./useCfdis";
 import { leerEstado } from "@/lib/cfdi-url";
 
 vi.mock("@/lib/api-client", async () => {
@@ -120,6 +120,33 @@ describe("useCfdiResumen", () => {
 
     rerender({ pagina: 2 });
 
+    expect(apiFetch).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("useCfdiDetalle", () => {
+  beforeEach(() => vi.mocked(apiFetch).mockReset());
+
+  it("no consulta mientras no haya uuid (fila cerrada)", () => {
+    renderHook(() => useCfdiDetalle("e1", null), { wrapper: crearWrapper() });
+
+    expect(apiFetch).not.toHaveBeenCalled();
+  });
+
+  it("pide el detalle del uuid y lo reutiliza al reabrir", async () => {
+    vi.mocked(apiFetch).mockResolvedValue({ conceptos: [], total_conceptos: 0 });
+    const wrapper = crearWrapper();
+    const { result, rerender } = renderHook(({ uuid }: { uuid: string | null }) => useCfdiDetalle("e1", uuid), {
+      wrapper,
+      initialProps: { uuid: "U-1" as string | null },
+    });
+
+    await waitFor(() => expect(result.current.data).toBeDefined());
+    expect(ultimaUrl()).toBe("/api/v1/empresas/e1/cfdis/U-1");
+
+    rerender({ uuid: null });
+    rerender({ uuid: "U-1" });
+    expect(result.current.data).toBeDefined();
     expect(apiFetch).toHaveBeenCalledTimes(1);
   });
 });

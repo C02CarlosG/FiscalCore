@@ -26,8 +26,31 @@ const columnasCfdi = {
     columna("total", "Total", "moneda", true),
     columna("estado", "Estado", "catalogo"),
   ],
-  concepto: [],
+  concepto: [
+    { ...columna("descripcion", "Descripción", "texto", true), grupo: "concepto" },
+    { ...columna("importe", "Importe", "moneda", true), grupo: "concepto" },
+  ],
 };
+const detalleCfdi = (uuid: string) => ({
+  encabezado: {
+    uuid, version: "4.0", tipo_comprobante: "I", serie: "A", folio: "001", fecha_emision: "2026-09-01T10:00:00",
+    fecha_timbrado: "2026-09-01T10:01:00", no_certificado: "30001000000500003416", lugar_expedicion: "68000",
+    moneda: "MXN", tipo_cambio: 1, subtotal: 1000, descuento: 0, iva_trasladado: 250, iva_retenido: 0,
+    isr_retenido: 0, total: 1250, saldo: 0, metodo_pago: "PUE", metodo_pago_desc: "PUE - Pago en una sola exhibición",
+    forma_pago: "03", forma_pago_desc: "03 - Transferencia electrónica de fondos", uso_cfdi: "G03",
+    uso_cfdi_desc: "G03 - Gastos en general", estado: "vigente",
+  },
+  emisor: { rfc: "AAA010101AAA", nombre: "Empresa de prueba", regimen: "601", regimen_desc: "601 - General de Ley Personas Morales" },
+  receptor: { rfc: "BBB010101BBB", nombre: "Proveedor ficticio uno", regimen: "601", regimen_desc: "601 - General de Ley Personas Morales", domicilio_fiscal: "68000" },
+  impuestos: [],
+  conceptos: [
+    { linea: 1, clave_prod_serv: "84111506", cantidad: 1, unidad: "Servicio", descripcion: "Servicio de consultoría ficticio", valor_unitario: 1000, importe: 1000, descuento: 0, iva_traslado_importe: 250 },
+  ],
+  total_conceptos: 1,
+  pagos: [],
+  relacionados: [],
+  tiene_xml: true,
+});
 const filasCfdi = [
   { uuid: "cfdi-demo-001", fecha_emision: "2026-09-01T10:00:00", folio: "001", contraparte: "Proveedor ficticio uno", total: 1250, estado: "vigente" },
   { uuid: "cfdi-demo-002", fecha_emision: "2026-09-02T11:30:00", folio: "002", contraparte: "Proveedor ficticio dos", total: 2500, estado: "vigente" },
@@ -156,6 +179,16 @@ test.beforeEach(async ({ page }) => {
         resultado: { iva_por_pagar: 0, saldo_a_cargo: 0, saldo_a_favor: 0 },
         comparativo_sat: { diot_iva_pagado: 0, diferencia: 0 },
       };
+    } else if (/\/cfdis\/[^/]+\/xml$/.test(path)) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/xml",
+        headers: { "Content-Disposition": 'attachment; filename="cfdi-demo-001.xml"' },
+        body: "<cfdi:Comprobante/>",
+      });
+      return;
+    } else if (/\/cfdis\/cfdi-demo-\d+$/.test(path)) {
+      body = detalleCfdi(path.split("/").pop()!);
     } else if (path.endsWith("/cfdis/columnas")) {
       body = columnasCfdi;
     } else if (path.endsWith("/cfdis/resumen")) {
@@ -279,6 +312,48 @@ test("CFDI emitidos muestra el listado del periodo con sus totales", async ({ pa
   await expect(page.getByText("01/09/2026")).toBeVisible();
 });
 
+test("una fila despliega sus conceptos sin salir del listado", async ({ page }) => {
+  await page.goto(`/empresas/${empresaId}/cfdi/emitidos?periodo=2026-09`);
+  await page.getByRole("button", { name: "Ver conceptos" }).first().click();
+
+  await expect(page.getByText("Servicio de consultoría ficticio")).toBeVisible();
+  await expect(page.getByText("1 concepto", { exact: true })).toBeVisible();
+  await expect(page).toHaveURL(/cfdi\/emitidos\?periodo=2026-09$/);
+
+  await page.getByRole("button", { name: "Ocultar conceptos" }).click();
+  await expect(page.getByText("Servicio de consultoría ficticio")).toHaveCount(0);
+});
+
+test("el visor muestra el CFDI y descarga su XML", async ({ page }) => {
+  await page.goto(`/empresas/${empresaId}/cfdi/emitidos?periodo=2026-09`);
+  await page.getByRole("button", { name: "Abrir visor del CFDI" }).first().click();
+
+  const visor = page.getByRole("dialog");
+  await expect(visor.getByRole("heading", { name: /Ingreso A-001/ })).toBeVisible();
+  await expect(visor.getByText("30001000000500003416")).toBeVisible();
+  await expect(visor.getByText("01/09/2026 10:00")).toBeVisible();
+  await expect(visor.getByRole("table", { name: "Totales" })).toContainText("$1,250.00");
+
+  const descarga = page.waitForEvent("download");
+  await visor.getByRole("button", { name: "Descargar XML" }).click();
+  expect((await descarga).suggestedFilename()).toBe("cfdi-demo-001.xml");
+
+  await visor.getByRole("button", { name: "Cerrar" }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+});
+
+test("al imprimir solo queda el visor del CFDI", async ({ page }) => {
+  await page.goto(`/empresas/${empresaId}/cfdi/emitidos?periodo=2026-09`);
+  await page.getByRole("button", { name: "Abrir visor del CFDI" }).first().click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+
+  await page.emulateMedia({ media: "print" });
+
+  await expect(page.getByRole("dialog").getByText("30001000000500003416")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "CFDI emitidos" })).toBeHidden();
+  await expect(page.getByRole("dialog").getByRole("button", { name: "Imprimir" })).toBeHidden();
+});
+
 test("CFDI recibidos usa la misma pantalla con su propio título", async ({ page }) => {
   await page.goto(`/empresas/${empresaId}/cfdi/recibidos?periodo=2026-09`);
   await expect(page.getByRole("heading", { name: "CFDI recibidos" })).toBeVisible();
@@ -289,11 +364,11 @@ test("el listado ordena en el servidor y el orden sobrevive a recargar", async (
   await page.goto(`/empresas/${empresaId}/cfdi/emitidos?periodo=2026-09`);
   const primera = page.getByRole("cell", { name: /^Proveedor ficticio/ }).first();
 
-  await page.getByRole("button", { name: "Total" }).click();
+  await page.getByRole("button", { name: "Total", exact: true }).click();
   await expect(page).toHaveURL(/orden=total/);
   await expect(primera).toHaveText("Proveedor ficticio uno");
 
-  await page.getByRole("button", { name: "Total" }).click();
+  await page.getByRole("button", { name: "Total", exact: true }).click();
   await expect(page).toHaveURL(/dir=desc/);
   await expect(primera).toHaveText("Proveedor ficticio dos");
 
@@ -303,6 +378,110 @@ test("el listado ordena en el servidor y el orden sobrevive a recargar", async (
   // La tabla de totales también tiene un encabezado "Total": se acota al listado (la segunda tabla).
   await expect(page.getByRole("table").nth(1).getByRole("columnheader", { name: "Total", exact: true }))
     .toHaveAttribute("aria-sort", "descending");
+});
+
+test("las columnas elegidas se guardan en el servidor y sobreviven a recargar", async ({ page }) => {
+  // El servidor guarda por usuario: el mock conserva lo último que recibió.
+  let guardado: unknown = null;
+  await page.route("**/api/v1/preferencias/tablas/**", async (route) => {
+    const peticion = route.request();
+    if (peticion.method() === "PUT") guardado = peticion.postDataJSON().columnas;
+    if (peticion.method() === "DELETE") guardado = null;
+    await route.fulfill({
+      status: peticion.method() === "DELETE" ? 204 : 200,
+      contentType: "application/json",
+      body: peticion.method() === "DELETE" ? "" : JSON.stringify({ columnas: guardado }),
+    });
+  });
+
+  await page.goto(`/empresas/${empresaId}/cfdi/emitidos?periodo=2026-09`);
+  const tabla = page.getByRole("table").nth(1);
+  await expect(tabla.getByRole("columnheader", { name: "Folio" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Columnas", exact: true }).click();
+  const dialogo = page.getByRole("dialog", { name: "Columnas del listado" });
+  await dialogo.getByRole("checkbox", { name: "Folio" }).uncheck();
+  await dialogo.getByRole("button", { name: "Subir Total" }).click();
+  await dialogo.getByRole("button", { name: "Guardar" }).click();
+  await expect(dialogo).toBeHidden();
+
+  await expect(tabla.getByRole("columnheader", { name: "Folio" })).toHaveCount(0);
+  await page.reload();
+  await expect(tabla.getByRole("columnheader", { name: /Fecha/ })).toBeVisible();   // ya cargó
+  await expect(tabla.getByRole("columnheader", { name: "Folio" })).toHaveCount(0);
+  const cabeceras = await tabla.getByRole("columnheader").allTextContents();
+  const posicion = (texto: string) => cabeceras.findIndex((c) => c.includes(texto));
+  expect(posicion("Total")).toBeGreaterThanOrEqual(0);
+  expect(posicion("Total")).toBeLessThan(posicion("Nombre"));   // subió un lugar
+
+  await page.getByRole("button", { name: "Columnas", exact: true }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Restablecer" }).click();
+  await expect(tabla.getByRole("columnheader", { name: "Folio" })).toBeVisible();
+});
+
+test("el filtro avanzado va a la URL, manda al servidor y se puede quitar", async ({ page }) => {
+  let consultaFiltros: string | null = null;
+  await page.route("**/api/v1/empresas/*/cfdis?**", async (route) => {
+    consultaFiltros = new URL(route.request().url()).searchParams.get("filtros");
+    await route.fallback();
+  });
+
+  await page.goto(`/empresas/${empresaId}/cfdi/emitidos?periodo=2026-09`);
+  await page.getByRole("button", { name: "Filtro avanzado" }).click();
+  const dialogo = page.getByRole("dialog", { name: "Filtro avanzado" });
+  await dialogo.getByRole("button", { name: "Agregar filtro" }).click();
+  await dialogo.getByLabel("Campo").selectOption("total");
+  await dialogo.getByLabel("Operador").selectOption("mayor");
+  await expect(dialogo.getByRole("button", { name: "Aplicar" })).toBeDisabled();
+  await dialogo.getByLabel("Valor de Total").fill("1000");
+  await dialogo.getByRole("button", { name: "Aplicar" }).click();
+
+  const esperado = JSON.stringify([{ campo: "total", op: "mayor", valor: 1000 }]);
+  await expect(page).toHaveURL(new RegExp(`filtros=${encodeURIComponent(esperado).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+  await expect(page.getByLabel("1 filtros activos")).toBeVisible();
+  await expect.poll(() => consultaFiltros).toBe(esperado);   // la petición sale después del cambio de URL
+
+  await page.reload();
+  await expect(page.getByLabel("1 filtros activos")).toBeVisible();   // la vista se reproduce
+
+  await page.getByRole("button", { name: "Filtro avanzado" }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Quitar todos" }).click();
+  await expect(page).not.toHaveURL(/filtros=/);
+});
+
+test("Exportar a Excel descarga lo filtrado con las columnas visibles", async ({ page }) => {
+  let pedido: URLSearchParams | null = null;
+  await page.route("**/api/v1/empresas/*/cfdis/exportar**", async (route) => {
+    pedido = new URL(route.request().url()).searchParams;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      headers: { "Content-Disposition": 'attachment; filename="cfdi_emitidos_I_2026-09.xlsx"' },
+      body: "PK-contenido-de-prueba",
+    });
+  });
+
+  await page.goto(`/empresas/${empresaId}/cfdi/emitidos?periodo=2026-09&q=ficticio&pagina=1`);
+  const descarga = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Exportar a Excel" }).click();
+
+  expect((await descarga).suggestedFilename()).toBe("cfdi_emitidos_I_2026-09.xlsx");
+  expect(pedido!.get("columnas")).toBe("fecha_emision,folio,contraparte,total,estado");
+  expect(pedido!.get("q")).toBe("ficticio");
+  expect(pedido!.has("pagina")).toBe(false);
+});
+
+test("si el servidor rechaza la exportación se muestra el motivo", async ({ page }) => {
+  await page.route("**/api/v1/empresas/*/cfdis/exportar**", (route) =>
+    route.fulfill({
+      status: 422,
+      contentType: "application/json",
+      body: JSON.stringify({ detail: "El resultado tiene 60,000 CFDI y el máximo a exportar es 50,000" }),
+    }));
+
+  await page.goto(`/empresas/${empresaId}/cfdi/emitidos?periodo=2026-09`);
+  await page.getByRole("button", { name: "Exportar a Excel" }).click();
+  await expect(page.getByRole("alert").filter({ hasText: "60,000 CFDI" })).toBeVisible();
 });
 
 test("Nómina es una pestaña del listado, no una pantalla aparte", async ({ page }) => {
