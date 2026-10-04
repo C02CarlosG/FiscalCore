@@ -110,9 +110,9 @@ def test_guarda_configuracion_y_audita(monkeypatch):
     guardado, auditado = {}, []
     monkeypatch.setattr(datos, "guardar_configuracion", lambda e, c, u: guardado.update(e=e, c=c.a_json(), u=u))
     monkeypatch.setattr(router_v, "registrar_evento", lambda *a, **k: auditado.append(a[1]))
-    r = client.put(f"{BASE}/configuracion", json={"inactivas": ["no_bancarizado"], "umbral_efectivo": 2500})
+    r = client.put(f"{BASE}/configuracion", json={"inactivas": ["no_bancarizado"], "umbral_efectivo": 1500})
     assert r.status_code == 200
-    assert r.json() == {"inactivas": ["no_bancarizado"], "umbral_efectivo": "2500.00"}
+    assert r.json() == {"inactivas": ["no_bancarizado"], "umbral_efectivo": "1500.00"}
     assert guardado == {"e": EMPRESA, "c": r.json(), "u": "u1"}
     assert auditado == ["validaciones_cfdi.configurar"]
 
@@ -121,6 +121,7 @@ def test_guarda_configuracion_y_audita(monkeypatch):
     {"inactivas": ["inventada"]},
     {"umbral_efectivo": -5},
     {"umbral_efectivo": "mucho"},
+    {"umbral_efectivo": 2500},
 ])
 def test_configuracion_invalida_responde_422(monkeypatch, cuerpo):
     monkeypatch.setattr(datos, "guardar_configuracion", lambda *a: pytest.fail("no debe guardar"))

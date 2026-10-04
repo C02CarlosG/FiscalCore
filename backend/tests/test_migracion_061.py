@@ -25,6 +25,9 @@ def test_061_crea_la_tabla_se_puede_repetir_y_borra_en_cascada():
         db.execute("INSERT INTO validaciones_cfdi_config (empresa_id) VALUES (%s)", (empresa["id"],))
         fila = db.query_one("SELECT config FROM validaciones_cfdi_config WHERE empresa_id = %s", (empresa["id"],))
         assert fila["config"] == {}
+        import psycopg2
+        with pytest.raises(psycopg2.errors.CheckViolation):
+            db.execute("UPDATE validaciones_cfdi_config SET config = '[]'::jsonb WHERE empresa_id = %s", (empresa["id"],))
         db.execute("DELETE FROM empresas WHERE id = %s", (empresa["id"],))
         assert db.query_one("SELECT 1 AS x FROM validaciones_cfdi_config WHERE empresa_id = %s", (empresa["id"],)) is None
     finally:

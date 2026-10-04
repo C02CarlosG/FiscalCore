@@ -115,13 +115,13 @@ describe("ValidacionesPanel", () => {
     await user.click(within(dialogo).getByRole("checkbox", { name: "Gastos no bancarizados" }));
     const umbral = within(dialogo).getByLabelText("Umbral de efectivo (pesos)");
     await user.clear(umbral);
-    await user.type(umbral, "3000");
+    await user.type(umbral, "1500");
     await user.click(within(dialogo).getByRole("button", { name: "Guardar" }));
 
     await waitFor(() =>
       expect(apiFetch).toHaveBeenCalledWith(`${BASE}/configuracion`, {
         method: "PUT",
-        body: JSON.stringify({ inactivas: ["no_bancarizado"], umbral_efectivo: "3000" }),
+        body: JSON.stringify({ inactivas: ["no_bancarizado"], umbral_efectivo: "1500" }),
       }),
     );
   });
@@ -136,7 +136,12 @@ describe("ValidacionesPanel", () => {
     await user.clear(umbral);
     await user.type(umbral, "-5");
     await user.click(within(dialogo).getByRole("button", { name: "Guardar" }));
-    expect(await within(dialogo).findByText("El umbral debe ser un importe de 0 o más")).toBeInTheDocument();
+    expect(await within(dialogo).findByText("El umbral debe ser un importe entre 0 y 2,000")).toBeInTheDocument();
+
+    await user.clear(umbral);
+    await user.type(umbral, "3000");
+    await user.click(within(dialogo).getByRole("button", { name: "Guardar" }));
+    expect(await within(dialogo).findByText("El umbral debe ser un importe entre 0 y 2,000")).toBeInTheDocument();
 
     vi.mocked(apiFetch).mockRejectedValueOnce(new ApiError(422, "umbral_efectivo fuera de rango"));
     await user.clear(umbral);

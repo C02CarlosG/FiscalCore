@@ -46,8 +46,8 @@ export function ConfiguracionValidacionesDialog({
     event.preventDefault();
     setError(null);
     const numero = Number(umbral);
-    if (umbral.trim() === "" || !Number.isFinite(numero) || numero < 0) {
-      setError("El umbral debe ser un importe de 0 o más");
+    if (umbral.trim() === "" || !Number.isFinite(numero) || numero < 0 || numero > 2000) {
+      setError("El umbral debe ser un importe entre 0 y 2,000");
       return;
     }
     try {
@@ -95,7 +95,8 @@ export function ConfiguracionValidacionesDialog({
             />
             <p className="text-xs text-muted-foreground">
               Gastos pagados en efectivo por más de este importe se señalan como no bancarizados. La ley fija
-              $2,000 (art. 27-III LISR).
+              $2,000 (art. 27-III LISR): puedes bajarlo para ser más estricto, no subirlo. Los combustibles en
+              efectivo se señalan por cualquier monto.
             </p>
           </div>
           {error && (

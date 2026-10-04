@@ -9,7 +9,7 @@
 
 CREATE TABLE IF NOT EXISTS validaciones_cfdi_config (
     empresa_id  UUID PRIMARY KEY REFERENCES empresas(id) ON DELETE CASCADE,
-    config      JSONB NOT NULL DEFAULT '{}'::jsonb,
+    config      JSONB NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(config) = 'object'),
     usuario_id  UUID REFERENCES usuarios(id) ON DELETE SET NULL,
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

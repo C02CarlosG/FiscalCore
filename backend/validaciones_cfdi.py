@@ -14,12 +14,18 @@ from decimal import Decimal, InvalidOperation
 from typing import Any, Optional
 
 from .cfdi_columnas import A_PESOS
+from .cfdi_listado import rango as _rango_mes
 from .iva import UMBRAL_EFECTIVO
 
 DIRECCIONES = ("emitidos", "recibidos")
 ALCANCES = ("periodo", "acumulado")
 CENTAVOS = Decimal("0.01")
-UMBRAL_MAXIMO = Decimal("1000000000")
+# El art. 27-III LISR fija $2,000: el umbral se puede bajar (más estricto), no subir.
+# Si se subiera, la tarjeta dejaría de coincidir con IVA y deducciones (`UMBRAL_EFECTIVO`).
+UMBRAL_MAXIMO = UMBRAL_EFECTIVO
+# Clase SAT 151015 "Petróleo y destilados" (gasolinas, diésel): en efectivo no es
+# deducible sin importar el monto (art. 27-III LISR, segundo párrafo).
+PREFIJO_COMBUSTIBLES = "151015"
 _PERIODO_RE = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
 
 
@@ -50,14 +56,14 @@ CATALOGO: tuple[Validacion, ...] = (
     ),
     Validacion(
         "egreso_sin_relacion", "Egresos sin CFDI relacionado",
-        "Notas de crédito sin el CFDI que disminuyen: no se sabe a qué ingreso ni a qué "
-        "periodo afectan.",
+        "Notas de crédito sin relación 01, 03 o 07 al CFDI que disminuyen (o con forma de "
+        "pago 30 sin relación 07): no se sabe a qué ingreso ni a qué periodo afectan.",
         ("emitidos", "recibidos"),
     ),
     Validacion(
         "no_bancarizado", "Gastos no bancarizados",
-        "Recibidos pagados en efectivo por más del umbral: no deducibles (art. 27-III LISR) "
-        "ni acreditables (art. 5-I LIVA).",
+        "Recibidos pagados en efectivo por más del umbral, y combustibles en efectivo por "
+        "cualquier monto: no deducibles (art. 27-III LISR) ni acreditables (art. 5-I LIVA).",
         ("recibidos",),
     ),
 )
@@ -70,7 +76,7 @@ def de_direccion(direccion: str) -> list[Validacion]:
 
 def _a_umbral(valor: Any) -> Decimal:
     umbral = Decimal(str(valor))
-    if not umbral.is_finite() or umbral < 0 or umbral > UMBRAL_MAXIMO:
+    if not umbral.is_finite() or umbral < 0:
         raise InvalidOperation
     return umbral.quantize(CENTAVOS)
 
@@ -87,7 +93,8 @@ class Configuracion:
         inactivas = config.get("inactivas")
         inactivas = frozenset(k for k in inactivas if k in POR_CLAVE) if isinstance(inactivas, list) else frozenset()
         try:
-            umbral = _a_umbral(config["umbral_efectivo"])
+            # Un valor guardado arriba del legal se lee como el legal.
+            umbral = min(_a_umbral(config["umbral_efectivo"]), UMBRAL_MAXIMO.quantize(CENTAVOS))
         except (KeyError, InvalidOperation, ValueError, TypeError):
             umbral = cls.umbral_efectivo
         return cls(inactivas=inactivas, umbral_efectivo=umbral)
@@ -110,8 +117,12 @@ def validar_cambio(cuerpo: dict) -> Configuracion:
     umbral = cuerpo.get("umbral_efectivo", Configuracion.umbral_efectivo)
     try:
         umbral = _a_umbral(umbral)
+        if umbral > UMBRAL_MAXIMO:
+            raise InvalidOperation
     except (InvalidOperation, ValueError, TypeError):
-        raise ValidacionInvalida("umbral_efectivo debe ser un importe entre 0 y 1,000,000,000")
+        raise ValidacionInvalida(
+            "umbral_efectivo debe ser un importe entre 0 y 2,000 (el art. 27-III LISR fija $2,000; solo se puede bajar)"
+        )
     return Configuracion(inactivas=frozenset(inactivas), umbral_efectivo=umbral)
 
 
@@ -119,9 +130,9 @@ def rangos(periodo: Any) -> tuple[date, date, date]:
     """(inicio del mes, inicio del mes siguiente, inicio del ejercicio)."""
     if not isinstance(periodo, str) or not _PERIODO_RE.fullmatch(periodo):
         raise ValidacionInvalida("periodo inválido; formato esperado YYYY-MM")
-    anio, mes = int(periodo[:4]), int(periodo[5:7])
-    siguiente = date(anio + 1, 1, 1) if mes == 12 else date(anio, mes + 1, 1)
-    return date(anio, mes, 1), siguiente, date(anio, 1, 1)
+    # Mismo rango de mes que el listado de CFDI, para que la lista y el listado coincidan.
+    inicio, siguiente = _rango_mes(periodo)
+    return inicio, siguiente, date(inicio.year, 1, 1)
 
 
 def validar_direccion(direccion: Any) -> str:
@@ -143,6 +154,14 @@ def validar_alcance(alcance: Any) -> str:
     return alcance
 
 
+# ¿Trae alguna relación de esos tipos? cfdi_relacionados es [{"tipo_relacion", "uuids"}].
+_TIENE_RELACION = (
+    "EXISTS (SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(c.cfdi_relacionados) = 'array' "
+    "THEN c.cfdi_relacionados ELSE '[]'::jsonb END) r WHERE r->>'tipo_relacion' IN ({tipos}))"
+)
+_RELACION_QUE_IDENTIFICA = _TIENE_RELACION.format(tipos="'01', '03', '07'")
+_RELACION_ANTICIPO = _TIENE_RELACION.format(tipos="'07'")
+
 # Condiciones sobre la tabla `cfdi` con alias `c`. Los CFDI ya vienen filtrados por
 # empresa, dirección, vigencia y fecha en la consulta que las usa.
 _CONDICIONES = {
@@ -155,11 +174,19 @@ _CONDICIONES = {
         "JOIN cfdi p ON p.id = pc.cfdi_id "
         "WHERE pr.cfdi_uuid = c.uuid AND p.empresa_id = c.empresa_id AND p.estado = 'vigente')"
     ),
+    # Solo las relaciones 01 (nota de crédito), 03 (devolución) y 07 (aplicación de
+    # anticipo) identifican el ingreso que se disminuye; una 04 (sustitución) o 02 no.
+    # Con forma de pago 30 (aplicación de anticipos) la relación debe ser 07.
     "egreso_sin_relacion": (
-        "c.tipo_comprobante = 'E' AND (c.cfdi_relacionados IS NULL "
-        "OR c.cfdi_relacionados IN ('[]'::jsonb, '{}'::jsonb, 'null'::jsonb))"
+        "c.tipo_comprobante = 'E' AND ("
+        f"NOT {_RELACION_QUE_IDENTIFICA} "
+        f"OR (c.forma_pago = '30' AND NOT {_RELACION_ANTICIPO}))"
     ),
-    "no_bancarizado": f"c.tipo_comprobante = 'I' AND c.forma_pago = '01' AND c.total * {A_PESOS} > %s",
+    "no_bancarizado": (
+        f"c.tipo_comprobante = 'I' AND c.forma_pago = '01' AND (c.total * {A_PESOS} > %s "
+        "OR EXISTS (SELECT 1 FROM cfdi_conceptos cc WHERE cc.cfdi_id = c.id "
+        f"AND cc.clave_prod_serv LIKE '{PREFIJO_COMBUSTIBLES}%%'))"
+    ),
 }
 
 

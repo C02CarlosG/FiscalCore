@@ -38,10 +38,15 @@ def test_configuracion_por_defecto():
 
 
 def test_configuracion_ignora_claves_desconocidas_al_leer():
-    c = v.Configuracion.desde_json({"inactivas": ["pue_con_rep", "vieja"], "umbral_efectivo": "3000", "otra": 1})
+    c = v.Configuracion.desde_json({"inactivas": ["pue_con_rep", "vieja"], "umbral_efectivo": "1500", "otra": 1})
     assert c.inactivas == frozenset({"pue_con_rep"})
-    assert c.umbral_efectivo == Decimal("3000.00")
+    assert c.umbral_efectivo == Decimal("1500.00")
     assert c.activa("pue_con_rep") is False
+
+
+def test_umbral_guardado_arriba_del_legal_se_lee_como_el_legal():
+    # El art. 27-III LISR fija $2,000: el umbral solo se puede bajar.
+    assert v.Configuracion.desde_json({"umbral_efectivo": "3000"}).umbral_efectivo == Decimal("2000.00")
 
 
 def test_configuracion_con_umbral_corrupto_usa_el_defecto():
@@ -49,9 +54,10 @@ def test_configuracion_con_umbral_corrupto_usa_el_defecto():
 
 
 def test_validar_cambio():
-    c = v.validar_cambio({"inactivas": ["no_bancarizado"], "umbral_efectivo": "2500.5"})
+    c = v.validar_cambio({"inactivas": ["no_bancarizado"], "umbral_efectivo": "1500.5"})
     assert c.inactivas == frozenset({"no_bancarizado"})
-    assert c.umbral_efectivo == Decimal("2500.50")
+    assert c.umbral_efectivo == Decimal("1500.50")
+    assert v.validar_cambio({"umbral_efectivo": "2000"}).umbral_efectivo == Decimal("2000.00")
 
 
 @pytest.mark.parametrize("cuerpo", [
@@ -59,6 +65,8 @@ def test_validar_cambio():
     {"umbral_efectivo": "-1"},
     {"umbral_efectivo": "NaN"},
     {"umbral_efectivo": "1e12"},
+    {"umbral_efectivo": "2000.01"},
+    {"umbral_efectivo": "3000"},
     {"inactivas": "pue_con_rep"},
 ])
 def test_validar_cambio_rechaza(cuerpo):
@@ -67,9 +75,21 @@ def test_validar_cambio_rechaza(cuerpo):
 
 
 def test_condicion_no_bancarizado_lleva_el_umbral_como_parametro():
-    sql, params = v.condicion("no_bancarizado", v.Configuracion.desde_json({"umbral_efectivo": "3000"}))
-    assert "%s" in sql and "3000" not in sql
-    assert params == [Decimal("3000.00")]
+    sql, params = v.condicion("no_bancarizado", v.Configuracion.desde_json({"umbral_efectivo": "1500"}))
+    assert "%s" in sql and "1500" not in sql
+    assert params == [Decimal("1500.00")]
+    assert "15101" in sql  # combustibles: en efectivo nunca son deducibles
+
+
+def test_egreso_sin_relacion_solo_cuenta_relaciones_que_identifican_el_ingreso():
+    sql, _ = v.condicion("egreso_sin_relacion", v.Configuracion.desde_json(None))
+    assert "'01'" in sql and "'03'" in sql and "'07'" in sql and "'30'" in sql
+
+
+def test_rangos_reutiliza_el_mes_del_listado():
+    from backend import cfdi_listado
+    inicio, siguiente, _ = v.rangos("2026-12")
+    assert (inicio, siguiente) == cfdi_listado.rango("2026-12")
 
 
 def test_condiciones_sin_parametros():

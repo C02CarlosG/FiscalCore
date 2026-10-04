@@ -3229,7 +3229,7 @@ paths:
         '403':
           $ref: '#/components/responses/ForbiddenError'
         '422':
-          description: Clave de validación desconocida o umbral fuera de rango
+          description: Clave de validación desconocida o umbral fuera de 0 a 2,000
 
 # ============================================================
 # COMPONENTS
@@ -4531,7 +4531,7 @@ components:
           items: { type: string, enum: [pue_forma_99, pue_con_rep, egreso_sin_relacion, no_bancarizado] }
         umbral_efectivo:
           type: string
-          description: Importe en pesos con dos decimales; por defecto "2000.00" (art. 27-III LISR).
+          description: Importe en pesos con dos decimales, de 0 a 2,000; por defecto "2000.00" (art. 27-III LISR fija $2,000, solo se puede bajar).
 
     TarjetaValidacionCfdi:
       type: object
