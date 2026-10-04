@@ -215,8 +215,11 @@ def parsear_constancia(pdf_bytes: bytes) -> dict:
             texto_completo: str,   # para depuración / fallback manual
         }
     """
-    texto = extraer_texto(pdf_bytes)
+    return parsear_texto_constancia(extraer_texto(pdf_bytes))
 
+
+def parsear_texto_constancia(texto: str) -> dict:
+    """Igual que `parsear_constancia`, sobre el texto ya extraído del PDF."""
     return {
         "rfc":           _buscar_rfc(texto),
         "razon_social":  _buscar_razon_social(texto),

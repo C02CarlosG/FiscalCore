@@ -23,8 +23,8 @@ Fixtures: PDF sintéticos generados en memoria; nunca un PDF real del SAT.
   - `detectar_tipo` para constancia, opinión y texto ajeno.
   - `parsear_opinion`: sentido positivo/negativo/inscrito sin obligaciones/no
     inscrito, folio y fecha tras "Revisión practicada el día".
-  - `estado_opinion`: emitida 2026-10-03 → vigente hasta 2026-11-02 (vigente ese día,
-    vencida el 03); negativa → `vigente = False`.
+  - `estado_opinion`: emitida 2026-10-03 → vigente hasta 2026-11-01 (vigente ese día,
+    vencida el 02); la vigencia no depende del sentido.
   - `validar_pdf`: sin `%PDF-`, ilegible, más de 10 páginas.
   - `analizar_documento`: RFC distinto, sin RFC, tipo cruzado, caso feliz.
 - Código: `backend/informacion_fiscal.py`.

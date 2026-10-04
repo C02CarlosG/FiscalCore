@@ -43,7 +43,7 @@ No entra:
 | Regla | Fundamento | Cómo se aplica |
 |---|---|---|
 | La opinión del cumplimiento se emite en sentido **positivo**, **negativo**, **inscrito sin obligaciones** o **no inscrito** | Art. 32-D CFF; regla de la RMF vigente sobre el procedimiento para obtener la opinión (2.1.37 en las RMF recientes; se confirma con la RMF 2026 en la revisión de `dominio-fiscal`) | Se lee del texto; si no se identifica, queda "no identificado" y el documento se acepta igual |
-| La opinión tiene vigencia de **30 días naturales** a partir de su emisión | Misma regla de la RMF | `vigente_hasta = fecha_emision + 30 días`; vigente si `hoy <= vigente_hasta`. Se calcula al consultar, no se guarda |
+| La opinión tiene vigencia de **30 días naturales** a partir de su emisión | Misma regla de la RMF | El día de emisión cuenta como el primero: `vigente_hasta = fecha_emision + 29 días`; vigente si `hoy <= vigente_hasta`. Es la lectura conservadora (no muestra como vigente una opinión que un tercero ya podría rechazar). La vigencia es independiente del sentido: la pantalla muestra ambos. Se calcula al consultar, no se guarda |
 | La constancia no tiene vencimiento legal | Art. 27 CFF (inscripción y actualización en el RFC) | Solo se muestra su antigüedad en días. Muchos clientes y bancos piden una de menos de 30 días; la pantalla lo señala como aviso, no como vencimiento |
 | El RFC del documento debe ser el de la empresa | Validación de integridad de FiscalCore (D4) | Se compara el RFC etiquetado del documento, en mayúsculas y sin espacios, contra `empresas.rfc`; si difiere o no se encuentra, 422 |
 
@@ -120,7 +120,7 @@ acceso a la empresa (403 si no lo tiene, 404 si la empresa no existe).
   "rfc": "ACM010101AA1", "fecha_emision": "2026-10-03", "created_at": "2026-10-04T10:00:00+00:00",
   "datos": {"razon_social": "…", "sentido": "positivo", "folio": "26NA1234567"},
   "antiguedad_dias": 1,
-  "vigente_hasta": "2026-11-02",
+  "vigente_hasta": "2026-11-01",
   "vigente": true
 }
 ```
@@ -162,8 +162,8 @@ Validación previa en el navegador (solo por comodidad, el backend decide): exte
 3. Una opinión subida como constancia (y al revés) responde 422.
 4. Un archivo `.pdf` que no empieza con `%PDF-`, uno de más de 5 MB y uno de más de 10
    páginas se rechazan sin guardar.
-5. Opinión positiva emitida el 2026-10-03: `vigente_hasta = 2026-11-02`, vigente el
-   2026-11-02 y vencida el 2026-11-03.
+5. Opinión emitida el 2026-10-03: `vigente_hasta = 2026-11-01`, vigente el
+   2026-11-01 y vencida el 2026-11-02.
 6. El PDF descargado es idéntico byte por byte al subido.
 7. Un usuario sin acceso a la empresa recibe 403 en todas las rutas; un documento de
    otra empresa da 404.
