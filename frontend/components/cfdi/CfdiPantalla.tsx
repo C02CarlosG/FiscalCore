@@ -16,12 +16,11 @@ import { useUrlParams } from "@/hooks/useUrlParams";
 import { Button } from "@/components/ui/button";
 import { EditorColumnas } from "@/components/cfdi/EditorColumnas";
 import { FiltroAvanzado } from "@/components/cfdi/FiltroAvanzado";
-import { CATALOGO_CIFRAS } from "@/components/cfdi/CfdiTotales";
 import { CfdiTabla } from "@/components/cfdi/CfdiTabla";
 import { CfdiVisor } from "@/components/cfdi/CfdiVisor";
 import { CfdiTabs } from "@/components/cfdi/CfdiTabs";
 import { CfdiToolbar } from "@/components/cfdi/CfdiToolbar";
-import { CfdiTotales } from "@/components/cfdi/CfdiTotales";
+import { CfdiTotales, catalogoCifras } from "@/components/cfdi/CfdiTotales";
 import { ErrorState } from "@/components/shared/ErrorState";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { contarActivos } from "@/lib/cfdi-filtros";
@@ -85,8 +84,8 @@ export function CfdiPantalla({ direccion }: { direccion: "emitidos" | "recibidos
     [catalogo, preferenciaTabla.data],
   );
   const editablesTotales = useMemo(
-    () => resolverColumnas(CATALOGO_CIFRAS, preferenciaTotales.data),
-    [preferenciaTotales.data],
+    () => resolverColumnas(catalogoCifras(resumen.data?.cifras), preferenciaTotales.data),
+    [resumen.data?.cifras, preferenciaTotales.data],
   );
 
   const texto = TEXTOS[direccion];
@@ -161,10 +160,21 @@ export function CfdiPantalla({ direccion }: { direccion: "emitidos" | "recibidos
         onChange={(tipo) => cambiar({ tipo, orden: POR_DEFECTO.orden, dir: POR_DEFECTO.dir })}
       />
 
+      {estado.tipo === "P" && (
+        <p className="rounded-md border border-dashed bg-card px-3 py-2 text-xs text-muted-foreground">
+          Las bases de IVA salen del complemento de pago versión 2.0. Los CFDI de pago versión 1.0 no las traen y
+          se muestran con guion.
+        </p>
+      )}
+
       {resumen.isError && !resumen.data ? (
         <ErrorState message="No se pudieron cargar los totales." onRetry={() => resumen.refetch()} />
       ) : (
-        <CfdiTotales totales={resumen.data?.totales} preferencia={preferenciaTotales.data} />
+        <CfdiTotales
+          totales={resumen.data?.totales}
+          cifras={resumen.data?.cifras}
+          preferencia={preferenciaTotales.data}
+        />
       )}
 
       <CfdiTabla
