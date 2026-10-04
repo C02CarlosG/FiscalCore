@@ -408,7 +408,7 @@ pausa.
 
 | Fecha | De → para | Qué se necesita | Estado |
 |---|---|---|---|
-| — | — | — | — |
+| 2026-10-04 | D → B | Agregar `"informacion-fiscal": "Información fiscal"` al mapa del breadcrumb de `layout/Header.tsx` (hoy muestra "Empresas" en `/empresas/{id}/informacion-fiscal`) y `"informacion-fiscal"` a `SUB_RUTAS` de `layout/EmpresaSwitcher.tsx` (para conservar la pantalla al cambiar de empresa) | Pendiente |
 
 ## Riesgos
 
@@ -435,7 +435,7 @@ pausa.
 | F4 | C | En revisión (PR #25); falta cuadrar con los CFDI reales de COPLASUR | `docs/superpowers/specs/2026-10-04-f4-inicio-design.md` | `docs/superpowers/plans/2026-10-04-f4-inicio.md` |
 | F5 | C | En curso (sin la parte de REP hasta que se integre F3.5a) | `docs/superpowers/specs/2026-10-04-f5-iva-base-flujo-design.md` (rama F5) | `docs/superpowers/plans/2026-10-04-f5-1-motor-iva-flujo.md` (rama F5) |
 | F6, F7 | C | Pendiente | — | — |
-| F8 | D | En curso | — | — |
+| F8 | D | En revisión (PR D·F8) | `docs/superpowers/specs/2026-10-04-f8-informacion-fiscal-design.md` | `docs/superpowers/plans/2026-10-04-f8-informacion-fiscal.md` |
 | M1, M4, M6 | A | Pendiente | — | — |
 | M3 | B | Pendiente |
 | V1, U1, M7 | D | Pendiente (después de F8) |
