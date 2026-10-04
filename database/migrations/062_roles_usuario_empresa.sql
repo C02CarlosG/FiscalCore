@@ -62,6 +62,8 @@ CREATE TABLE IF NOT EXISTS invitaciones_empresa (
     invitada_por   UUID REFERENCES usuarios(id) ON DELETE SET NULL,
     respondida_por UUID REFERENCES usuarios(id) ON DELETE SET NULL,
     created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    -- Una invitación vence a los 7 días; re-invitar la renueva.
+    expires_at     TIMESTAMPTZ NOT NULL DEFAULT NOW() + INTERVAL '7 days',
     respondida_at  TIMESTAMPTZ
 );
 

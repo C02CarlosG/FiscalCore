@@ -22,9 +22,21 @@ from pydantic import BaseModel, Field
 from .. import db
 from .. import usuarios_empresa as ue
 from ..auditoria import registrar_evento
-from ..deps import get_current_user, hash_password, limiter, validar_acceso_empresa, verify_password
+from ..deps import get_current_user, hash_password, limiter, validar_acceso_empresa, verificar_token, verify_password
 
 router = APIRouter(prefix="/api/v1/cuenta", tags=["Cuenta"])
+
+
+def _clave_usuario(request: Request) -> str:
+    """Clave del límite de frecuencia: el usuario autenticado, no la IP (varias personas
+    de un despacho comparten IP y una sola cuenta no debe esquivarlo cambiando de red)."""
+    auth = request.headers.get("authorization", "")
+    if auth.lower().startswith("bearer "):
+        try:
+            return "usuario:" + str(verificar_token(auth[7:]).get("user_id"))
+        except Exception:
+            pass
+    return "ip:" + (request.client.host if request.client else "desconocida")
 
 
 class CambioContrasena(BaseModel):
@@ -52,7 +64,7 @@ def _404_miembro():
 # ─── Contraseña ──────────────────────────────────────────────────────────────
 
 @router.post("/contrasena", status_code=204)
-@limiter.limit("5/minute")  # exige la contraseña actual: mismo cuidado que el login
+@limiter.limit("5/minute", key_func=_clave_usuario)  # exige la contraseña actual: mismo cuidado que el login
 async def cambiar_contrasena(
     request: Request,
     cuerpo: CambioContrasena,
@@ -182,7 +194,7 @@ async def listar_usuarios(empresa_id: uuid.UUID, current_user: dict = Depends(ge
     if puede:
         invitaciones = db.query_all(
             "SELECT id, email, rol, estado, created_at FROM invitaciones_empresa "
-            "WHERE empresa_id = %s AND estado = 'pendiente' ORDER BY created_at",
+            "WHERE empresa_id = %s AND estado = 'pendiente' AND expires_at > NOW() ORDER BY created_at",
             (eid,),
         )
     return {
@@ -223,7 +235,9 @@ async def cambiar_rol(
         entidad_id=str(usuario_id),
         metadata=_metadata(via_admin, {"de": anterior, "a": rol, "administradores_fijados": promovidos}),
     )
-    miembro = next(m for m in db.query_all(_SQL_MIEMBROS, (eid,)) if str(m["usuario_id"]) == str(usuario_id))
+    miembro = next((m for m in db.query_all(_SQL_MIEMBROS, (eid,)) if str(m["usuario_id"]) == str(usuario_id)), None)
+    if miembro is None:  # lo quitaron entre la escritura y esta lectura
+        raise _404_miembro()
     return _usuario(miembro, {str(usuario_id): rol}, current_user["user_id"])
 
 
@@ -256,7 +270,7 @@ async def quitar_usuario(
 # ─── Invitaciones (lado de la empresa) ───────────────────────────────────────
 
 @router.post("/empresas/{empresa_id}/invitaciones", status_code=201)
-@limiter.limit("20/hour")  # evita barrer correos aunque la respuesta no revele nada
+@limiter.limit("20/hour", key_func=_clave_usuario)  # evita barrer correos aunque la respuesta no revele nada
 async def invitar(
     request: Request,
     empresa_id: uuid.UUID,
@@ -265,32 +279,39 @@ async def invitar(
 ):
     """Invita un correo. Misma respuesta exista o no una cuenta con ese correo."""
     eid, via_admin = _empresa_visible(empresa_id, current_user)
-    miembros = db.query_all(_SQL_MIEMBROS, (eid,))
-    roles = ue.roles_efectivos(miembros)
-    _exigir_administrador(current_user, roles, _rol_plataforma(current_user))
+    rol_plataforma = _rol_plataforma(current_user)
     try:
         email = ue.normalizar_correo(cuerpo.email)
         rol = ue.validar_rol(cuerpo.rol)
     except ue.DatoInvalido as e:
         raise _422(e)
     mio = (db.query_one("SELECT email FROM usuarios WHERE id = %s", (current_user["user_id"],)) or {}).get("email")
-    if mio and mio.strip().lower() == email:
-        # También impide que un administrador de la plataforma se dé acceso a sí mismo.
-        raise HTTPException(status_code=422, detail="No puedes invitarte a ti mismo")
-    if any((m["email"] or "").strip().lower() == email for m in miembros):
-        raise HTTPException(status_code=409, detail="Esa persona ya tiene acceso a la empresa")
-
-    fila = db.execute(
-        """
-        INSERT INTO invitaciones_empresa (empresa_id, email, rol, invitada_por)
-        VALUES (%s, %s, %s, %s)
-        ON CONFLICT (empresa_id, email) WHERE estado = 'pendiente'
-        DO UPDATE SET rol = EXCLUDED.rol, invitada_por = EXCLUDED.invitada_por
-        RETURNING id, email, rol, estado, created_at
-        """,
-        (eid, email, rol, current_user["user_id"]),
-        returning=True,
-    )
+    with _miembros_bloqueados(eid) as (cur, miembros, roles):
+        # El permiso se revisa sobre los vínculos bloqueados: si otro administrador le
+        # quita el rol al mismo tiempo, esta invitación espera y luego se rechaza.
+        _exigir_administrador(current_user, roles, rol_plataforma)
+        if mio and mio.strip().lower() == email:
+            # También impide que un administrador de la plataforma se dé acceso a sí mismo.
+            raise HTTPException(status_code=422, detail="No puedes invitarte a ti mismo")
+        cur.execute(
+            "SELECT 1 FROM usuario_empresas ue JOIN usuarios u ON u.id = ue.usuario_id "
+            "WHERE ue.empresa_id = %s AND lower(btrim(u.email)) = %s",
+            (eid, email),
+        )
+        if cur.fetchone():
+            raise HTTPException(status_code=409, detail="Esa persona ya tiene acceso a la empresa")
+        cur.execute(
+            """
+            INSERT INTO invitaciones_empresa (empresa_id, email, rol, invitada_por)
+            VALUES (%s, %s, %s, %s)
+            ON CONFLICT (empresa_id, email) WHERE estado = 'pendiente'
+            DO UPDATE SET rol = EXCLUDED.rol, invitada_por = EXCLUDED.invitada_por,
+                          created_at = NOW(), expires_at = NOW() + INTERVAL '7 days'
+            RETURNING id, email, rol, estado, created_at
+            """,
+            (eid, email, rol, current_user["user_id"]),
+        )
+        fila = dict(cur.fetchone())
     registrar_evento(
         current_user["user_id"], "cuenta.invitar", empresa_id=eid, entidad="invitacion",
         entidad_id=str(fila["id"]), metadata=_metadata(via_admin, {"email": email, "rol": rol}),
@@ -305,14 +326,15 @@ async def cancelar_invitacion(
     current_user: dict = Depends(get_current_user),
 ):
     eid, via_admin = _empresa_visible(empresa_id, current_user)
-    roles = ue.roles_efectivos(db.query_all(_SQL_MIEMBROS, (eid,)))
-    _exigir_administrador(current_user, roles, _rol_plataforma(current_user))
-    fila = db.execute(
-        "UPDATE invitaciones_empresa SET estado = 'cancelada', respondida_at = NOW(), respondida_por = %s "
-        "WHERE id = %s AND empresa_id = %s AND estado = 'pendiente' RETURNING id",
-        (current_user["user_id"], str(invitacion_id), eid),
-        returning=True,
-    )
+    rol_plataforma = _rol_plataforma(current_user)
+    with _miembros_bloqueados(eid) as (cur, _miembros, roles):
+        _exigir_administrador(current_user, roles, rol_plataforma)
+        cur.execute(
+            "UPDATE invitaciones_empresa SET estado = 'cancelada', respondida_at = NOW(), respondida_por = %s "
+            "WHERE id = %s AND empresa_id = %s AND estado = 'pendiente' RETURNING id",
+            (current_user["user_id"], str(invitacion_id), eid),
+        )
+        fila = cur.fetchone()
     if not fila:
         raise HTTPException(status_code=404, detail="Invitación no encontrada")
     registrar_evento(current_user["user_id"], "cuenta.cancelar_invitacion", empresa_id=eid, entidad="invitacion",
@@ -322,26 +344,42 @@ async def cancelar_invitacion(
 
 # ─── Invitaciones (lado de la persona invitada) ──────────────────────────────
 
-def _mi_correo(current_user: dict) -> str:
+def _mi_correo(current_user: dict):
+    """Correo de la cuenta en minúsculas, o None si es ambiguo.
+
+    `usuarios.email` distingue mayúsculas: dos cuentas pueden tener el mismo correo
+    escrito distinto. En ese caso nadie puede ver ni aceptar invitaciones a ese correo
+    (lo contrario dejaría a un tercero tomar la invitación registrándose como
+    «Victima@…»). Se audita y se resuelve cuando el carril B haga único lower(email).
+    """
     fila = db.query_one("SELECT email FROM usuarios WHERE id = %s AND activo = TRUE", (current_user["user_id"],))
     if not fila:
         raise HTTPException(status_code=403, detail="Cuenta inactiva")
-    return fila["email"].strip().lower()
+    email = fila["email"].strip().lower()
+    cuentas = db.query_one("SELECT COUNT(*) AS n FROM usuarios WHERE lower(btrim(email)) = %s", (email,))["n"]
+    if cuentas > 1:
+        registrar_evento(current_user["user_id"], "cuenta.correo_ambiguo", entidad="usuario",
+                         entidad_id=current_user["user_id"], metadata={"cuentas": int(cuentas)})
+        return None
+    return email
 
 
 @router.get("/invitaciones")
 async def mis_invitaciones(current_user: dict = Depends(get_current_user)):
-    """Invitaciones pendientes al correo de la cuenta."""
+    """Invitaciones pendientes y vigentes al correo de la cuenta."""
+    email = _mi_correo(current_user)
+    if email is None:
+        return []
     filas = db.query_all(
         """
         SELECT i.id, i.rol, i.created_at, e.rfc, e.razon_social, u.nombre AS invitada_por
         FROM invitaciones_empresa i
-        JOIN empresas e ON e.id = i.empresa_id
+        JOIN empresas e ON e.id = i.empresa_id AND e.activo IS NOT FALSE
         LEFT JOIN usuarios u ON u.id = i.invitada_por
-        WHERE i.email = %s AND i.estado = 'pendiente'
+        WHERE i.email = %s AND i.estado = 'pendiente' AND i.expires_at > NOW()
         ORDER BY i.created_at
         """,
-        (_mi_correo(current_user),),
+        (email,),
     )
     return [
         {"id": str(f["id"]), "rol": f["rol"], "creada": f["created_at"].isoformat(), "rfc": f["rfc"],
@@ -352,10 +390,14 @@ async def mis_invitaciones(current_user: dict = Depends(get_current_user)):
 
 def _responder(invitacion_id: uuid.UUID, current_user: dict, aceptar: bool) -> str:
     email = _mi_correo(current_user)
+    if email is None:
+        raise HTTPException(status_code=404, detail="Invitación no encontrada")
     with db.get_conn() as conn, conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
         cur.execute(
-            "SELECT id, empresa_id, rol FROM invitaciones_empresa "
-            "WHERE id = %s AND email = %s AND estado = 'pendiente' FOR UPDATE",
+            "SELECT i.id, i.empresa_id, i.rol FROM invitaciones_empresa i "
+            "JOIN empresas e ON e.id = i.empresa_id AND e.activo IS NOT FALSE "
+            "WHERE i.id = %s AND i.email = %s AND i.estado = 'pendiente' AND i.expires_at > NOW() "
+            "FOR UPDATE OF i",
             (str(invitacion_id), email),
         )
         inv = cur.fetchone()

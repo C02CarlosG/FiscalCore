@@ -3350,7 +3350,8 @@ paths:
       description: |
         Solo un administrador de la empresa (o de la plataforma). La respuesta es la misma
         exista o no una cuenta con ese correo; la persona acepta desde su perfil (o al
-        registrarse con ese correo). Re-invitar actualiza la pendiente. Límite: 20 por hora.
+        registrarse con ese correo). La invitación vence a los 7 días; re-invitar la renueva.
+        Límite: 20 por hora por usuario.
       parameters:
         - $ref: '#/components/parameters/EmpresaId'
       requestBody:
@@ -3402,7 +3403,10 @@ paths:
     get:
       operationId: misInvitaciones
       tags: [Cuenta]
-      summary: Invitaciones pendientes al correo de la cuenta
+      summary: Invitaciones pendientes y vigentes (7 días) al correo de la cuenta
+      description: |
+        Vacía si hay más de una cuenta con el mismo correo en minúsculas (se audita) o si la
+        empresa está inactiva.
       responses:
         '200':
           description: Invitaciones pendientes

@@ -14,13 +14,15 @@ DUENO = "u1-dueno@test.local"
 NUEVO = "u1-nuevo@test.local"
 EXISTENTE = "u1-existente@test.local"
 SEGUNDO = "u1-segundo@test.local"
-CORREOS = (DUENO, NUEVO, EXISTENTE, SEGUNDO)
+ATACANTE = "U1-Existente@Test.local"  # mismo correo que EXISTENTE con otras mayúsculas
+CORREOS = (DUENO, NUEVO, EXISTENTE, SEGUNDO, ATACANTE)
 CLAVE = "Clave-Duena-1"
 
 
 def _limpiar(db):
     db.execute("DELETE FROM empresas WHERE rfc IN (%s, %s)", (RFC, RFC_OTRA))
     db.execute("DELETE FROM usuarios WHERE email IN %s", (CORREOS,))
+    db.execute("DELETE FROM empresas WHERE rfc = 'CTZ010101AB1'")
 
 
 def _login(client, email, password):
@@ -209,3 +211,50 @@ def test_cambio_de_contrasena(entorno):
     assert client.post(url, headers=headers, json={"actual": CLAVE, "nueva": "Nueva-Clave-1"}).status_code == 204
     assert _login(client, DUENO, CLAVE).status_code == 401
     assert _login(client, DUENO, "Nueva-Clave-1").status_code == 200
+
+
+def test_cuenta_con_el_mismo_correo_en_otras_mayusculas_no_toma_la_invitacion(entorno):
+    """B1: usuarios.email distingue mayúsculas; con dos cuentas para el mismo correo en
+    minúsculas nadie ve ni acepta la invitación hasta que se resuelva la duplicidad."""
+    from backend.deps import hash_password
+
+    db, client, headers, empresa_id = entorno
+    assert _invitar(client, headers, empresa_id, EXISTENTE).status_code == 201
+    db.execute("INSERT INTO usuarios (email, password_hash) VALUES (%s, %s)", (ATACANTE, hash_password("Clave-Atacante-1")))
+    h_atacante = _headers(client, ATACANTE, "Clave-Atacante-1")
+    h_victima = _headers(client, EXISTENTE, "Clave-Existente-1")
+
+    assert client.get("/api/v1/cuenta/invitaciones", headers=h_atacante).json() == []
+    assert client.get("/api/v1/cuenta/invitaciones", headers=h_victima).json() == []
+    inv_id = db.query_one("SELECT id FROM invitaciones_empresa WHERE empresa_id = %s AND email = %s",
+                          (empresa_id, EXISTENTE))["id"]
+    assert client.post(f"/api/v1/cuenta/invitaciones/{inv_id}/aceptar", headers=h_atacante).status_code == 404
+    assert client.get(f"/api/v1/empresas/{empresa_id}", headers=h_atacante).status_code == 403
+    assert db.query_one("SELECT COUNT(*) AS n FROM auditoria WHERE accion = 'cuenta.correo_ambiguo'")["n"] >= 1
+
+
+def test_invitacion_vencida_no_se_lista_ni_se_acepta(entorno):
+    db, client, headers, empresa_id = entorno
+    assert _invitar(client, headers, empresa_id, EXISTENTE).status_code == 201
+    db.execute("UPDATE invitaciones_empresa SET expires_at = NOW() - INTERVAL '1 minute' WHERE email = %s", (EXISTENTE,))
+    h = _headers(client, EXISTENTE, "Clave-Existente-1")
+    assert client.get("/api/v1/cuenta/invitaciones", headers=h).json() == []
+    inv_id = db.query_one("SELECT id FROM invitaciones_empresa WHERE email = %s", (EXISTENTE,))["id"]
+    assert client.post(f"/api/v1/cuenta/invitaciones/{inv_id}/aceptar", headers=h).status_code == 404
+    # Tampoco aparece como pendiente para la empresa, y re-invitar la renueva.
+    assert client.get(f"{_base(empresa_id)}/usuarios", headers=headers).json()["invitaciones"] == []
+    assert _invitar(client, headers, empresa_id, EXISTENTE).status_code == 201
+    assert len(client.get("/api/v1/cuenta/invitaciones", headers=h).json()) == 1
+
+
+def test_no_se_acepta_invitacion_de_empresa_inactiva(entorno):
+    db, client, headers, empresa_id = entorno
+    assert _invitar(client, headers, empresa_id, EXISTENTE).status_code == 201
+    h = _headers(client, EXISTENTE, "Clave-Existente-1")
+    inv_id = client.get("/api/v1/cuenta/invitaciones", headers=h).json()[0]["id"]
+    db.execute("UPDATE empresas SET activo = FALSE WHERE id = %s", (empresa_id,))
+    try:
+        assert client.get("/api/v1/cuenta/invitaciones", headers=h).json() == []
+        assert client.post(f"/api/v1/cuenta/invitaciones/{inv_id}/aceptar", headers=h).status_code == 404
+    finally:
+        db.execute("UPDATE empresas SET activo = TRUE WHERE id = %s", (empresa_id,))

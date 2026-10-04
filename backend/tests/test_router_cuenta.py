@@ -42,11 +42,36 @@ def _base_falsa(monkeypatch, miembros, rol_plataforma="contador"):
             return {"id": EMPRESA}
         if "FROM usuario_empresas" in sql:
             return None
+        if "SELECT email FROM usuarios" in sql:
+            return {"email": "yo@x.mx"}
         raise AssertionError(sql)
 
     monkeypatch.setattr(db, "query_one", _one)
     monkeypatch.setattr(db, "query_all", lambda sql, params=(): [] if "invitaciones_empresa" in sql else miembros)
     monkeypatch.setattr(db, "execute", lambda sql, params=(), returning=False: ejecutado.append((sql, params)))
+
+    from contextlib import contextmanager
+    from backend import usuarios_empresa as ue
+
+    class _Cursor:
+        ultimo = ""
+
+        def execute(self, sql, params=()):
+            self.ultimo = sql
+            ejecutado.append((sql, params))
+
+        def fetchone(self):
+            if "INSERT INTO invitaciones_empresa" in self.ultimo:
+                from datetime import datetime
+                return {"id": "inv-1", "email": "c@d.mx", "rol": "contador", "estado": "pendiente",
+                        "created_at": datetime(2026, 10, 4)}
+            return None
+
+    @contextmanager
+    def _bloqueados(eid):
+        yield _Cursor(), miembros, ue.roles_efectivos(miembros)
+
+    monkeypatch.setattr(cuenta, "_miembros_bloqueados", _bloqueados)
     return ejecutado
 
 
@@ -139,3 +164,19 @@ def test_cambio_de_contrasena_limitado_a_5_por_minuto(monkeypatch):
     codigos = [client.post("/api/v1/cuenta/contrasena", json={"actual": "x", "nueva": "y" * 8}).status_code
                for _ in range(6)]
     assert codigos == [400] * 5 + [429]
+
+
+def test_el_limite_de_invitar_es_por_usuario_y_no_por_ip(monkeypatch):
+    from backend.deps import crear_token
+
+    main.app.dependency_overrides.clear()  # usar el token real de cada usuario
+    _base_falsa(monkeypatch, [_miembro(YO, "contador", 1), _miembro(OTRO, "administrador", 2)])
+    monkeypatch.setattr(cuenta, "validar_acceso_empresa", lambda *a, **k: None)
+    url = f"/api/v1/cuenta/empresas/{EMPRESA}/invitaciones"
+    h_a = {"Authorization": f"Bearer {crear_token({'user_id': YO})}"}
+    h_b = {"Authorization": f"Bearer {crear_token({'user_id': OTRO})}"}
+    codigos_a = [client.post(url, headers=h_a, json={"email": "a@b.mx", "rol": "contador"}).status_code for _ in range(21)]
+    assert codigos_a[-1] == 429
+    # Misma IP (el TestClient), otro usuario: tiene su propio cupo.
+    monkeypatch.setattr(cuenta, "registrar_evento", lambda *a, **k: None)
+    assert client.post(url, headers=h_b, json={"email": "c@d.mx", "rol": "contador"}).status_code == 201

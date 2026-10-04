@@ -411,6 +411,7 @@ pausa.
 | 2026-10-04 | D → B | Agregar `"informacion-fiscal": "Información fiscal"` al mapa del breadcrumb de `layout/Header.tsx` (hoy muestra "Empresas" en `/empresas/{id}/informacion-fiscal`) y `"informacion-fiscal"` a `SUB_RUTAS` de `layout/EmpresaSwitcher.tsx` (para conservar la pantalla al cambiar de empresa) | Hecho en el PR #30 (F2.3) |
 | 2026-10-04 | D → B | Lo mismo para la pantalla de V1: `"validaciones": "Validaciones de CFDI"` en el breadcrumb de `Header.tsx` y `"validaciones"` en `SUB_RUTAS` de `EmpresaSwitcher.tsx` | Pendiente |
 | 2026-10-04 | D → B | U1: (1) `POST /mis-empresas` (`empresas.py`) vincula al creador con `rol = 'administrador'` (hoy usa el valor por defecto; U1 lo compensa al leer). (2) Breadcrumb de `Header.tsx` para `/perfil` ("Mi perfil") y `usuarios` ("Usuarios"); `"usuarios"` en `SUB_RUTAS` de `EmpresaSwitcher.tsx`. (3) Ya no aplica: U1 da acceso por invitación y no crea contraseñas temporales | Pendiente |
+| 2026-10-04 | D → B | **Requisito de U1 (seguridad):** índice único sobre `lower(btrim(email))` en `usuarios` y registro/login con el correo normalizado en minúsculas (`auth.py`). Mientras no exista, U1 bloquea las invitaciones a un correo con más de una cuenta y lo audita (`cuenta.correo_ambiguo`) | Pendiente |
 
 ## Riesgos
 
