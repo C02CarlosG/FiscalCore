@@ -24,6 +24,7 @@ const LABELS: Record<string, string> = {
   ingesta: "Ingesta",
   conciliacion: "Conciliación",
   "cedula-iva": "Cédula de IVA",
+  "iva-flujo": "IVA base flujo",
   sat: "Conexión SAT",
   "informacion-fiscal": "Información fiscal",
 };
