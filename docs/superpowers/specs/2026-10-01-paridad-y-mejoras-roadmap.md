@@ -430,16 +430,18 @@ pausa.
 |---|---|---|---|---|
 | F0 | B | Integrada salvo la carga de CFDI reales (se cierra con F2) | (no requiere) | (lista de verificación abajo) |
 | F1 | B (cierre) | Integrada. Falta el cierre con datos reales: reprocesar los CFDI de COPLASUR y cuadrar el IVA por tasa contra el encabezado | este documento, sección "Fases" y "Reglas comunes" | `docs/superpowers/plans/2026-10-01-fase1-detalle-fiscal-cfdi.md` |
-| F2 | B | F2.1 (base: migración 031, `sat_sync.py`, reintentos, partición por volumen y por 5002) y F2.2 (worker: `backend/worker.py`, `procesar_empresa`, candado por empresa, carga inicial y corrida diaria) integradas (PR #17); F2.3 (endpoints `sync/estado`, `sync/config`, `sync/ahora`, consentimiento y auditoría; borrar la e.firma desactiva la automatización) implementada, en revisión; F2.4 y F2.5 pendientes. Pendiente de quien tenga acceso: documentar `FIEL_ENCRYPTION_KEY` y `SAT_SYNC_*` en `.env.example` (texto en el plan de F2.2) | `docs/superpowers/specs/2026-10-03-f2-descarga-automatica-design.md` (en PR #17) | un plan por entrega |
-| F3 | A | F3.1, F3.2, F3.3 (PR #21) y F3.4 (PR #24) integradas; F3.5a extracción v2 en curso; luego F3.5b | `docs/superpowers/specs/2026-10-02-f3-listado-cfdi-design.md` | `2026-10-02-f3-1-api-listado-cfdi.md`, `2026-10-03-f3-2-pantalla-cfdi.md`; un plan por entrega restante |
-| F4 | C | En revisión (PR #25); falta cuadrar con los CFDI reales de COPLASUR | `docs/superpowers/specs/2026-10-04-f4-inicio-design.md` | `docs/superpowers/plans/2026-10-04-f4-inicio.md` |
-| F5 | C | F5.1 (motor, API y ajustes) integrada; F5.2 (pantalla y Excel) en revisión; luego F5.3 (cédula e Inicio al motor nuevo) y F5.4 (REP completo) | `docs/superpowers/specs/2026-10-04-f5-iva-base-flujo-design.md` | `docs/superpowers/plans/2026-10-04-f5-1-motor-iva-flujo.md`, `2026-10-04-f5-2-pantalla-iva-flujo.md` |
+| F2 | B | F2.1 (base: migración 031, `sat_sync.py`, reintentos, partición por volumen y por 5002) y F2.2 (worker: `backend/worker.py`, `procesar_empresa`, candado por empresa, carga inicial y corrida diaria) integradas (PR #17); F2.3 (endpoints `sync/estado`, `sync/config`, `sync/ahora`, consentimiento y auditoría; borrar la e.firma desactiva la automatización) integrada (PR #30); F2.4 y F2.5 pendientes. Pendiente de quien tenga acceso: documentar `FIEL_ENCRYPTION_KEY` y `SAT_SYNC_*` en `.env.example` (texto en el plan de F2.2) | `docs/superpowers/specs/2026-10-03-f2-descarga-automatica-design.md` (en PR #17) | un plan por entrega |
+| F3 | A | F3.1, F3.2, F3.3 (PR #21), F3.4 (PR #24) y F3.5a extracción v2 (PR #27) integradas; siguen F3.5b (incluye el orden del nodo en la llave de `pagos_cfdi`, migración 041) y F3.6 | `docs/superpowers/specs/2026-10-02-f3-listado-cfdi-design.md` | `2026-10-02-f3-1-api-listado-cfdi.md`, `2026-10-03-f3-2-pantalla-cfdi.md`; un plan por entrega restante |
+| F4 | C | Integrada (PR #25); falta cuadrar con los CFDI reales de COPLASUR | `docs/superpowers/specs/2026-10-04-f4-inicio-design.md` | `docs/superpowers/plans/2026-10-04-f4-inicio.md` |
+| F5 | C | F5.1 (motor, API y ajustes, PR #29) y F5.2 (pantalla y Excel, PR #32) integradas; luego F5.3 (cédula e Inicio al motor nuevo) y F5.4 (REP completo) | `docs/superpowers/specs/2026-10-04-f5-iva-base-flujo-design.md` | `docs/superpowers/plans/2026-10-04-f5-1-motor-iva-flujo.md`, `2026-10-04-f5-2-pantalla-iva-flujo.md` |
 | F6, F7 | C | Pendiente | — | — |
-| F8 | D | En revisión (PR D·F8) | `docs/superpowers/specs/2026-10-04-f8-informacion-fiscal-design.md` | `docs/superpowers/plans/2026-10-04-f8-informacion-fiscal.md` |
+| F8 | D | Integrada (PR #31); falta probar con PDF reales | `docs/superpowers/specs/2026-10-04-f8-informacion-fiscal-design.md` | `docs/superpowers/plans/2026-10-04-f8-informacion-fiscal.md` |
 | M1, M4, M6 | A | Pendiente | — | — |
 | M3 | B | Pendiente |
-| V1, U1, M7 | D | Pendiente (después de F8) |
+| V1 | D | En curso |
+| U1, M7 | D | Pendiente |
 | F3.6 | A | Pendiente (después de F3.5b) | — | — |
+| Punto de control de paridad | Coordinación | Pendiente: al terminar F5–F7 se recorre FiscalCore con Playwright contra las capturas y se cuadran las cifras de control | — | — |
 | M2, M5 | C | Pendiente | — | — |
 
 ### Lista de verificación de F0
