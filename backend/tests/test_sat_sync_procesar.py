@@ -381,3 +381,78 @@ def test_una_excepcion_inesperada_deja_la_config_consistente(entorno, monkeypatc
     # el candado quedó libre: se puede volver a intentar
     with sat_sync.candado_empresa(empresa) as obtenido:
         assert obtenido is True
+
+
+# ─── cancelados: qué ventanas de metadatos pide la corrida diaria ────────────
+
+def _diaria_lista(db, empresa, ahora):
+    db.execute(
+        "UPDATE sat_sync_config SET carga_inicial_ok=TRUE, ultima_exitosa=%s, proxima_corrida=%s, estado='al_dia', "
+        "corrida_inicio=NULL WHERE empresa_id=%s", (ahora - timedelta(days=1), ahora - timedelta(minutes=1), empresa))
+
+
+def _ventanas_de_metadatos(sat, desde=0):
+    return [p for p, kw in list(zip(sat.pedidas, sat.parametros))[desde:] if kw["tipo_solicitud"] == "Metadata"]
+
+
+def test_la_primera_corrida_diaria_hace_el_barrido_de_cancelados_y_las_siguientes_la_ventana_reciente(entorno):
+    from backend import sat_sync
+
+    db, empresa, sat = entorno
+    ahora = datetime.now(timezone.utc)
+    hoy = ahora.astimezone(sat_sync._ZONA_CORRIDA).date()
+    _diaria_lista(db, empresa, ahora)
+
+    assert _correr_hasta_terminar(empresa, ahora) == "al_dia"
+
+    # primera vez: barrido desde enero del ejercicio anterior hasta hoy, una ventana por tipo
+    assert _ventanas_de_metadatos(sat) == [("emitidos", date(hoy.year - 1, 1, 1), hoy),
+                                           ("recibidos", date(hoy.year - 1, 1, 1), hoy)]
+
+    # el día siguiente: ya hubo un barrido hace menos de 7 días, así que solo el mes en curso y los 3 anteriores
+    manana = ahora + timedelta(days=1)
+    hoy2 = manana.astimezone(sat_sync._ZONA_CORRIDA).date()
+    previas = len(sat.pedidas)
+    _diaria_lista(db, empresa, manana)
+    assert _correr_hasta_terminar(empresa, manana) == "al_dia"
+    reciente = sat_sync._restar_meses(hoy2.replace(day=1), 3)
+    assert _ventanas_de_metadatos(sat, previas) == [("emitidos", reciente, hoy2), ("recibidos", reciente, hoy2)]
+
+
+def test_dos_corridas_el_mismo_dia_no_repiten_los_metadatos(entorno):
+    db, empresa, sat = entorno
+    ahora = datetime.now(timezone.utc)
+    _diaria_lista(db, empresa, ahora)
+    assert _correr_hasta_terminar(empresa, ahora) == "al_dia"
+    primeras = len(_ventanas_de_metadatos(sat))
+    assert primeras == 2
+
+    _diaria_lista(db, empresa, ahora)                    # "Actualizar ahora" el mismo día
+    assert _correr_hasta_terminar(empresa, ahora) == "al_dia"
+
+    assert len(_ventanas_de_metadatos(sat)) == primeras  # no se gastó otra solicitud idéntica
+
+
+def test_el_barrido_se_repite_pasados_los_dias_configurados(entorno):
+    from backend import sat_sync
+
+    db, empresa, sat = entorno
+    ahora = datetime.now(timezone.utc)
+    _diaria_lista(db, empresa, ahora)
+    assert _correr_hasta_terminar(empresa, ahora) == "al_dia"
+
+    db.execute("UPDATE sat_solicitudes SET created_at = NOW() - INTERVAL '8 days' WHERE empresa_id=%s", (empresa,))
+    en_8_dias = ahora + timedelta(days=8)
+    hoy8 = en_8_dias.astimezone(sat_sync._ZONA_CORRIDA).date()
+    previas = len(sat.pedidas)
+    _diaria_lista(db, empresa, en_8_dias)
+    assert _correr_hasta_terminar(empresa, en_8_dias) == "al_dia"
+
+    assert _ventanas_de_metadatos(sat, previas) == [("emitidos", date(hoy8.year - 1, 1, 1), hoy8),
+                                                    ("recibidos", date(hoy8.year - 1, 1, 1), hoy8)]
+
+
+def test_la_carga_inicial_no_pide_metadatos(entorno):
+    db, empresa, sat = entorno
+    assert _correr_hasta_terminar(empresa, datetime.now(timezone.utc)) == "al_dia"
+    assert _ventanas_de_metadatos(sat) == []

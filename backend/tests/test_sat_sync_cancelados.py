@@ -44,6 +44,7 @@ def empresa():
     db.init_db()
     emp, rfc = _crear_empresa(db, "Cancelados")
     yield db, emp, rfc
+    db.execute("DELETE FROM conciliaciones WHERE empresa_id=%s", (emp,))
     db.execute("DELETE FROM cfdi WHERE empresa_id=%s", (emp,))
     db.execute("DELETE FROM empresas WHERE id=%s", (emp,))
 
@@ -305,3 +306,98 @@ def test_avanzar_solicitud_de_metadatos_usa_la_importacion_de_metadatos(empresa,
     fila = db.query_one("SELECT * FROM sat_solicitudes WHERE id=%s", (sol,))
     assert sat_sync.avanzar_solicitud(object(), fila) == "descargado"
     assert _estado(db, emp, a)["estado"] == "cancelado"
+
+
+# ─── atomicidad y contexto del evento ────────────────────────────────────────
+
+def test_si_falla_la_auditoria_el_cfdi_no_queda_cancelado_sin_evento(empresa, monkeypatch):
+    """El cambio de estado y su evento van en una sola transacción: si el evento no se puede
+    escribir, el CFDI sigue vigente y la siguiente corrida lo reintenta (no se pierde la alerta)."""
+    from backend import sat_sync
+
+    db, emp, rfc = empresa
+    u = _uuid_nuevo()
+    _cfdi(db, emp, rfc, u)
+
+    def _falla(*a, **k):
+        raise RuntimeError("no se pudo escribir la auditoría")
+    monkeypatch.setattr(sat_sync.psycopg2.extras, "Json", _falla)
+
+    with pytest.raises(RuntimeError):
+        sat_sync.marcar_cancelados(emp, [_meta(u)])
+    assert _estado(db, emp, u)["estado"] == "vigente" and _eventos(db, emp) == []
+
+    monkeypatch.undo()
+    assert sat_sync.marcar_cancelados(emp, [_meta(u)]) == 1
+    assert _estado(db, emp, u)["estado"] == "cancelado" and len(_eventos(db, emp)) == 1
+
+
+def _id_cfdi(db, emp, uuid):
+    return str(db.query_one("SELECT id FROM cfdi WHERE empresa_id=%s AND uuid=%s", (emp, uuid))["id"])
+
+
+def test_el_evento_dice_si_el_cfdi_estaba_conciliado(empresa):
+    from backend import sat_sync
+
+    db, emp, rfc = empresa
+    conciliado, suelto = _uuid_nuevo(), _uuid_nuevo()
+    _cfdi(db, emp, rfc, conciliado)
+    _cfdi(db, emp, rfc, suelto)
+    db.execute("INSERT INTO conciliaciones (empresa_id, cfdi_id, tipo_match, periodo) VALUES (%s, %s, 'exacto', '2026-09')",
+               (emp, _id_cfdi(db, emp, conciliado)))
+
+    sat_sync.marcar_cancelados(emp, [_meta(conciliado), _meta(suelto)])
+
+    por_uuid = {e["entidad_id"]: e["metadata"] for e in _eventos(db, emp)}
+    assert por_uuid[conciliado]["tiene_conciliacion"] is True
+    assert por_uuid[suelto]["tiene_conciliacion"] is False
+
+
+def test_el_evento_de_un_rep_lista_las_facturas_que_cobraba(empresa):
+    from backend import sat_sync
+
+    db, emp, rfc = empresa
+    factura, rep = _uuid_nuevo(), _uuid_nuevo()
+    _cfdi(db, emp, rfc, factura, metodo_pago="PPD", monto_cobrado="116", estado_pago="pagado_total")
+    _cfdi(db, emp, rfc, rep, tipo_comprobante="P", total="0", subtotal="0", iva_trasladado="0")
+    pago = db.execute(
+        "INSERT INTO pagos_cfdi (empresa_id, cfdi_id, uuid_cfdi_pago, fecha_pago, monto) VALUES (%s,%s,%s,NOW(),116) RETURNING id",
+        (emp, _id_cfdi(db, emp, rep), rep), returning=True)
+    db.execute("INSERT INTO pagos_relaciones (pago_id, cfdi_uuid, importe_pagado) VALUES (%s,%s,116)",
+               (str(pago["id"]), factura))
+
+    sat_sync.marcar_cancelados(emp, [_meta(rep, efecto="P")])
+
+    [evento] = _eventos(db, emp)
+    assert evento["metadata"]["facturas_afectadas"] == [factura]
+
+
+def test_el_evento_lleva_los_cfdi_relacionados(empresa):
+    import psycopg2.extras
+
+    from backend import sat_sync
+
+    db, emp, rfc = empresa
+    u, relacionado = _uuid_nuevo(), _uuid_nuevo()
+    _cfdi(db, emp, rfc, u, tipo_comprobante="E")
+    db.execute("UPDATE cfdi SET cfdi_relacionados=%s WHERE empresa_id=%s AND uuid=%s",
+               (psycopg2.extras.Json([{"uuid": relacionado, "tipo_relacion": "01"}]), emp, u))
+
+    sat_sync.marcar_cancelados(emp, [_meta(u, efecto="E")])
+
+    [evento] = _eventos(db, emp)
+    assert evento["metadata"]["relacionados"] == [{"uuid": relacionado, "tipo_relacion": "01"}]
+    assert evento["metadata"]["facturas_afectadas"] == []
+
+
+def test_un_paquete_sin_archivo_de_metadatos_no_se_da_por_bueno(empresa, monkeypatch):
+    from backend import sat_sync
+
+    db, emp, rfc = empresa
+    monkeypatch.setattr(sat_sync, "descargar_paquete", lambda creds, pid, extensiones=(".xml",): [])
+    sol = _solicitud(db, emp)
+
+    assert _importar(emp, sol, ["p1"]) == "fallo"
+
+    fila = _fila(db, sol)
+    assert fila["estado"] == "fallo" and "no trae archivo de metadatos" in fila["error_msg"]

@@ -1,5 +1,5 @@
 """Planeación pura de una corrida de descarga: qué ventanas pedir y cuándo toca la siguiente."""
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -82,46 +82,70 @@ def test_diaria_ultima_exitosa_futura_no_rompe():
 
 # ─── cancelados (metadatos) ──────────────────────────────────────────────────
 
+DIARIA = dict(carga_inicial_ok=True, ultima_exitosa=date(2026, 10, 2))
+
+
 def _metadatos(plan):
     return [v for v in plan if v.origen == "cancelados"]
 
 
+def _rangos(plan):
+    return [(v.tipo, v.inicio, v.fin) for v in _metadatos(plan)]
+
+
 def test_la_carga_inicial_no_pide_cancelados():
-    assert _metadatos(_plan(meses_cancelacion=3)) == []
+    assert _metadatos(_plan(meses_cancelacion=3, barrido_cancelados=True)) == []
 
 
 def test_sin_meses_de_cancelacion_la_diaria_no_agrega_nada():
-    diaria = dict(carga_inicial_ok=True, ultima_exitosa=date(2026, 10, 2))
-    assert _plan(**diaria) == _plan(**diaria, meses_cancelacion=None)
-    assert _metadatos(_plan(**diaria)) == []
+    assert _plan(**DIARIA) == _plan(**DIARIA, meses_cancelacion=None)
+    assert _metadatos(_plan(**DIARIA)) == []
 
 
-def test_la_diaria_agrega_los_metadatos_de_cancelados_del_mes_abierto_y_los_anteriores():
-    plan = _plan(carga_inicial_ok=True, ultima_exitosa=date(2026, 10, 2), meses_cancelacion=3)
+def test_la_diaria_pide_una_ventana_de_metadatos_por_tipo_que_termina_hoy():
+    plan = _plan(**DIARIA, meses_cancelacion=3)
 
-    assert plan[:4] == _plan(carga_inicial_ok=True, ultima_exitosa=date(2026, 10, 2))      # primero los XML
-    esperado = [
-        (tipo, i, f)
-        for tipo in ("emitidos", "recibidos")
-        for i, f in [(date(2026, 7, 1), date(2026, 7, 31)), (date(2026, 8, 1), date(2026, 8, 31)),
-                     (date(2026, 9, 1), date(2026, 9, 30)), (date(2026, 10, 1), date(2026, 10, 4))]
-    ]
-    assert [(v.tipo, v.inicio, v.fin) for v in _metadatos(plan)] == esperado
+    assert plan[:4] == _plan(**DIARIA)                                   # primero los XML
+    assert _rangos(plan) == [("emitidos", date(2026, 7, 1), HOY), ("recibidos", date(2026, 7, 1), HOY)]
     assert {(v.tipo_solicitud, v.estado_comprobante) for v in _metadatos(plan)} == {("Metadata", "Cancelado")}
     assert {(v.tipo_solicitud, v.estado_comprobante) for v in plan[:4]} == {("CFDI", "Vigente")}
 
 
 def test_cero_meses_de_cancelacion_es_solo_el_mes_abierto():
-    plan = _plan(carga_inicial_ok=True, ultima_exitosa=date(2026, 10, 2), meses_cancelacion=0)
-    assert [(v.tipo, v.inicio, v.fin) for v in _metadatos(plan)] == [
-        ("emitidos", date(2026, 10, 1), date(2026, 10, 4)), ("recibidos", date(2026, 10, 1), date(2026, 10, 4))]
+    assert _rangos(_plan(**DIARIA, meses_cancelacion=0)) == [
+        ("emitidos", date(2026, 10, 1), HOY), ("recibidos", date(2026, 10, 1), HOY)]
 
 
 def test_los_meses_de_cancelacion_cruzan_de_anio():
     plan = _plan(hoy=date(2027, 1, 15), carga_inicial_ok=True, ultima_exitosa=date(2027, 1, 14), meses_cancelacion=3)
-    emitidos = [(v.inicio, v.fin) for v in _metadatos(plan) if v.tipo == "emitidos"]
-    assert emitidos[0] == (date(2026, 10, 1), date(2026, 10, 31)) and emitidos[-1] == (date(2027, 1, 1), date(2027, 1, 15))
-    assert len(emitidos) == 4
+    assert _rangos(plan)[0] == ("emitidos", date(2026, 10, 1), date(2027, 1, 15))
+
+
+def test_el_barrido_cubre_el_ejercicio_anterior_y_el_en_curso_en_una_sola_ventana_por_tipo():
+    """Una cancelación puede ocurrir meses después de la emisión (el SAT filtra por emisión)."""
+    plan = _plan(**DIARIA, meses_cancelacion=3, barrido_cancelados=True)
+    assert _rangos(plan) == [("emitidos", date(2025, 1, 1), HOY), ("recibidos", date(2025, 1, 1), HOY)]
+
+
+def test_un_tipo_ya_verificado_hoy_no_se_vuelve_a_pedir():
+    plan = _plan(**DIARIA, meses_cancelacion=3, metadatos_hoy=frozenset({"emitidos"}))
+    assert _rangos(plan) == [("recibidos", date(2026, 7, 1), HOY)]
+
+
+def test_los_parametros_enviados_al_sat_nunca_se_repiten_entre_dias_consecutivos():
+    """El SAT limita de por vida las solicitudes con parámetros idénticos (5002): el plan de cada
+    día debe diferir del de todos los anteriores, también el barrido de meses cerrados."""
+    vistos: set = set()
+    for dia in range(40):
+        hoy = date(2026, 9, 1) + timedelta(days=dia)
+        plan = planear_corrida(
+            hoy=hoy, carga_inicial_ok=True, ultima_exitosa=hoy - timedelta(days=1), traslape_dias=7,
+            descargadas=set(), meses_cancelacion=3, barrido_cancelados=(dia % 7 == 0))
+        llaves = [(v.tipo, v.inicio, v.fin, v.tipo_solicitud) for v in plan]
+        assert len(llaves) == len(set(llaves))
+        repetidas = vistos & set(llaves)
+        assert not repetidas, f"{hoy}: parámetros repetidos de un día anterior: {sorted(repetidas)[:2]}"
+        vistos |= set(llaves)
 
 
 def test_una_ventana_de_metadatos_no_es_una_de_xml_aunque_tenga_las_mismas_fechas():

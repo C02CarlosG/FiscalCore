@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 
 import psycopg2.errors
+import psycopg2.extras
 from zoneinfo import ZoneInfo
 
 from . import cfdi_store, db, fiel_store
@@ -362,6 +363,7 @@ class ConfigSync:
     traslape_dias: int = 7
     meses_cancelacion: int = 3
     max_en_vuelo: int = 4
+    dias_barrido_cancelados: int = 7
 
 
 _HORA_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
@@ -393,6 +395,7 @@ def config_sync() -> ConfigSync:
         traslape_dias=_entero_positivo("SAT_SYNC_TRASLAPE_DIAS", base.traslape_dias),
         meses_cancelacion=_entero_positivo("SAT_SYNC_MESES_CANCELACION", base.meses_cancelacion),
         max_en_vuelo=_entero_positivo("SAT_SYNC_MAX_EN_VUELO", base.max_en_vuelo),
+        dias_barrido_cancelados=_entero_positivo("SAT_SYNC_DIAS_BARRIDO_CANCELADOS", base.dias_barrido_cancelados),
     )
 
 
@@ -560,9 +563,17 @@ def importar_paquetes_metadata(
             _log.error("Error descargando paquete de metadatos %s: %s", id_paq, e)
             return registrar_paquete_fallido(solicitud_id, num_paq, len(paquetes), e)
 
+        if not archivos:
+            _log.warning("El paquete de metadatos %s no trae ningún archivo .txt", id_paq)
+            db.execute(
+                "UPDATE sat_solicitudes SET estado='fallo', error_msg=%s, updated_at=NOW() WHERE id=%s",
+                (f"El paquete {num_paq} de {len(paquetes)} no trae archivo de metadatos.", solicitud_id),
+            )
+            return "fallo"
         try:
             registros = [r for contenido in archivos for r in parsear_metadata(contenido)]
         except FIELError as e:
+            _log.warning("Metadatos ilegibles en el paquete %s: %s", id_paq, e)
             db.execute(
                 "UPDATE sat_solicitudes SET estado='fallo', error_msg=%s, updated_at=NOW() WHERE id=%s",
                 (f"Metadatos ilegibles en el paquete {num_paq} de {len(paquetes)}: {e}", solicitud_id),
@@ -778,6 +789,8 @@ def planear_corrida(
     traslape_dias: int,
     descargadas: set[tuple[str, date, date]],
     meses_cancelacion: int | None = None,
+    barrido_cancelados: bool = False,
+    metadatos_hoy: frozenset[str] = frozenset(),
 ) -> list[VentanaPlan]:
     """Decide qué ventanas hay que pedir al SAT en esta corrida.
 
@@ -788,9 +801,13 @@ def planear_corrida(
     - **Diaria**: desde ``ultima_exitosa - traslape_dias`` hasta ``hoy``, por mes y por
       tipo. El traslape evita perder CFDI timbrados con retraso.
 
-    - **Cancelados**: solo en la corrida diaria y si ``meses_cancelacion`` no es ``None``: los
-      metadatos de cancelados del mes en curso y los ``meses_cancelacion`` anteriores. Un
-      CFDI cancelado después de descargarse solo se descubre así (el XML se pidió vigente).
+    - **Cancelados**: solo en la corrida diaria y si ``meses_cancelacion`` no es ``None``: una
+      ventana de metadatos por tipo, **siempre con ``fin = hoy``** (así los parámetros no se
+      repiten de un día a otro y no se gasta el límite 5002). Normalmente cubre el mes en curso
+      y los ``meses_cancelacion`` anteriores; con ``barrido_cancelados`` (cada
+      ``dias_barrido_cancelados`` días) cubre desde enero del ejercicio anterior, porque el SAT
+      filtra por fecha de **emisión** y una cancelación puede ocurrir meses después. Los tipos
+      en ``metadatos_hoy`` ya se verificaron hoy y no se piden otra vez.
 
     El orden es determinista: primero los XML (por tipo y fecha) y luego los metadatos.
     """
@@ -807,10 +824,11 @@ def planear_corrida(
             plan.append(VentanaPlan(tipo, inicio, fin, origen))
 
     if origen == "diaria" and meses_cancelacion is not None:
-        primer_mes = _restar_meses(hoy.replace(day=1), meses_cancelacion)
+        inicio = (date(hoy.year - 1, 1, 1) if barrido_cancelados
+                  else _restar_meses(hoy.replace(day=1), meses_cancelacion))
         for tipo in TIPOS_DESCARGA:
-            for inicio, fin in ventanas_mensuales(primer_mes, hoy):
-                plan.append(VentanaPlan(tipo, inicio, fin, "cancelados", "Metadata", "Cancelado"))
+            if tipo not in metadatos_hoy:
+                plan.append(VentanaPlan(tipo, inicio, hoy, "cancelados", "Metadata", "Cancelado"))
     return plan
 
 
@@ -917,8 +935,8 @@ def _cubierta(ventana: VentanaPlan, filas: list[dict]) -> bool:
     return any(
         f["tipo"] == ventana.tipo and f["fecha_inicio"] is not None
         and f["fecha_inicio"] >= ventana.inicio and f["fecha_fin"] <= ventana.fin
-        and f["tipo_solicitud"] == ventana.tipo_solicitud
-        and f["estado_comprobante"] == ventana.estado_comprobante
+        and f.get("tipo_solicitud", "CFDI") == ventana.tipo_solicitud
+        and f.get("estado_comprobante", "Vigente") == ventana.estado_comprobante
         for f in filas
     )
 
@@ -941,6 +959,33 @@ def _solicitudes_de_la_corrida(empresa_id: str) -> list[dict]:
     )
 
 
+def _estado_de_cancelados(
+    empresa_id: str, hoy: date, config: ConfigSync, corrida_inicio: datetime | None = None,
+) -> tuple[bool, frozenset[str]]:
+    """(¿toca el barrido largo?, tipos cuyos metadatos ya se pidieron hoy).
+
+    El barrido toca si no hay uno bueno (``descargado``) de los últimos ``dias_barrido_cancelados``
+    días **anterior a esta corrida**: lo pedido en la propia corrida no cuenta, para que la
+    decisión no cambie entre vueltas del worker (si no, el segundo tipo pediría la ventana corta
+    en cuanto el primero termine su barrido). Un tipo se da por verificado hoy si ya tiene una
+    solicitud de metadatos que termina hoy."""
+    inicio_barrido = date(hoy.year - 1, 1, 1)
+    hecho = db.query_one(
+        """SELECT 1 AS ok FROM sat_solicitudes
+           WHERE empresa_id=%s AND tipo_solicitud='Metadata' AND estado='descargado' AND fecha_inicio=%s
+             AND created_at >= NOW() - make_interval(days => %s)
+             AND (%s::timestamptz IS NULL OR created_at < %s::timestamptz)
+           LIMIT 1""",
+        (empresa_id, inicio_barrido, config.dias_barrido_cancelados, corrida_inicio, corrida_inicio),
+    )
+    de_hoy = db.query_all(
+        """SELECT DISTINCT tipo FROM sat_solicitudes
+           WHERE empresa_id=%s AND tipo_solicitud='Metadata' AND fecha_fin=%s AND estado <> 'fallo'""",
+        (empresa_id, hoy),
+    )
+    return hecho is None, frozenset(f["tipo"] for f in de_hoy)
+
+
 def _plan_de_la_corrida(empresa_id: str, cfg: dict, ahora: datetime, config: ConfigSync):
     """Ventanas que planea la corrida y solicitudes ya creadas en ella."""
     descargadas = {
@@ -953,13 +998,17 @@ def _plan_de_la_corrida(empresa_id: str, cfg: dict, ahora: datetime, config: Con
         )
     }
     ultima = cfg.get("ultima_exitosa")
+    hoy = ahora.astimezone(_ZONA_CORRIDA).date()
+    barrido, metadatos_hoy = _estado_de_cancelados(empresa_id, hoy, config, cfg.get("corrida_inicio"))
     plan = planear_corrida(
-        hoy=ahora.astimezone(_ZONA_CORRIDA).date(),
+        hoy=hoy,
         carga_inicial_ok=bool(cfg.get("carga_inicial_ok")),
         ultima_exitosa=ultima.astimezone(_ZONA_CORRIDA).date() if ultima else None,
         traslape_dias=config.traslape_dias,
         descargadas=descargadas,
         meses_cancelacion=config.meses_cancelacion,
+        barrido_cancelados=barrido,
+        metadatos_hoy=metadatos_hoy,
     )
     return plan, _solicitudes_de_la_corrida(empresa_id)
 
@@ -1041,6 +1090,9 @@ def _cerrar_corrida(empresa_id: str, empresa: dict, cfg: dict, ahora: datetime, 
                WHERE empresa_id=%s""",
             (siguiente, ahora, empresa_id),
         )
+    if cancelados_fallidas:
+        _log.warning("Empresa %s: no se pudo verificar las cancelaciones (%d ventana(s) de metadatos fallida(s))",
+                     empresa_id, cancelados_fallidas)
     _auditar(empresa_id, "sync_corrida_fin", resultado=estado, solicitudes=len(filas),
              cfdi_importados=importados, fallidas=len(fallidas), periodos=periodos,
              cancelados_marcados=cancelados_marcados, cancelados_fallidas=cancelados_fallidas)
@@ -1301,35 +1353,63 @@ def marcar_cancelados(empresa_id: str, registros: list[MetadataCFDI]) -> int:
 
     **No recalcula nada**: no corre el pipeline y no modifica ``monto_cobrado`` de las
     facturas que un REP cancelado había cobrado. Cada cambio deja un evento
-    ``cfdi_cancelado_posterior`` en ``auditoria`` (la alerta es de M3). Los cálculos de IVA
-    e ISR deben filtrar por ``estado``. Devuelve cuántos CFDI pasaron a cancelado.
+    ``cfdi_cancelado_posterior`` en ``auditoria`` **en la misma transacción** que el cambio de
+    estado (si el evento no se escribe, el CFDI sigue vigente y la próxima corrida lo reintenta;
+    de otro modo la alerta de M3 se perdería para siempre). El evento dice si el CFDI estaba
+    conciliado, qué facturas cobraba (si es un REP) y qué CFDI tiene relacionados, para que M3
+    distinga una alerta real de ruido. Los cálculos de IVA e ISR deben filtrar por ``estado``.
+    Devuelve cuántos CFDI pasaron a cancelado.
     """
     canceladas = {r.uuid.upper(): r for r in registros if r.estatus == "cancelado"}
     if not canceladas:
         return 0
     empresa_id = str(empresa_id)
-    cambiados = db.query_all(
-        """UPDATE cfdi SET estado='cancelado'
-           WHERE empresa_id=%s AND uuid = ANY(%s) AND estado='vigente'
-           RETURNING uuid, tipo_comprobante, fecha_emision, rfc_emisor""",
-        (empresa_id, list(canceladas)),
-    )
-    if not cambiados:
-        return 0
-    rfc_empresa = (db.query_one("SELECT rfc FROM empresas WHERE id=%s", (empresa_id,)) or {}).get("rfc")
-    for fila in cambiados:
-        emision = fila["fecha_emision"]
-        registrar_evento(
-            None, "cfdi_cancelado_posterior", empresa_id=empresa_id, entidad="cfdi", entidad_id=fila["uuid"],
-            metadata={
-                "origen": "automatico",
-                "uuid": fila["uuid"],
-                "tipo_comprobante": fila["tipo_comprobante"],
-                "periodo": f"{emision.year}-{emision.month:02d}" if emision else None,
-                "fecha_emision": _iso_fecha(emision),
-                "fecha_cancelacion": (canceladas[fila["uuid"].upper()].fecha_cancelacion.isoformat()
-                                      if canceladas[fila["uuid"].upper()].fecha_cancelacion else None),
-                "direccion": "emitido" if fila["rfc_emisor"] == rfc_empresa else "recibido",
-            },
-        )
+    with db.get_conn() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                """UPDATE cfdi SET estado='cancelado'
+                   WHERE empresa_id=%s AND uuid = ANY(%s) AND estado='vigente'
+                   RETURNING id, uuid, tipo_comprobante, fecha_emision, rfc_emisor, cfdi_relacionados""",
+                (empresa_id, list(canceladas)),
+            )
+            cambiados = [dict(f) for f in cur.fetchall()]
+            if not cambiados:
+                return 0
+            ids = [str(f["id"]) for f in cambiados]
+
+            cur.execute("SELECT rfc FROM empresas WHERE id=%s", (empresa_id,))
+            rfc_empresa = (cur.fetchone() or {}).get("rfc")
+            cur.execute("SELECT DISTINCT cfdi_id FROM conciliaciones WHERE empresa_id=%s AND cfdi_id = ANY(%s::uuid[])",
+                        (empresa_id, ids))
+            conciliados = {str(f["cfdi_id"]) for f in cur.fetchall()}
+            cur.execute(
+                """SELECT pc.cfdi_id, pr.cfdi_uuid
+                   FROM pagos_cfdi pc JOIN pagos_relaciones pr ON pr.pago_id = pc.id
+                   WHERE pc.empresa_id=%s AND pc.cfdi_id = ANY(%s::uuid[])""",
+                (empresa_id, ids),
+            )
+            cobradas: dict[str, list[str]] = {}
+            for f in cur.fetchall():
+                cobradas.setdefault(str(f["cfdi_id"]), []).append(f["cfdi_uuid"])
+
+            for fila in cambiados:
+                emision = fila["fecha_emision"]
+                cancelacion = canceladas[fila["uuid"].upper()].fecha_cancelacion
+                metadata = {
+                    "origen": "automatico",
+                    "uuid": fila["uuid"],
+                    "tipo_comprobante": fila["tipo_comprobante"],
+                    "periodo": f"{emision.year}-{emision.month:02d}" if emision else None,
+                    "fecha_emision": _iso_fecha(emision),
+                    "fecha_cancelacion": cancelacion.isoformat() if cancelacion else None,
+                    "direccion": "emitido" if fila["rfc_emisor"] == rfc_empresa else "recibido",
+                    "tiene_conciliacion": str(fila["id"]) in conciliados,
+                    "facturas_afectadas": sorted(set(cobradas.get(str(fila["id"]), []))),
+                    "relacionados": (fila["cfdi_relacionados"] or [])[:20],
+                }
+                cur.execute(
+                    """INSERT INTO auditoria (usuario_id, empresa_id, accion, entidad, entidad_id, metadata)
+                       VALUES (NULL, %s, 'cfdi_cancelado_posterior', 'cfdi', %s, %s)""",
+                    (empresa_id, fila["uuid"], psycopg2.extras.Json(metadata)),
+                )
     return len(cambiados)

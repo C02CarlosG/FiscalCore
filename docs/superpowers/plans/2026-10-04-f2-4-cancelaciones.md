@@ -16,7 +16,8 @@
 - **Qué se marca.** Solo `vigente → cancelado` de CFDI que ya existen en la empresa (por UUID en mayúsculas). Nunca se crea un CFDI desde metadatos, nunca se "des-cancela" y no se tocan los `sustituido`.
 - **Sin recálculo silencioso.** No se corre el pipeline por una cancelación y **no se toca `monto_cobrado`** de las facturas que un REP cancelado había cobrado (`cfdi_store.recalcular_cobrado` no mira el estado del REP; es del carril A). Cada cambio deja `cfdi_cancelado_posterior` en `auditoria` con UUID, periodo, tipo y direcciones; la alerta es de M3. Los cálculos de IVA/ISR (F5/F7) deben filtrar por `estado`.
 - **Las cancelaciones no frenan la descarga.** Una ventana de cancelados que falla no deja la corrida en `error` ni detiene `ultima_exitosa`: es de mejor esfuerzo y su falla se informa en el evento `sync_corrida_fin`.
-- **Solo en la corrida diaria.** La carga inicial baja XML vigentes; nada previo que cancelar. Los metadatos cubren el mes abierto y los `SAT_SYNC_MESES_CANCELACION` (3) anteriores.
+- **Solo en la corrida diaria, con `fin = hoy`.** La carga inicial baja XML vigentes; nada previo que cancelar. Una ventana por tipo que termina hoy (los parámetros cambian cada día: pedir meses cerrados con fechas idénticas agotaría el límite 5002); cubre el mes abierto y los `SAT_SYNC_MESES_CANCELACION` (3) anteriores, y cada `SAT_SYNC_DIAS_BARRIDO_CANCELADOS` (7) días un barrido desde enero del ejercicio anterior (el SAT filtra por fecha de emisión y una cancelación puede ocurrir meses después). Lo corrigió la revisión fiscal.
+- **Auditoría transaccional.** El cambio de estado y su evento van en una sola transacción; el evento lleva si el CFDI estaba conciliado, las facturas que cobraba un REP y los CFDI relacionados.
 
 ## Global Constraints
 
@@ -91,8 +92,8 @@
 
 ### Task 5: Verificación y cierre
 
-- [ ] `python -m pytest` completo y `npm test` en verde.
-- [ ] Revisión del agente `dominio-fiscal` sobre el manejo de cancelaciones (efecto sobre cálculos, REP cancelado y `monto_cobrado`).
+- [x] `python -m pytest` completo (1309) en verde.
+- [x] Revisión del agente `dominio-fiscal`: 2 hallazgos críticos (parámetros repetidos que agotan el 5002; ventana de detección demasiado corta), 3 altos y varios medios, atendidos en el código; quedan como pendientes de otros carriles el `monto_cobrado` ante un REP cancelado y la alerta de M3.
 - [ ] Actualizar la spec (formato de metadatos y su validación pendiente), el plan maestro (fila de F2) y abrir el PR en borrador.
 
 ## Fuera de esta entrega
