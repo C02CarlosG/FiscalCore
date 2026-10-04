@@ -3162,51 +3162,16 @@ paths:
                   mi_rol: { type: string, nullable: true, enum: [administrador, contador, null] }
                   puede_administrar: { type: boolean }
                   usuarios: { type: array, items: { $ref: '#/components/schemas/UsuarioEmpresa' } }
+                  invitaciones:
+                    type: array
+                    description: Pendientes; vacía si quien consulta no administra la empresa.
+                    items: { $ref: '#/components/schemas/InvitacionEmpresa' }
         '401':
           $ref: '#/components/responses/UnauthorizedError'
         '403':
           $ref: '#/components/responses/ForbiddenError'
         '404':
           $ref: '#/components/responses/NotFoundError'
-    post:
-      operationId: altaUsuarioEmpresa
-      tags: [Cuenta]
-      summary: Dar acceso a la empresa (vincula una cuenta existente o crea una nueva)
-      description: |
-        Solo un administrador de la empresa (o de la plataforma). Si el correo no tiene
-        cuenta, se crea con `nombre` y `password_temporal` (8 caracteres o más).
-      parameters:
-        - $ref: '#/components/parameters/EmpresaId'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [email, rol]
-              properties:
-                email: { type: string }
-                rol: { type: string, enum: [administrador, contador] }
-                nombre: { type: string, nullable: true }
-                password_temporal: { type: string, nullable: true }
-      responses:
-        '201':
-          description: Acceso concedido
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  usuario: { $ref: '#/components/schemas/UsuarioEmpresa' }
-                  cuenta_creada: { type: boolean }
-        '401':
-          $ref: '#/components/responses/UnauthorizedError'
-        '403':
-          $ref: '#/components/responses/ForbiddenError'
-        '409':
-          $ref: '#/components/responses/ConflictError'
-        '422':
-          $ref: '#/components/responses/UnprocessableError'
 
   /api/v1/cuenta/empresas/{empresa_id}/usuarios/{usuario_id}:
     patch:
@@ -3259,6 +3224,122 @@ paths:
           $ref: '#/components/responses/NotFoundError'
         '409':
           description: La empresa se quedaría sin administrador
+
+  /api/v1/cuenta/empresas/{empresa_id}/invitaciones:
+    post:
+      operationId: invitarAEmpresa
+      tags: [Cuenta]
+      summary: Invitar un correo a la empresa
+      description: |
+        Solo un administrador de la empresa (o de la plataforma). La respuesta es la misma
+        exista o no una cuenta con ese correo; la persona acepta desde su perfil (o al
+        registrarse con ese correo). Re-invitar actualiza la pendiente. Límite: 20 por hora.
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, rol]
+              properties:
+                email: { type: string }
+                rol: { type: string, enum: [administrador, contador] }
+      responses:
+        '201':
+          description: Invitación pendiente
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InvitacionEmpresa' }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '409':
+          description: Esa persona ya tiene acceso a la empresa
+        '422':
+          description: Correo o rol inválido, o el correo es el propio
+        '429':
+          description: Demasiadas invitaciones
+
+  /api/v1/cuenta/empresas/{empresa_id}/invitaciones/{invitacion_id}:
+    delete:
+      operationId: cancelarInvitacion
+      tags: [Cuenta]
+      summary: Cancelar una invitación pendiente
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - { name: invitacion_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '204':
+          description: Cancelada
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/v1/cuenta/invitaciones:
+    get:
+      operationId: misInvitaciones
+      tags: [Cuenta]
+      summary: Invitaciones pendientes al correo de la cuenta
+      responses:
+        '200':
+          description: Invitaciones pendientes
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id: { type: string, format: uuid }
+                    rol: { type: string, enum: [administrador, contador] }
+                    creada: { type: string, format: date-time }
+                    rfc: { type: string }
+                    razon_social: { type: string }
+                    invitada_por: { type: string, nullable: true }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /api/v1/cuenta/invitaciones/{invitacion_id}/aceptar:
+    post:
+      operationId: aceptarInvitacion
+      tags: [Cuenta]
+      summary: Aceptar una invitación (da acceso a la empresa con el rol invitado)
+      parameters:
+        - { name: invitacion_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Aceptada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  empresa_id: { type: string, format: uuid }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          description: No existe, no es de este correo o ya se respondió
+
+  /api/v1/cuenta/invitaciones/{invitacion_id}/rechazar:
+    post:
+      operationId: rechazarInvitacion
+      tags: [Cuenta]
+      summary: Rechazar una invitación
+      parameters:
+        - { name: invitacion_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '204':
+          description: Rechazada
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          description: No existe, no es de este correo o ya se respondió
 
 # ============================================================
 # COMPONENTS
@@ -4561,3 +4642,12 @@ components:
         rol: { type: string, enum: [administrador, contador] }
         desde: { type: string, format: date-time, nullable: true }
         soy_yo: { type: boolean }
+
+    InvitacionEmpresa:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string }
+        rol: { type: string, enum: [administrador, contador] }
+        estado: { type: string, enum: [pendiente, aceptada, rechazada, cancelada] }
+        creada: { type: string, format: date-time }

@@ -8,82 +8,93 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ErrorState } from "@/components/shared/ErrorState";
 import { LoadingState } from "@/components/shared/LoadingState";
-import { useAltaUsuario, useCambiarRol, useQuitarUsuario, useUsuariosEmpresa } from "@/hooks/useCuenta";
+import {
+  useCambiarRol,
+  useCancelarInvitacion,
+  useInvitar,
+  useQuitarUsuario,
+  useUsuariosEmpresa,
+} from "@/hooks/useCuenta";
 import { ApiError } from "@/lib/api-client";
 import { formatearFecha } from "@/lib/formato";
-import { ETIQUETA_ROL_EMPRESA, type AltaUsuarioInput, type RolEmpresa } from "./tipos";
+import { ETIQUETA_ROL_EMPRESA, type InvitacionEmpresa, type RolEmpresa } from "./tipos";
 
 const SELECT_CLASS =
   "h-9 rounded-md border border-input bg-background px-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring";
-const ALTA_VACIA = { email: "", rol: "contador" as RolEmpresa, nombre: "", password_temporal: "" };
+const INVITACION_VACIA = { email: "", rol: "contador" as RolEmpresa };
 
 const mensajeDe = (err: unknown, otro: string) => (err instanceof ApiError ? err.message : otro);
 
-function AltaForm({ empresaId }: { empresaId: string }) {
-  const alta = useAltaUsuario(empresaId);
-  const [valores, setValores] = useState(ALTA_VACIA);
+function InvitarForm({ empresaId }: { empresaId: string }) {
+  const invitar = useInvitar(empresaId);
+  const [valores, setValores] = useState(INVITACION_VACIA);
   const [mensaje, setMensaje] = useState<{ tipo: "ok" | "error"; texto: string } | null>(null);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setMensaje(null);
-    const cuerpo: AltaUsuarioInput = { email: valores.email.trim(), rol: valores.rol };
-    if (valores.nombre.trim()) cuerpo.nombre = valores.nombre.trim();
-    if (valores.password_temporal) cuerpo.password_temporal = valores.password_temporal;
     try {
-      const r = await alta.mutateAsync(cuerpo);
+      await invitar.mutateAsync({ email: valores.email.trim(), rol: valores.rol });
       setMensaje({
         tipo: "ok",
-        texto: r?.cuenta_creada
-          ? "Cuenta creada. Comparte la contraseña temporal por un medio seguro y pide que la cambie en su perfil."
-          : "Acceso concedido a una cuenta existente.",
+        texto:
+          "Invitación enviada. La persona la acepta en «Mi perfil»; si aún no tiene cuenta, que se registre con ese correo.",
       });
-      setValores(ALTA_VACIA);
+      setValores(INVITACION_VACIA);
     } catch (err) {
-      setMensaje({ tipo: "error", texto: mensajeDe(err, "No se pudo dar acceso") });
-      setValores({ ...valores, password_temporal: "" });
+      setMensaje({ tipo: "error", texto: mensajeDe(err, "No se pudo enviar la invitación") });
     }
   }
 
   return (
-    <form aria-label="Dar acceso a la empresa" onSubmit={handleSubmit} className="space-y-4 border-t border-border pt-5" noValidate>
-      <h3 className="text-sm font-semibold">Dar acceso a otra persona</h3>
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+    <form aria-label="Invitar a la empresa" onSubmit={handleSubmit} className="space-y-4 border-t border-border pt-5" noValidate>
+      <h3 className="text-sm font-semibold">Invitar a otra persona</h3>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-[1fr_12rem]">
         <div className="space-y-1.5">
-          <Label htmlFor="alta-email">Correo</Label>
-          <Input id="alta-email" type="email" value={valores.email}
+          <Label htmlFor="invitar-email">Correo</Label>
+          <Input id="invitar-email" type="email" value={valores.email}
                  onChange={(e) => setValores({ ...valores, email: e.target.value })} />
         </div>
         <div className="space-y-1.5">
-          <Label htmlFor="alta-rol">Rol</Label>
-          <select id="alta-rol" className={`${SELECT_CLASS} w-full`} value={valores.rol}
+          <Label htmlFor="invitar-rol">Rol</Label>
+          <select id="invitar-rol" className={`${SELECT_CLASS} w-full`} value={valores.rol}
                   onChange={(e) => setValores({ ...valores, rol: e.target.value as RolEmpresa })}>
             <option value="contador">Contador</option>
             <option value="administrador">Administrador</option>
           </select>
         </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="alta-nombre">Nombre (si no tiene cuenta)</Label>
-          <Input id="alta-nombre" value={valores.nombre}
-                 onChange={(e) => setValores({ ...valores, nombre: e.target.value })} />
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="alta-password">Contraseña temporal (si no tiene cuenta)</Label>
-          <Input id="alta-password" type="password" autoComplete="new-password" value={valores.password_temporal}
-                 onChange={(e) => setValores({ ...valores, password_temporal: e.target.value })} />
-        </div>
       </div>
-      <p className="text-xs text-muted-foreground">
-        Si el correo ya tiene cuenta en FiscalCore, solo se le da acceso a esta empresa y su contraseña no cambia.
-      </p>
       {mensaje && (
         <p role={mensaje.tipo === "ok" ? "status" : "alert"}
            className={`text-sm ${mensaje.tipo === "ok" ? "text-status-ok" : "text-destructive"}`}>
           {mensaje.texto}
         </p>
       )}
-      <Button type="submit" disabled={alta.isPending}>Dar acceso</Button>
+      <Button type="submit" disabled={invitar.isPending}>Invitar</Button>
     </form>
+  );
+}
+
+function InvitacionesPendientes({ empresaId, invitaciones }: { empresaId: string; invitaciones: InvitacionEmpresa[] }) {
+  const cancelar = useCancelarInvitacion(empresaId);
+  if (invitaciones.length === 0) return null;
+  return (
+    <div className="space-y-2">
+      <h3 className="text-sm font-semibold">Invitaciones pendientes</h3>
+      <ul className="divide-y divide-border rounded-md border border-dashed border-border">
+        {invitaciones.map((i) => (
+          <li key={i.id} className="flex items-center justify-between gap-2 p-3 text-sm">
+            <span className="min-w-0 truncate">
+              {i.email} · {ETIQUETA_ROL_EMPRESA[i.rol]}
+            </span>
+            <Button type="button" size="sm" variant="ghost" aria-label={`Cancelar invitación a ${i.email}`}
+                    disabled={cancelar.isPending} onClick={() => cancelar.mutate(i.id)}>
+              Cancelar
+            </Button>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 
@@ -98,7 +109,7 @@ export function UsuariosEmpresa({ empresaId }: { empresaId: string }) {
   if (consulta.isError || !consulta.data) {
     return <ErrorState message="No se pudieron consultar los usuarios." onRetry={() => consulta.refetch()} />;
   }
-  const { usuarios, puede_administrar } = consulta.data;
+  const { usuarios, puede_administrar, invitaciones = [] } = consulta.data;
 
   async function handleRol(usuarioId: string, rol: RolEmpresa) {
     setError(null);
@@ -125,13 +136,13 @@ export function UsuariosEmpresa({ empresaId }: { empresaId: string }) {
       <CardHeader className="px-5 py-5 sm:px-6">
         <CardTitle className="font-display text-base">Usuarios con acceso</CardTitle>
         <CardDescription>
-          El administrador gestiona quién tiene acceso; el contador trabaja la empresa.
+          El administrador invita y gestiona quién tiene acceso; el contador trabaja la empresa.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-5 px-5 pb-5 sm:px-6">
         {!puede_administrar && (
           <p className="rounded-md border border-dashed border-border p-3 text-sm text-muted-foreground">
-            Solo un administrador de la empresa puede dar acceso, cambiar roles o quitar usuarios.
+            Solo un administrador de la empresa puede invitar, cambiar roles o quitar usuarios.
           </p>
         )}
         {error && (
@@ -187,7 +198,8 @@ export function UsuariosEmpresa({ empresaId }: { empresaId: string }) {
             </li>
           ))}
         </ul>
-        {puede_administrar && <AltaForm empresaId={empresaId} />}
+        {puede_administrar && <InvitacionesPendientes empresaId={empresaId} invitaciones={invitaciones} />}
+        {puede_administrar && <InvitarForm empresaId={empresaId} />}
       </CardContent>
     </Card>
   );

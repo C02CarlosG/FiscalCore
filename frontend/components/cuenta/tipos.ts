@@ -21,17 +21,33 @@ export interface UsuarioEmpresa {
   soy_yo: boolean;
 }
 
+export interface InvitacionEmpresa {
+  id: string;
+  email: string;
+  rol: RolEmpresa;
+  estado: "pendiente" | "aceptada" | "rechazada" | "cancelada";
+  creada: string | null;
+}
+
 export interface UsuariosDeEmpresa {
   mi_rol: RolEmpresa | null;
   puede_administrar: boolean;
   usuarios: UsuarioEmpresa[];
+  invitaciones: InvitacionEmpresa[];
 }
 
-export interface AltaUsuarioInput {
+export interface InvitacionInput {
   email: string;
   rol: RolEmpresa;
-  nombre?: string;
-  password_temporal?: string;
+}
+
+export interface MiInvitacion {
+  id: string;
+  rol: RolEmpresa;
+  creada: string;
+  rfc: string;
+  razon_social: string;
+  invitada_por: string | null;
 }
 
 export const ETIQUETA_ROL_EMPRESA: Record<RolEmpresa, string> = {
@@ -40,3 +56,4 @@ export const ETIQUETA_ROL_EMPRESA: Record<RolEmpresa, string> = {
 };
 
 export const rutaUsuarios = (empresaId: string) => `/api/v1/cuenta/empresas/${empresaId}/usuarios`;
+export const rutaInvitaciones = (empresaId: string) => `/api/v1/cuenta/empresas/${empresaId}/invitaciones`;

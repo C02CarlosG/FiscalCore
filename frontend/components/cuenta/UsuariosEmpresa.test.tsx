@@ -21,6 +21,9 @@ const datos = (puede: boolean): UsuariosDeEmpresa => ({
     { usuario_id: "u1", email: "carlos@despacho.mx", nombre: "Carlos", rol: "administrador", desde: "2026-01-01T00:00:00+00:00", soy_yo: puede },
     { usuario_id: "u2", email: "ana@despacho.mx", nombre: "Ana", rol: "contador", desde: "2026-02-01T00:00:00+00:00", soy_yo: !puede },
   ],
+  invitaciones: puede
+    ? [{ id: "i1", email: "pendiente@despacho.mx", rol: "contador", estado: "pendiente", creada: "2026-10-04T00:00:00+00:00" }]
+    : [],
 });
 
 function renderUsuarios(puede = true) {
@@ -52,36 +55,47 @@ describe("UsuariosEmpresa", () => {
     renderUsuarios(false);
     await screen.findByText("ana@despacho.mx");
     expect(screen.getByText(/Solo un administrador de la empresa/)).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Dar acceso" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Invitar" })).not.toBeInTheDocument();
     expect(screen.queryByRole("combobox", { name: /Rol de/ })).not.toBeInTheDocument();
   });
 
-  it("da de alta con contraseña temporal", async () => {
+  it("invita por correo y rol, sin contraseñas ni nombre", async () => {
     const user = userEvent.setup();
     renderUsuarios();
     await screen.findByText("ana@despacho.mx");
-    const form = screen.getByRole("form", { name: "Dar acceso a la empresa" });
+    const form = screen.getByRole("form", { name: "Invitar a la empresa" });
+    expect(within(form).queryByLabelText(/Contraseña/)).not.toBeInTheDocument();
     await user.type(within(form).getByLabelText("Correo"), "luis@despacho.mx");
-    await user.type(within(form).getByLabelText("Nombre (si no tiene cuenta)"), "Luis");
-    await user.type(within(form).getByLabelText("Contraseña temporal (si no tiene cuenta)"), "Temporal-123");
-    await user.click(within(form).getByRole("button", { name: "Dar acceso" }));
+    await user.selectOptions(within(form).getByLabelText("Rol"), "administrador");
+    await user.click(within(form).getByRole("button", { name: "Invitar" }));
     await waitFor(() =>
-      expect(apiFetch).toHaveBeenCalledWith(BASE, {
+      expect(apiFetch).toHaveBeenCalledWith("/api/v1/cuenta/empresas/e1/invitaciones", {
         method: "POST",
-        body: JSON.stringify({ email: "luis@despacho.mx", rol: "contador", nombre: "Luis", password_temporal: "Temporal-123" }),
+        body: JSON.stringify({ email: "luis@despacho.mx", rol: "administrador" }),
       }),
     );
+    expect(await screen.findByText(/Invitación enviada/)).toBeInTheDocument();
   });
 
-  it("muestra el error del backend al dar de alta", async () => {
+  it("muestra el error del backend al invitar", async () => {
     const user = userEvent.setup();
     renderUsuarios();
     await screen.findByText("ana@despacho.mx");
     vi.mocked(apiFetch).mockRejectedValueOnce(new ApiError(409, "Esa persona ya tiene acceso a la empresa"));
-    const form = screen.getByRole("form", { name: "Dar acceso a la empresa" });
+    const form = screen.getByRole("form", { name: "Invitar a la empresa" });
     await user.type(within(form).getByLabelText("Correo"), "ana@despacho.mx");
-    await user.click(within(form).getByRole("button", { name: "Dar acceso" }));
+    await user.click(within(form).getByRole("button", { name: "Invitar" }));
     expect(await screen.findByText("Esa persona ya tiene acceso a la empresa")).toBeInTheDocument();
+  });
+
+  it("lista y cancela invitaciones pendientes", async () => {
+    const user = userEvent.setup();
+    renderUsuarios();
+    expect(await screen.findByText(/pendiente@despacho.mx/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Cancelar invitación a pendiente@despacho.mx" }));
+    await waitFor(() =>
+      expect(apiFetch).toHaveBeenCalledWith("/api/v1/cuenta/empresas/e1/invitaciones/i1", { method: "DELETE" }),
+    );
   });
 
   it("cambia el rol de una fila", async () => {

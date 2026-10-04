@@ -40,12 +40,12 @@ def _base_falsa(monkeypatch, miembros, rol_plataforma="contador"):
             return {"rol": rol_plataforma}
         if "FROM empresas" in sql:
             return {"id": EMPRESA}
-        if "LOWER(email)" in sql:
+        if "FROM usuario_empresas" in sql:
             return None
         raise AssertionError(sql)
 
     monkeypatch.setattr(db, "query_one", _one)
-    monkeypatch.setattr(db, "query_all", lambda sql, params=(): miembros)
+    monkeypatch.setattr(db, "query_all", lambda sql, params=(): [] if "invitaciones_empresa" in sql else miembros)
     monkeypatch.setattr(db, "execute", lambda sql, params=(), returning=False: ejecutado.append((sql, params)))
     return ejecutado
 
@@ -81,9 +81,9 @@ def test_lista_marca_al_primer_vinculado_como_administrador(monkeypatch):
     assert [(u["rol"], u["soy_yo"]) for u in cuerpo["usuarios"]] == [("administrador", True), ("contador", False)]
 
 
-def test_contador_no_puede_dar_de_alta(monkeypatch):
+def test_contador_no_puede_invitar(monkeypatch):
     ejecutado = _base_falsa(monkeypatch, [_miembro(OTRO, "administrador", 1), _miembro(YO, "contador", 2)])
-    r = client.post(BASE, json={"email": "a@b.mx", "rol": "contador", "nombre": "A", "password_temporal": "12345678"})
+    r = client.post(f"/api/v1/cuenta/empresas/{EMPRESA}/invitaciones", json={"email": "a@b.mx", "rol": "contador"})
     assert r.status_code == 403
     assert ejecutado == []
 
@@ -91,22 +91,21 @@ def test_contador_no_puede_dar_de_alta(monkeypatch):
 @pytest.mark.parametrize("cuerpo,detalle", [
     ({"email": "no-es-correo", "rol": "contador"}, "Correo"),
     ({"email": "a@b.mx", "rol": "dueño"}, "rol"),
-    ({"email": "a@b.mx", "rol": "contador", "password_temporal": "12345678"}, "nombre"),
-    ({"email": "a@b.mx", "rol": "contador", "nombre": "A", "password_temporal": "corta"}, "8 caracteres"),
 ])
-def test_alta_invalida_responde_422_sin_escribir(monkeypatch, cuerpo, detalle):
+def test_invitacion_invalida_responde_422_sin_escribir(monkeypatch, cuerpo, detalle):
     ejecutado = _base_falsa(monkeypatch, [_miembro(YO, "administrador", 1)])
-    r = client.post(BASE, json=cuerpo)
+    r = client.post(f"/api/v1/cuenta/empresas/{EMPRESA}/invitaciones", json=cuerpo)
     assert r.status_code == 422
     assert detalle in r.json()["detail"]
     assert ejecutado == []
 
 
-def test_no_se_degrada_al_ultimo_administrador(monkeypatch):
-    _base_falsa(monkeypatch, [_miembro(YO, "administrador", 1), _miembro(OTRO, "contador", 2)])
-    assert client.patch(f"{BASE}/{YO}", json={"rol": "contador"}).status_code == 409
-    assert client.delete(f"{BASE}/{YO}").status_code == 409
-    assert client.patch(f"{BASE}/44444444-4444-4444-4444-444444444444", json={"rol": "contador"}).status_code == 404
+def test_invitar_limitado_a_20_por_hora(monkeypatch):
+    _base_falsa(monkeypatch, [_miembro(YO, "contador", 1), _miembro(OTRO, "administrador", 2)])
+    codigos = [client.post(f"/api/v1/cuenta/empresas/{EMPRESA}/invitaciones",
+                           json={"email": "a@b.mx", "rol": "contador"}).status_code for _ in range(21)]
+    assert codigos[:20] == [403] * 20
+    assert codigos[20] == 429
 
 
 def test_cambio_de_contrasena_audita_sin_contrasenas(monkeypatch):
@@ -126,6 +125,12 @@ def test_contrasena_nueva_igual_a_la_actual(monkeypatch):
 
     monkeypatch.setattr(db, "query_one", lambda sql, params=(): {"password_hash": hash_password("Actual-123")})
     r = client.post("/api/v1/cuenta/contrasena", json={"actual": "Actual-123", "nueva": "Actual-123"})
+    assert r.status_code == 422
+
+
+def test_contrasena_de_mas_de_128_caracteres_responde_422(monkeypatch):
+    monkeypatch.setattr(db, "query_one", lambda *a, **k: pytest.fail("no debe consultar"))
+    r = client.post("/api/v1/cuenta/contrasena", json={"actual": "x" * 129, "nueva": "y" * 8})
     assert r.status_code == 422
 
 

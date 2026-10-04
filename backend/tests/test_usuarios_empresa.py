@@ -34,7 +34,10 @@ def test_contrasena():
     with pytest.raises(ue.DatoInvalido, match="distinta"):
         ue.validar_contrasena("secreto-123", actual="secreto-123")
     with pytest.raises(ue.DatoInvalido):
-        ue.validar_contrasena("x" * 129)
+        ue.validar_contrasena("x" * 73)
+    with pytest.raises(ue.DatoInvalido):
+        ue.validar_contrasena("ñ" * 40)  # 80 bytes en UTF-8
+    ue.validar_contrasena("x" * 72)
 
 
 def _m(uid, rol="contador", desde=datetime(2026, 1, 1)):
@@ -81,3 +84,9 @@ def test_cambio_o_baja_de_quien_no_es_miembro():
         ue.validar_cambio_rol({"a": "administrador"}, "z", "contador")
     with pytest.raises(ue.NoEsMiembro):
         ue.validar_baja({"a": "administrador"}, "z")
+
+
+def test_created_at_nulo_no_truena_y_va_al_final():
+    from datetime import timezone
+    miembros = [_m("a", desde=None), _m("b", desde=datetime(2026, 1, 1, tzinfo=timezone.utc))]
+    assert ue.roles_efectivos(miembros) == {"a": "contador", "b": "administrador"}

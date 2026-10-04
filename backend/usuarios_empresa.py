@@ -6,11 +6,13 @@ Módulo puro: recibe los vínculos ya leídos de `usuario_empresas`.
 from __future__ import annotations
 
 import re
+from datetime import datetime, timezone
 from typing import Iterable, Optional
 
 ROLES = ("administrador", "contador")
 MIN_CONTRASENA = 8
-MAX_CONTRASENA = 128  # bcrypt solo usa los primeros 72 bytes; el tope evita abusos
+MAX_CONTRASENA = 128
+MAX_BYTES_BCRYPT = 72  # bcrypt ignora lo que pase de 72 bytes: se rechaza en vez de truncar en silencio
 _CORREO_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
@@ -42,8 +44,8 @@ def validar_rol(rol: Optional[str]) -> str:
 def validar_contrasena(nueva: Optional[str], actual: Optional[str] = None) -> str:
     if not isinstance(nueva, str) or len(nueva) < MIN_CONTRASENA:
         raise DatoInvalido(f"La contraseña debe tener al menos {MIN_CONTRASENA} caracteres")
-    if len(nueva) > MAX_CONTRASENA:
-        raise DatoInvalido(f"La contraseña no puede tener más de {MAX_CONTRASENA} caracteres")
+    if len(nueva) > MAX_CONTRASENA or len(nueva.encode("utf-8")) > MAX_BYTES_BCRYPT:
+        raise DatoInvalido(f"La contraseña no puede tener más de {MAX_BYTES_BCRYPT} caracteres")
     if actual is not None and nueva == actual:
         raise DatoInvalido("La contraseña nueva debe ser distinta de la actual")
     return nueva
@@ -55,7 +57,12 @@ def roles_efectivos(miembros: Iterable[dict]) -> dict:
     Es la regla de la migración 062 aplicada al leer: `POST /mis-empresas` (carril B)
     todavía vincula al creador con el rol por defecto.
     """
-    miembros = sorted(miembros, key=lambda m: (m["created_at"], str(m["usuario_id"])))
+    # created_at nulo va al final, como el NULLS LAST de la migración 062.
+    miembros = sorted(miembros, key=lambda m: (
+        m["created_at"] is None,
+        m["created_at"] or datetime.min.replace(tzinfo=timezone.utc),
+        str(m["usuario_id"]),
+    ))
     roles = {str(m["usuario_id"]): (m["rol"] if m["rol"] in ROLES else "contador") for m in miembros}
     if miembros and "administrador" not in roles.values():
         roles[str(miembros[0]["usuario_id"])] = "administrador"

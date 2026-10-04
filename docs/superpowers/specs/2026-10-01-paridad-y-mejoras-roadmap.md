@@ -409,7 +409,7 @@ pausa.
 | Fecha | De → para | Qué se necesita | Estado |
 |---|---|---|---|
 | 2026-10-04 | D → B | Agregar `"informacion-fiscal": "Información fiscal"` al mapa del breadcrumb de `layout/Header.tsx` (hoy muestra "Empresas" en `/empresas/{id}/informacion-fiscal`) y `"informacion-fiscal"` a `SUB_RUTAS` de `layout/EmpresaSwitcher.tsx` (para conservar la pantalla al cambiar de empresa) | Hecho en el PR #30 (F2.3) |
-| 2026-10-04 | D → B | U1: (1) `POST /mis-empresas` (`empresas.py`) vincula al creador con `rol = 'administrador'` (hoy usa el valor por defecto; U1 lo compensa al leer). (2) Breadcrumb de `Header.tsx` para `/perfil` ("Mi perfil") y `usuarios` ("Usuarios"); `"usuarios"` en `SUB_RUTAS` de `EmpresaSwitcher.tsx`. (3) Opcional: obligar a cambiar la contraseña temporal en el primer acceso (login en `auth.py`) | Pendiente |
+| 2026-10-04 | D → B | U1: (1) `POST /mis-empresas` (`empresas.py`) vincula al creador con `rol = 'administrador'` (hoy usa el valor por defecto; U1 lo compensa al leer). (2) Breadcrumb de `Header.tsx` para `/perfil` ("Mi perfil") y `usuarios` ("Usuarios"); `"usuarios"` en `SUB_RUTAS` de `EmpresaSwitcher.tsx`. (3) Ya no aplica: U1 da acceso por invitación y no crea contraseñas temporales | Pendiente |
 
 ## Riesgos
 

@@ -3,14 +3,19 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api-client";
 import {
+  rutaInvitaciones,
   rutaUsuarios,
-  type AltaUsuarioInput,
   type CambiosPerfil,
+  type InvitacionEmpresa,
+  type InvitacionInput,
+  type MiInvitacion,
   type Perfil,
   type RolEmpresa,
   type UsuarioEmpresa,
   type UsuariosDeEmpresa,
 } from "@/components/cuenta/tipos";
+
+const MIS_INVITACIONES = ["cuenta", "invitaciones"];
 
 const PERFIL = ["cuenta", "perfil"];
 const usuarios = (empresaId: string) => ["cuenta", "usuarios", empresaId];
@@ -30,6 +35,8 @@ export function useActualizarPerfil() {
 
 export function useCambiarContrasena() {
   return useMutation({
+    // Las contraseñas viajan en las variables de la mutación: no se conservan en caché.
+    gcTime: 0,
     mutationFn: (datos: { actual: string; nueva: string }) =>
       apiFetch<void>("/api/v1/cuenta/contrasena", { method: "POST", body: JSON.stringify(datos) }),
   });
@@ -43,15 +50,44 @@ export function useUsuariosEmpresa(empresaId: string) {
   });
 }
 
-export function useAltaUsuario(empresaId: string) {
+export function useInvitar(empresaId: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (alta: AltaUsuarioInput) =>
-      apiFetch<{ usuario: UsuarioEmpresa; cuenta_creada: boolean }>(rutaUsuarios(empresaId), {
+    mutationFn: (invitacion: InvitacionInput) =>
+      apiFetch<InvitacionEmpresa>(rutaInvitaciones(empresaId), {
         method: "POST",
-        body: JSON.stringify(alta),
+        body: JSON.stringify(invitacion),
       }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: usuarios(empresaId) }),
+  });
+}
+
+export function useCancelarInvitacion(empresaId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (invitacionId: string) =>
+      apiFetch<void>(`${rutaInvitaciones(empresaId)}/${invitacionId}`, { method: "DELETE" }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: usuarios(empresaId) }),
+  });
+}
+
+export function useMisInvitaciones() {
+  return useQuery({
+    queryKey: MIS_INVITACIONES,
+    queryFn: () => apiFetch<MiInvitacion[]>("/api/v1/cuenta/invitaciones"),
+  });
+}
+
+export function useResponderInvitacion() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, aceptar }: { id: string; aceptar: boolean }) =>
+      apiFetch<unknown>(`/api/v1/cuenta/invitaciones/${id}/${aceptar ? "aceptar" : "rechazar"}`, { method: "POST" }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: MIS_INVITACIONES });
+      // Aceptar agrega una empresa a la lista del selector.
+      queryClient.invalidateQueries({ queryKey: ["empresas"] });
+    },
   });
 }
 

@@ -34,6 +34,7 @@ export function CambiarContrasenaForm() {
     } finally {
       // Las contraseñas no se conservan en el navegador más allá del envío.
       setValores(VACIO);
+      cambiar.reset();
     }
   }
 

@@ -1,5 +1,7 @@
-"""E2E de U1 contra Postgres real: alta, roles, baja y cambio de contraseña con login
-real. Se salta sin DB."""
+"""E2E de U1 contra Postgres real: invitaciones, roles, bajas, carreras y cambio de
+contraseña con login real. Se salta sin DB."""
+import threading
+
 import pytest
 
 from backend.tests.conftest import db_disponible
@@ -7,22 +9,24 @@ from backend.tests.conftest import db_disponible
 pytestmark = [pytest.mark.db, pytest.mark.skipif(not db_disponible(), reason="Postgres no disponible (docker compose up -d db)")]
 
 RFC = "CTA010101AB1"
+RFC_OTRA = "CTB010101AB1"
 DUENO = "u1-dueno@test.local"
 NUEVO = "u1-nuevo@test.local"
 EXISTENTE = "u1-existente@test.local"
+SEGUNDO = "u1-segundo@test.local"
+CORREOS = (DUENO, NUEVO, EXISTENTE, SEGUNDO)
 CLAVE = "Clave-Duena-1"
 
 
 def _limpiar(db):
-    db.execute("DELETE FROM empresas WHERE rfc = %s", (RFC,))
-    db.execute("DELETE FROM usuarios WHERE email IN (%s, %s, %s)", (DUENO, NUEVO, EXISTENTE))
+    db.execute("DELETE FROM empresas WHERE rfc IN (%s, %s)", (RFC, RFC_OTRA))
+    db.execute("DELETE FROM usuarios WHERE email IN %s", (CORREOS,))
 
 
 def _login(client, email, password):
     from backend.deps import limiter
     limiter.reset()  # el login permite 5 por minuto
-    r = client.post("/api/v1/auth/login", json={"email": email, "password": password})
-    return r
+    return client.post("/api/v1/auth/login", json={"email": email, "password": password})
 
 
 def _headers(client, email, password):
@@ -31,7 +35,7 @@ def _headers(client, email, password):
     return {"Authorization": f"Bearer {r.json()['access_token']}"}
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture
 def entorno():
     from fastapi.testclient import TestClient
 
@@ -44,10 +48,9 @@ def entorno():
     limiter.reset()
     client = TestClient(main.app)
     try:
-        db.execute("INSERT INTO usuarios (email, password_hash, nombre) VALUES (%s, %s, 'Dueña')",
-                   (DUENO, hash_password(CLAVE)))
-        db.execute("INSERT INTO usuarios (email, password_hash, nombre) VALUES (%s, %s, 'Ya existía')",
-                   (EXISTENTE, hash_password("Clave-Existente-1")))
+        for correo, clave in ((DUENO, CLAVE), (EXISTENTE, "Clave-Existente-1"), (SEGUNDO, "Clave-Segundo-1")):
+            db.execute("INSERT INTO usuarios (email, password_hash, nombre) VALUES (%s, %s, %s)",
+                       (correo, hash_password(clave), f"Nombre real de {correo}"))
         headers = _headers(client, DUENO, CLAVE)
         r = client.post("/api/v1/mis-empresas", headers=headers, json={"rfc": RFC, "razon_social": "Cuenta E2E"})
         assert r.status_code == 201, r.text
@@ -57,60 +60,145 @@ def entorno():
         _limpiar(db)
 
 
-def _usuarios(client, headers, empresa_id):
-    return client.get(f"/api/v1/cuenta/empresas/{empresa_id}/usuarios", headers=headers)
+def _base(empresa_id):
+    return f"/api/v1/cuenta/empresas/{empresa_id}"
 
 
-def test_flujo_de_usuarios(entorno):
+def _invitar(client, headers, empresa_id, email, rol="contador"):
+    from backend.deps import limiter
+    limiter.reset()
+    return client.post(f"{_base(empresa_id)}/invitaciones", headers=headers, json={"email": email, "rol": rol})
+
+
+def _unir(client, headers_dueno, empresa_id, email, clave, rol="contador"):
+    """Invita y acepta; devuelve los headers de la persona."""
+    assert _invitar(client, headers_dueno, empresa_id, email, rol).status_code == 201
+    h = _headers(client, email, clave)
+    inv = client.get("/api/v1/cuenta/invitaciones", headers=h).json()
+    assert len(inv) == 1, inv
+    assert client.post(f"/api/v1/cuenta/invitaciones/{inv[0]['id']}/aceptar", headers=h).status_code == 200
+    return h
+
+
+def test_invitar_no_revela_si_la_cuenta_existe(entorno):
+    _db, client, headers, empresa_id = entorno
+    sin_cuenta = _invitar(client, headers, empresa_id, " U1-Nuevo@Test.local ")
+    con_cuenta = _invitar(client, headers, empresa_id, EXISTENTE)
+    assert sin_cuenta.status_code == con_cuenta.status_code == 201
+    assert set(sin_cuenta.json()) == set(con_cuenta.json()) == {"id", "email", "rol", "estado", "creada"}
+    assert "Nombre real" not in con_cuenta.text
+    assert sin_cuenta.json()["email"] == NUEVO
+
+    # Nadie queda vinculado hasta aceptar.
+    h_existente = _headers(client, EXISTENTE, "Clave-Existente-1")
+    assert client.get(f"/api/v1/empresas/{empresa_id}", headers=h_existente).status_code == 403
+    lista = client.get(f"{_base(empresa_id)}/usuarios", headers=headers).json()
+    assert {i["email"] for i in lista["invitaciones"]} == {NUEVO, EXISTENTE}
+
+    # Re-invitar actualiza la pendiente, no duplica.
+    assert _invitar(client, headers, empresa_id, EXISTENTE, "administrador").json()["rol"] == "administrador"
+    assert len(client.get(f"{_base(empresa_id)}/usuarios", headers=headers).json()["invitaciones"]) == 2
+
+
+def test_aceptar_rechazar_y_cuenta_nueva(entorno):
     db, client, headers, empresa_id = entorno
-    base = f"/api/v1/cuenta/empresas/{empresa_id}/usuarios"
-
-    # El creador administra aunque mis-empresas lo vinculó con el rol por defecto.
-    lista = _usuarios(client, headers, empresa_id).json()
-    assert (lista["mi_rol"], lista["puede_administrar"]) == ("administrador", True)
-
-    # Alta de una cuenta nueva con contraseña temporal.
-    r = client.post(base, headers=headers, json={
-        "email": " U1-Nuevo@Test.local ", "rol": "contador", "nombre": "Nuevo", "password_temporal": "Temporal-123"})
-    assert r.status_code == 201, r.text
-    assert r.json()["cuenta_creada"] is True
-    nuevo_id = r.json()["usuario"]["usuario_id"]
-    h_nuevo = _headers(client, NUEVO, "Temporal-123")
-    assert client.get(f"/api/v1/empresas/{empresa_id}", headers=h_nuevo).status_code == 200
-
-    # Vínculo de una cuenta existente: no cambia su contraseña.
-    r = client.post(base, headers=headers, json={"email": EXISTENTE, "rol": "administrador",
-                                                  "password_temporal": "No-Se-Usa-123"})
-    assert r.status_code == 201, r.text
-    assert r.json()["cuenta_creada"] is False
-    existente_id = r.json()["usuario"]["usuario_id"]
+    h_existente = _unir(client, headers, empresa_id, EXISTENTE, "Clave-Existente-1")
+    assert client.get(f"/api/v1/empresas/{empresa_id}", headers=h_existente).status_code == 200
+    # Su contraseña no cambió.
     assert _login(client, EXISTENTE, "Clave-Existente-1").status_code == 200
-    assert client.post(base, headers=headers, json={"email": EXISTENTE, "rol": "contador"}).status_code == 409
 
-    # Un contador no administra.
-    lista = _usuarios(client, h_nuevo, empresa_id).json()
-    assert (lista["mi_rol"], lista["puede_administrar"]) == ("contador", False)
-    assert client.post(base, headers=h_nuevo, json={"email": "otro@test.local", "rol": "contador",
-                                                     "nombre": "x", "password_temporal": "12345678"}).status_code == 403
-    assert client.patch(f"{base}/{existente_id}", headers=h_nuevo, json={"rol": "contador"}).status_code == 403
-    assert client.delete(f"{base}/{existente_id}", headers=h_nuevo).status_code == 403
+    # Quien no tenía cuenta se registra con ese correo y ve la invitación; la rechaza.
+    assert _invitar(client, headers, empresa_id, NUEVO).status_code == 201
+    from backend.deps import limiter
+    limiter.reset()
+    r = client.post("/api/v1/auth/register", json={"email": NUEVO, "password": "Clave-Nuevo-1", "nombre": "Nuevo"})
+    assert r.status_code == 201, r.text
+    h_nuevo = {"Authorization": f"Bearer {r.json()['access_token']}"}
+    inv = client.get("/api/v1/cuenta/invitaciones", headers=h_nuevo).json()
+    assert [(i["razon_social"], i["rol"]) for i in inv] == [("Cuenta E2E", "contador")]
+    # Otra persona no puede aceptar una invitación que no es suya.
+    assert client.post(f"/api/v1/cuenta/invitaciones/{inv[0]['id']}/aceptar", headers=h_existente).status_code == 404
+    assert client.post(f"/api/v1/cuenta/invitaciones/{inv[0]['id']}/rechazar", headers=h_nuevo).status_code == 204
+    assert client.get(f"/api/v1/empresas/{empresa_id}", headers=h_nuevo).status_code == 403
+    assert client.post(f"/api/v1/cuenta/invitaciones/{inv[0]['id']}/aceptar", headers=h_nuevo).status_code == 404
+
+    acciones = {f["accion"] for f in db.query_all("SELECT accion FROM auditoria WHERE empresa_id = %s", (empresa_id,))}
+    assert {"cuenta.invitar", "cuenta.aceptar_invitacion", "cuenta.rechazar_invitacion"} <= acciones
+
+
+def test_permisos_roles_y_bajas(entorno):
+    db, client, headers, empresa_id = entorno
+    base = _base(empresa_id)
+    h_contador = _unir(client, headers, empresa_id, EXISTENTE, "Clave-Existente-1")
+    _unir(client, headers, empresa_id, SEGUNDO, "Clave-Segundo-1", rol="administrador")
+    lista = client.get(f"{base}/usuarios", headers=headers).json()
+    ids = {u["email"]: u["usuario_id"] for u in lista["usuarios"]}
+    assert lista["mi_rol"] == "administrador"
+
+    # Un contador no gestiona.
+    contador = client.get(f"{base}/usuarios", headers=h_contador).json()
+    assert (contador["mi_rol"], contador["puede_administrar"], contador["invitaciones"]) == ("contador", False, [])
+    assert _invitar(client, h_contador, empresa_id, "otro@test.local").status_code == 403
+    assert client.patch(f"{base}/usuarios/{ids[SEGUNDO]}", headers=h_contador, json={"rol": "contador"}).status_code == 403
+    assert client.delete(f"{base}/usuarios/{ids[SEGUNDO]}", headers=h_contador).status_code == 403
+
+    # No se puede invitar a sí mismo ni a quien ya tiene acceso.
+    assert _invitar(client, headers, empresa_id, DUENO).status_code == 422
+    assert _invitar(client, headers, empresa_id, EXISTENTE).status_code == 409
+
+    # IDOR: un usuario de otra empresa no es miembro de esta.
+    from backend.deps import hash_password
+    otro = db.execute("INSERT INTO usuarios (email, password_hash) VALUES (%s, %s) RETURNING id",
+                      (NUEVO, hash_password("x" * 8)), returning=True)
+    otra = db.execute("INSERT INTO empresas (rfc, razon_social) VALUES (%s, 'Otra') RETURNING id", (RFC_OTRA,), returning=True)
+    db.execute("INSERT INTO usuario_empresas (usuario_id, empresa_id, rol) VALUES (%s, %s, 'administrador')",
+               (otro["id"], otra["id"]))
+    assert client.patch(f"{base}/usuarios/{otro['id']}", headers=headers, json={"rol": "contador"}).status_code == 404
+    assert client.delete(f"{base}/usuarios/{otro['id']}", headers=headers).status_code == 404
+    assert client.get(f"{_base(otra['id'])}/usuarios", headers=headers).status_code == 403
 
     # Con dos administradores se puede degradar a uno; al último, no.
-    dueno_id = next(u["usuario_id"] for u in lista["usuarios"] if u["email"] == DUENO)
-    assert client.patch(f"{base}/{existente_id}", headers=headers, json={"rol": "contador"}).status_code == 200
-    r = client.patch(f"{base}/{dueno_id}", headers=headers, json={"rol": "contador"})
-    assert r.status_code == 409
-    assert client.delete(f"{base}/{dueno_id}", headers=headers).status_code == 409
+    assert client.patch(f"{base}/usuarios/{ids[SEGUNDO]}", headers=headers, json={"rol": "contador"}).status_code == 200
+    assert client.patch(f"{base}/usuarios/{ids[DUENO]}", headers=headers, json={"rol": "contador"}).status_code == 409
+    assert client.delete(f"{base}/usuarios/{ids[DUENO]}", headers=headers).status_code == 409
 
     # Quitar el acceso no borra la cuenta.
-    assert client.delete(f"{base}/{nuevo_id}", headers=headers).status_code == 204
-    assert client.get(f"/api/v1/empresas/{empresa_id}", headers=h_nuevo).status_code == 403
-    assert _login(client, NUEVO, "Temporal-123").status_code == 200
-    assert client.delete(f"{base}/{nuevo_id}", headers=headers).status_code == 404
+    assert client.delete(f"{base}/usuarios/{ids[EXISTENTE]}", headers=headers).status_code == 204
+    assert client.get(f"/api/v1/empresas/{empresa_id}", headers=h_contador).status_code == 403
+    assert _login(client, EXISTENTE, "Clave-Existente-1").status_code == 200
+    assert client.delete(f"{base}/usuarios/{ids[EXISTENTE]}", headers=headers).status_code == 404
 
-    acciones = {f["accion"] for f in db.query_all(
-        "SELECT accion FROM auditoria WHERE empresa_id = %s", (empresa_id,))}
-    assert {"cuenta.alta_usuario", "cuenta.cambiar_rol", "cuenta.quitar_usuario"} <= acciones
+
+def test_dos_administradores_que_se_quitan_a_la_vez_dejan_uno(entorno):
+    from fastapi.testclient import TestClient
+
+    import backend.main_api as main
+
+    db, client, headers, empresa_id = entorno
+    base = _base(empresa_id)
+    h_segundo = _unir(client, headers, empresa_id, SEGUNDO, "Clave-Segundo-1", rol="administrador")
+    ids = {u["email"]: u["usuario_id"] for u in client.get(f"{base}/usuarios", headers=headers).json()["usuarios"]}
+
+    resultados = {}
+    barrera = threading.Barrier(2)
+
+    def quitar(nombre, h, objetivo):
+        propio = TestClient(main.app)
+        barrera.wait()
+        resultados[nombre] = propio.delete(f"{base}/usuarios/{objetivo}", headers=h).status_code
+
+    hilos = [threading.Thread(target=quitar, args=("dueno", headers, ids[SEGUNDO])),
+             threading.Thread(target=quitar, args=("segundo", h_segundo, ids[DUENO]))]
+    for h in hilos:
+        h.start()
+    for h in hilos:
+        h.join()
+
+    assert sorted(resultados.values())[0] == 204
+    assert sorted(resultados.values())[1] in (403, 409)
+    admins = db.query_all("SELECT usuario_id FROM usuario_empresas WHERE empresa_id = %s AND rol = 'administrador'",
+                          (empresa_id,))
+    assert len(admins) == 1
 
 
 def test_cambio_de_contrasena(entorno):
