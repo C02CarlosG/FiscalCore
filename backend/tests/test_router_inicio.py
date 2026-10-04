@@ -71,7 +71,9 @@ def test_iva_anual_delega_con_ejercicio_y_periodo(con_acceso, monkeypatch):
 
 
 @pytest.mark.parametrize("params", [{"ejercicio": 1999}, {"ejercicio": 2100}, {"ejercicio": "x"}, {},
-                                    {"ejercicio": 2026, "periodo": "2026-14"}])
+                                    {"ejercicio": 2026, "periodo": "2026-14"},
+                                    {"ejercicio": 2026, "periodo": "2025-12"},
+                                    {"ejercicio": 2026, "periodo": "2027-01"}])
 def test_iva_anual_rechaza_parametros_invalidos(con_acceso, monkeypatch, params):
     monkeypatch.setattr(inicio_datos, "cargar_iva_ejercicio", lambda *a: pytest.fail("no debía consultar"))
 

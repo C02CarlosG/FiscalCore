@@ -206,3 +206,37 @@ def test_el_resultado_del_aplanado_se_compone_sin_error():
     r = inicio.componer_iva_anual(2026, [inicio.aplanar_iva("2026-01", traslado, acreditable, D("0"), D("0"))], None)
 
     assert r["meses"][0]["resultado"]["iva_por_pagar"] == D("160.00")
+
+
+# ── Contra las funciones reales de iva.py (sin DB) ───────────────────────────
+
+def test_aplanar_iva_con_la_salida_real_de_iva_py():
+    from datetime import date
+
+    from backend import iva
+
+    rfc = "AAA010101AAA"
+    cfdis = [
+        {"uuid": "U1", "tipo_comprobante": "I", "metodo_pago": "PUE", "estado": "vigente", "es_anticipo_sat": False,
+         "rfc_emisor": rfc, "rfc_receptor": "XAXX010101000", "forma_pago": "03", "fecha_emision": date(2026, 9, 10),
+         "subtotal": D("1000"), "descuento": D("0"), "total": D("1160"), "iva_trasladado": D("160")},
+        {"uuid": "U2", "tipo_comprobante": "I", "metodo_pago": "PUE", "estado": "vigente", "es_anticipo_sat": False,
+         "rfc_emisor": "PRO010101AAA", "rfc_receptor": rfc, "forma_pago": "03", "fecha_emision": date(2026, 9, 11),
+         "subtotal": D("400"), "descuento": D("0"), "total": D("464"), "iva_trasladado": D("64")},
+    ]
+    t = iva.iva_trasladado(cfdis, [], "2026-09", rfc)
+    a = iva.iva_acreditable(cfdis, [], "2026-09", rfc)
+
+    mes = inicio.aplanar_iva("2026-09", t, a, iva.aplicar_prorrateo(a["bruto"], D("1")), D("0"))
+    r = inicio.componer_iva_anual(2026, [mes], None)["meses"][8]
+
+    assert r["trasladado"]["total"] == D("160.00") and r["acreditable"]["ajustado"] == D("64.00")
+    assert r["resultado"]["iva_por_pagar"] == D("96.00")
+
+
+def test_siguiente_mes_cambia_de_ejercicio_en_diciembre():
+    from backend.inicio_datos import _siguiente_mes
+
+    assert _siguiente_mes("2026-12") == "2027-01"
+    assert _siguiente_mes("2026-09") == "2026-10"
+    assert _siguiente_mes("2026-01") == "2026-02"

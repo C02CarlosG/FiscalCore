@@ -28,7 +28,8 @@ El Inicio muestra lo **facturado** (devengado), no lo cobrado: la cifra de refer
 Ingresos del mes = Σ (subtotal − descuento) de los CFDI **emitidos por la empresa** de tipo Ingreso (I), menos Σ (subtotal − descuento) de sus **notas de crédito** (Egreso, E), con fecha de emisión en el mes.
 
 - Solo `estado = 'vigente'`: un cancelado no produce efectos.
-- Se excluyen los anticipos SAT (`es_anticipo_sat`), igual que la cédula de IVA: el anticipo no se cuenta dos veces cuando llega la factura que lo aplica.
+- Se excluyen los anticipos SAT (`es_anticipo_sat`) y los **egresos que los aplican** (`forma_pago = '30'`): la factura final trae el importe completo, así que contar el egreso como nota de crédito restaría el anticipo dos veces (ingreso = B − A en lugar de B). El ingreso del anticipo se reconoce, por tanto, en el mes de la factura final y no en el del anticipo.
+- Nómina (tipo N): el gasto es el **subtotal** (percepciones y otros pagos); el descuento de un CFDI de nómina son deducciones del trabajador (ISR e IMSS retenidos), no un descuento comercial, y restarlo daría el neto pagado.
 - Sin IVA: la base es subtotal menos descuento.
 - Moneda extranjera: importe × tipo de cambio del comprobante (`tipo_cambio` vacío o 0 = 1), según la regla común del plan maestro.
 - Los CFDI de traslado (T), nómina (N) y pago (P) no son ingreso.
@@ -93,7 +94,7 @@ Ambos requieren acceso a la empresa (403 si no) y no escriben en `auditoria` (so
   "totales": {"trasladado": 0, "acreditable": 0, "iva_retenido": 0, "iva_por_pagar": 0}
 }
 ```
-`meses` trae los 12 meses del ejercicio; los posteriores a `periodo` (si se manda) llevan ceros. `ejercicio` debe estar entre 2000 y 2099.
+`meses` trae los 12 meses del ejercicio; los posteriores a `periodo` (si se manda) llevan ceros. `ejercicio` debe estar entre 2000 y 2099 y, si se manda, `periodo` debe pertenecer a ese ejercicio (422 si no).
 
 ## Pantalla
 
@@ -111,7 +112,16 @@ Ambos requieren acceso a la empresa (403 si no) y no escriben en `auditoria` (so
 | D-F4-1 | La nómina no se suma a "Gastos netos"; se muestra aparte | Sin nómina en gastos | Al cuadrar con la referencia (12,803,855.07), si ella incluye nómina, se suma en el módulo `inicio.py` (un solo lugar) |
 | D-F4-2 | Las tres pestañas del IVA anual son Trasladado / Acreditable / Resultado | Inferidas del plan maestro ("tres pestañas") | Ajustar los nombres y columnas al ver la pantalla de referencia; el contrato ya separa los tres bloques |
 | D-F4-3 | Ingresos y gastos son devengados (fecha de emisión) | Devengado | Un interruptor "flujo" se evalúa en F5/F7, que ya calculan cobrado y pagado |
-| D-F4-4 | Los anticipos SAT se excluyen de ingresos y gastos | Excluidos (igual que el IVA) | Se revisa con F5, que define el tratamiento completo de anticipos por tasa |
+| D-F4-4 | Los anticipos SAT y sus egresos de aplicación (forma de pago 30) se excluyen de ingresos y gastos | Excluidos; el ingreso cae en el mes de la factura final | F5 define el tratamiento completo de anticipos por tasa |
+
+## Limitaciones conocidas (heredadas de la cédula de IVA, se corrigen en F5)
+
+El IVA anual reutiliza `iva.py` para coincidir con la cédula, y eso hereda tres cosas que F5 reescribe:
+1. **Egreso de aplicación de anticipo**: la cédula lo resta como si fuera nota de crédito (el IVA del anticipo se resta aunque el anticipo se haya excluido). Las cifras de ingresos del Inicio ya lo evitan; el IVA anual no hasta F5.
+2. **Moneda extranjera**: el IVA de un CFDI en USD se suma sin convertir, mientras la base de ingresos sí se convierte.
+3. **Factor de prorrateo** fijo en 1 y retenciones en 0 (la pantalla lo avisa; la cédula acepta `?factor=`).
+
+Otras observaciones de la revisión fiscal que quedan documentadas, sin cambio: una autofactura (empresa como emisor y receptor) cuenta solo como ingreso en el resumen; cancelados y sustituidos se filtran por su estado actual (un CFDI cancelado después aparece como no existente en meses ya declarados, y el sustituto cae en el mes de su emisión); los gastos son lo facturado recibido, no lo deducible (la deducibilidad llega con F7); `to_char(fecha_emision)` usa la zona de la sesión igual que la cédula.
 
 ## Cálculo y rendimiento
 

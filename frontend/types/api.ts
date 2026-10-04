@@ -276,3 +276,54 @@ export interface CfdiResumenResponse {
 export interface PeriodosResponse {
   periodos: string[];
 }
+
+// ── Inicio (F4) ──────────────────────────────────────────────────────────────
+
+export interface InicioIngresos {
+  facturado: number;
+  notas_credito: number;
+  neto: number;
+  cfdi: number;
+}
+
+export interface InicioGastos extends InicioIngresos {
+  nomina: number;
+}
+
+export interface InicioMes {
+  periodo: string;
+  ingresos: InicioIngresos;
+  gastos: { neto: number };
+}
+
+export interface InicioResumen {
+  empresa_id: string;
+  periodo: string;
+  ejercicio: number;
+  ingresos: { periodo: InicioIngresos; acumulado: InicioIngresos };
+  gastos: { periodo: InicioGastos; acumulado: InicioGastos };
+  meses: InicioMes[];
+}
+
+export interface InicioIvaMes {
+  periodo: string;
+  trasladado: { pue: number; ppd: number; notas_credito: number; total: number };
+  acreditable: {
+    pue: number;
+    ppd: number;
+    notas_credito: number;
+    excluido_efectivo: number;
+    bruto: number;
+    ajustado: number;
+  };
+  resultado: { iva_retenido: number; iva_por_pagar: number; saldo_a_cargo: number; saldo_a_favor: number };
+}
+
+export interface InicioIvaAnual {
+  empresa_id: string;
+  ejercicio: number;
+  factor_prorrateo: number;
+  iva_retenido_incluido: boolean;
+  meses: InicioIvaMes[];
+  totales: { trasladado: number; acreditable: number; iva_retenido: number; iva_por_pagar: number };
+}

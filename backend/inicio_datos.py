@@ -25,13 +25,21 @@ def cargar_agregados(empresa_id: str, rfc: str, periodo: str) -> list[dict]:
         SELECT to_char(c.fecha_emision, 'YYYY-MM') AS mes,
                CASE WHEN c.rfc_emisor = %s THEN 'emitido' ELSE 'recibido' END AS lado,
                c.tipo_comprobante AS tipo,
-               SUM((c.subtotal - COALESCE(c.descuento, 0)) * COALESCE(NULLIF(c.tipo_cambio, 0), 1)) AS base,
+               SUM(
+                   CASE WHEN c.tipo_comprobante = 'N'
+                        THEN c.subtotal                              -- percepciones: el descuento son deducciones del trabajador
+                        ELSE c.subtotal - COALESCE(c.descuento, 0)
+                   END * COALESCE(NULLIF(c.tipo_cambio, 0), 1)
+               ) AS base,
                COUNT(*) AS cuenta
         FROM cfdi c
         WHERE c.empresa_id = %s
           AND c.estado = 'vigente'
           AND NOT COALESCE(c.es_anticipo_sat, FALSE)
           AND c.tipo_comprobante IN ('I', 'E', 'N')
+          -- El egreso que aplica un anticipo (forma de pago 30) no es una devolución: el
+          -- anticipo ya se excluyó y la factura final trae el importe completo.
+          AND NOT (c.tipo_comprobante = 'E' AND c.forma_pago = '30')
           AND (c.rfc_emisor = %s OR c.rfc_receptor = %s)
           AND c.fecha_emision >= (%s || '-01')::date
           AND c.fecha_emision <  (%s || '-01')::date
