@@ -35,10 +35,7 @@ function parseFieldErrors(detail: unknown): Record<string, string> | undefined {
   return Object.keys(fieldErrors).length > 0 ? fieldErrors : undefined;
 }
 
-export async function apiFetch<T>(
-  path: string,
-  options: RequestInit = {},
-): Promise<T> {
+async function pedir(path: string, options: RequestInit): Promise<Response> {
   const token = getToken();
   const isFormData = options.body instanceof FormData;
   const headers: Record<string, string> = {
@@ -71,9 +68,29 @@ export async function apiFetch<T>(
     throw new ApiError(response.status, message, fieldErrors);
   }
 
+  return response;
+}
+
+export async function apiFetch<T>(
+  path: string,
+  options: RequestInit = {},
+): Promise<T> {
+  const response = await pedir(path, options);
+
   if (response.status === 204) {
     return undefined as T;
   }
 
   return (await response.json()) as T;
+}
+
+/** Descarga un archivo (con la sesión). Devuelve el contenido y el nombre que propone el servidor. */
+export async function apiDownload(
+  path: string,
+  nombreFallback: string,
+): Promise<{ blob: Blob; nombre: string }> {
+  const response = await pedir(path, {});
+  const disposicion = response.headers.get("Content-Disposition") ?? "";
+  const nombre = /filename="?([^";]+)"?/.exec(disposicion)?.[1] ?? nombreFallback;
+  return { blob: await response.blob(), nombre };
 }

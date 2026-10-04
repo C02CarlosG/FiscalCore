@@ -9,6 +9,7 @@ import { ErrorState } from "@/components/shared/ErrorState";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { formatearFecha, formatearFechaHora, formatearMoneda } from "@/lib/formato";
 import { POR_PAGINA, type CfdiEstadoUrl } from "@/lib/cfdi-url";
+import { columnasVisibles, type ColumnaPreferida } from "@/lib/columnas-preferidas";
 import type { CfdiColumna, CfdiFila, CfdiListadoResponse } from "@/types/api";
 
 const SIN_DATO = "—";
@@ -63,11 +64,13 @@ function Esqueleto() {
 }
 
 /**
- * Tabla del listado: muestra las columnas visibles por defecto del catálogo, ordena y
+ * Tabla del listado: muestra las columnas visibles (preferencia del usuario o, sin ella,
+ * las del catálogo), ordena y
  * pagina en el servidor. No guarda estado: todo llega por propiedades y sube por callbacks.
  */
 export function CfdiTabla({
   columnas,
+  preferencia,
   datos,
   cargando,
   error,
@@ -82,6 +85,8 @@ export function CfdiTabla({
   onLimpiar,
 }: {
   columnas: CfdiColumna[] | undefined;
+  /** Orden y visibilidad del usuario; sin ella, el catálogo manda. */
+  preferencia?: ColumnaPreferida[] | null;
   datos: CfdiListadoResponse | undefined;
   cargando: boolean;
   error: boolean;
@@ -112,7 +117,7 @@ export function CfdiTabla({
     );
   }
 
-  const visibles = columnas.filter((c) => c.visible_por_defecto);
+  const visibles = columnasVisibles(columnas, preferencia);
   const totalPaginas = Math.max(1, Math.ceil(datos.total / porPagina));
   const desde = (pagina - 1) * porPagina + 1;
   const hasta = Math.min(datos.total, pagina * porPagina);
