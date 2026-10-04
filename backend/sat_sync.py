@@ -14,6 +14,7 @@ import calendar
 import logging
 import os
 import re
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 
@@ -753,3 +754,33 @@ def proxima_corrida(ahora: datetime, hora_local: str) -> datetime:
     if candidata <= local:
         candidata += timedelta(days=1)
     return candidata.astimezone(timezone.utc)
+
+
+# ---------------------------------------------------------------------------
+# Candado por empresa
+# ---------------------------------------------------------------------------
+
+
+@contextmanager
+def candado_empresa(empresa_id: str):
+    """Candado de Postgres por empresa: evita que dos procesos trabajen la misma.
+
+    Cede ``True`` si lo obtuvo y ``False`` si otro proceso lo tiene. Es un advisory
+    lock de **sesión** sobre una conexión dedicada (el trabajo de la empresa usa otras
+    conexiones y puede tardar minutos), así que se suelta explícitamente al salir,
+    también ante una excepción, antes de devolver la conexión al pool.
+    """
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT pg_try_advisory_lock(hashtext(%s)) AS ok", (str(empresa_id),))
+            obtenido = bool(cur.fetchone()[0])
+        try:
+            yield obtenido
+        finally:
+            if obtenido:
+                try:
+                    with conn.cursor() as cur:
+                        cur.execute("SELECT pg_advisory_unlock(hashtext(%s))", (str(empresa_id),))
+                except Exception:
+                    # Si la conexión murió, Postgres libera el candado al cerrarse la sesión.
+                    _log.exception("No se pudo liberar el candado de la empresa %s", empresa_id)
