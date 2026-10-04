@@ -1430,6 +1430,154 @@ paths:
         '404':
           description: No pertenece a la empresa o no hay XML guardado
 
+  /api/v1/empresas/{empresa_id}/iva-flujo/ajustes:
+    get:
+      operationId: listarAjustesIva
+      tags: [IVA por flujo]
+      summary: Ajustes manuales del IVA (no considerar y periodo reasignado)
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+      responses:
+        '200':
+          description: Ajustes vigentes, del mas reciente al mas antiguo
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: { type: array, items: { type: object, additionalProperties: true } }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+    put:
+      operationId: guardarAjusteIva
+      tags: [IVA por flujo]
+      summary: Crea o reemplaza el ajuste de un CFDI en una direccion
+      description: |
+        `excluir` saca el CFDI de las sumas del IVA; `reasignar` mueve su efecto a
+        `periodo_destino` (YYYY-MM). Es unico por (empresa, CFDI, direccion) y queda en
+        `auditoria` (`iva_ajuste`) con usuario y motivo.
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [uuid, direccion, accion]
+              properties:
+                uuid: { type: string, maxLength: 36 }
+                direccion: { type: string, enum: [trasladado, acreditable] }
+                accion: { type: string, enum: [excluir, reasignar] }
+                periodo_destino: { type: string, nullable: true, pattern: '^20[0-9]{2}-(0[1-9]|1[0-2])$' }
+                motivo: { type: string, maxLength: 500 }
+      responses:
+        '200':
+          description: Ajuste guardado
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          description: El CFDI no es de la empresa, no es Ingreso/Egreso o no corresponde a esa direccion
+        '422':
+          description: Combinacion invalida (reasignar sin destino, excluir con destino, destino igual al mes de emision de un PUE)
+
+  /api/v1/empresas/{empresa_id}/iva-flujo/ajustes/{direccion}/{uuid}:
+    delete:
+      operationId: quitarAjusteIva
+      tags: [IVA por flujo]
+      summary: Retira un ajuste del IVA
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - { name: direccion, in: path, required: true, schema: { type: string, enum: [trasladado, acreditable] } }
+        - { name: uuid, in: path, required: true, schema: { type: string, maxLength: 36 } }
+      responses:
+        '204':
+          description: Ajuste retirado (queda en auditoria como `iva_ajuste_retirado`)
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          description: No hay un ajuste para ese CFDI y direccion
+
+  /api/v1/empresas/{empresa_id}/iva-flujo/{periodo}:
+    get:
+      operationId: resumenIvaFlujo
+      tags: [IVA por flujo]
+      summary: IVA del mes por flujo de efectivo, por tasa y origen
+      description: |
+        Trasladado cobrado y acreditable pagado con bases e IVA al 16 %, 8 %, 0 %, exento y
+        otras tasas, por origen (contado, cobro o pago de credito, notas de credito), mas lo
+        no considerado, lo reasignado, las retenciones, el resultado del mes y las
+        advertencias (pagos version 1.0 aproximados, descuadres, sin equivalencia).
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - { name: periodo, in: path, required: true, schema: { type: string, pattern: '^20[0-9]{2}-(0[1-9]|1[0-2])$' } }
+        - { name: factor, in: query, schema: { type: number, minimum: 0, maximum: 1, default: 1 } }
+      responses:
+        '200':
+          description: Resumen del IVA del periodo
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  empresa_id: { type: string }
+                  periodo: { type: string }
+                  factor_prorrateo: { type: number }
+                  trasladado: { type: object, additionalProperties: true }
+                  acreditable: { type: object, additionalProperties: true }
+                  retenciones_a_enterar: { type: number }
+                  resultado: { type: object, additionalProperties: true }
+                  advertencias: { type: array, items: { type: object, additionalProperties: true } }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '422':
+          description: periodo o factor invalido
+
+  /api/v1/empresas/{empresa_id}/iva-flujo/{periodo}/detalle:
+    get:
+      operationId: detalleIvaFlujo
+      tags: [IVA por flujo]
+      summary: CFDI que componen una cifra del IVA por flujo
+      description: |
+        Renglones paginados por fecha de efecto con UUID, fecha de emision y de pago, UUID del
+        REP, contraparte, bases e IVA por tasa, retencion, marcas, motivo y ajuste vigente.
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - { name: periodo, in: path, required: true, schema: { type: string, pattern: '^20[0-9]{2}-(0[1-9]|1[0-2])$' } }
+        - { name: direccion, in: query, required: true, schema: { type: string, enum: [trasladado, acreditable] } }
+        - { name: origen, in: query, required: true, schema: { type: string, enum: [contado, credito, notas_credito, no_considerados, reasignados] } }
+        - { name: pagina, in: query, schema: { type: integer, minimum: 1, default: 1 } }
+        - { name: por_pagina, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 50 } }
+      responses:
+        '200':
+          description: Pagina de renglones
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: { type: array, items: { type: object, additionalProperties: true } }
+                  total: { type: integer }
+                  pagina: { type: integer }
+                  por_pagina: { type: integer }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '422':
+          description: periodo, direccion, origen o paginacion invalidos
+
   # ============================================================
   # DASHBOARD
   # ============================================================
