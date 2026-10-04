@@ -409,6 +409,7 @@ pausa.
 | Fecha | De → para | Qué se necesita | Estado |
 |---|---|---|---|
 | 2026-10-04 | D → B | Agregar `"informacion-fiscal": "Información fiscal"` al mapa del breadcrumb de `layout/Header.tsx` (hoy muestra "Empresas" en `/empresas/{id}/informacion-fiscal`) y `"informacion-fiscal"` a `SUB_RUTAS` de `layout/EmpresaSwitcher.tsx` (para conservar la pantalla al cambiar de empresa) | Hecho en el PR #30 (F2.3) |
+| 2026-10-04 | D → B | Lo mismo para la pantalla de V1: `"validaciones": "Validaciones de CFDI"` en el breadcrumb de `Header.tsx` y `"validaciones"` en `SUB_RUTAS` de `EmpresaSwitcher.tsx` | Pendiente |
 | 2026-10-04 | D → B | M7.1: en `POST /mis-empresas` (`empresas.py`), antes de crear la empresa, llamar a `suscripcion_datos.verificar_alta_rfc(current_user["user_id"])` y responder 403 con el mensaje de `LimiteRfcAlcanzado`. Mientras no esté, el límite de RFC se muestra pero no bloquea | Pendiente |
 
 ## Riesgos
@@ -439,7 +440,7 @@ pausa.
 | F8 | D | Integrada (PR #31); falta probar con PDF reales | `docs/superpowers/specs/2026-10-04-f8-informacion-fiscal-design.md` | `docs/superpowers/plans/2026-10-04-f8-informacion-fiscal.md` |
 | M1, M4, M6 | A | Pendiente | — | — |
 | M3 | B | Pendiente |
-| V1 | D | En curso |
+| V1 | D | En revisión (PR D·V1) | `docs/superpowers/specs/2026-10-04-v1-validaciones-cfdi-design.md` | `docs/superpowers/plans/2026-10-04-v1-validaciones-cfdi.md` |
 | U1, M7 | D | Pendiente |
 | M7.1 | D | En revisión (PR D·M7.1): planes, límite de RFC y asignación manual, sin cobro en línea (decisiones de Carlos del 2026-10-04 en la spec); M7.2 cobro en línea pendiente | `docs/superpowers/specs/2026-10-04-m7-1-suscripcion-design.md` | `docs/superpowers/plans/2026-10-04-m7-1-suscripcion.md` |
 | F3.6 | A | Pendiente (después de F3.5b) | — | — |
