@@ -47,7 +47,16 @@ DO $$ BEGIN
         CHECK (tipo_operacion IN ('02', '03', '06', '07', '08', '85', '87'));
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
--- Menor de la revisión de F6.1: la clave de país es ISO 3166-1 alfa-3 (mayúsculas)
+-- Menor de la revisión de F6.1: la clave de país es ISO 3166-1 alfa-3 (mayúsculas). NOT VALID: no revisa las filas ya
+-- guardadas (un dato viejo mal capturado no debe abortar init_db); sí revisa toda alta y cambio nuevos.
 DO $$ BEGIN
-    ALTER TABLE proveedores ADD CONSTRAINT chk_proveedores_pais CHECK (pais IS NULL OR pais ~ '^[A-Z]{3}$');
+    ALTER TABLE proveedores ADD CONSTRAINT chk_proveedores_pais CHECK (pais IS NULL OR pais ~ '^[A-Z]{3}$') NOT VALID;
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- Un extranjero renombrado por el contador debe seguir ligado a sus CFDI: nombre_cfdi guarda el nombre con que llegó en
+-- el comprobante (la llave de la alimentación y de la DIOT); `nombre` es el que se muestra y se edita.
+ALTER TABLE proveedores ADD COLUMN IF NOT EXISTS nombre_cfdi TEXT;
+UPDATE proveedores SET nombre_cfdi = nombre WHERE nombre_cfdi IS NULL AND rfc = 'XEXX010101000';
+DROP INDEX IF EXISTS uq_proveedores_extranjero_cfdi;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_proveedores_extranjero_nombre_cfdi
+    ON proveedores (empresa_id, rfc, nombre_cfdi) WHERE rfc = 'XEXX010101000' AND nombre_cfdi IS NOT NULL;

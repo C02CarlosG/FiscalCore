@@ -203,3 +203,51 @@ def test_otra_empresa_recibe_403(entorno):
     assert client.get(_url(entorno, "2026-09"), headers=ajeno).status_code == 403
     assert client.get(_url(entorno, "2026-09/exportar"), headers=ajeno).status_code == 403
     assert client.put(_url(entorno, f"2026-09/cfdi/{_uuid(1)}"), headers=ajeno, json={"tipo_operacion": "03"}).status_code == 403
+
+
+def test_un_extranjero_renombrado_no_se_duplica_al_sincronizar_y_conserva_sus_cfdi(entorno):
+    db, client, headers, e = entorno
+    acme = _por(_diot(entorno), EXT, "ACME INC")
+
+    r = client.patch(f"/api/v1/empresas/{e}/proveedores/{acme['proveedor_id']}", headers=headers,
+                     json={"nombre": "ACME INCORPORATED", "id_fiscal": "12-3456", "pais": "usa"})
+    assert r.status_code == 200, r.text
+    d = _diot(entorno)
+
+    nombres = sorted(t["contraparte"] for t in d["terceros"] if t["contraparte_rfc"] == EXT)
+    assert nombres == ["ACME INC", "GLOBEX LLC"]                                          # el CFDI sigue diciendo ACME INC
+    assert _por(d, EXT, "ACME INC")["proveedor_id"] == acme["proveedor_id"]
+    assert _por(d, EXT, "ACME INC")["advertencias"] == []
+    assert db.query_one("SELECT COUNT(*) AS n FROM proveedores WHERE empresa_id = %s AND rfc = %s", (e, EXT))["n"] == 2
+
+
+def test_la_operacion_de_un_cfdi_exige_efecto_en_ese_periodo(entorno):
+    client, headers = entorno[1], entorno[2]
+
+    # el CFDI 8 es de agosto: en septiembre no tiene efecto
+    r = client.put(_url(entorno, f"2026-09/cfdi/{_uuid(8)}"), headers=headers, json={"tipo_operacion": "03"})
+    assert r.status_code == 422 and "no tiene efecto" in r.json()["detail"]
+    assert client.put(_url(entorno, f"2026-08/cfdi/{_uuid(8)}"), headers=headers, json={"tipo_operacion": "03"}).status_code == 200
+    client.delete(_url(entorno, f"2026-08/cfdi/{_uuid(8)}"), headers=headers)
+
+
+def test_los_actos_incluyen_lo_no_acreditable_y_el_cuadre_es_exacto_con_varios_terceros(entorno):
+    d = _diot(entorno, factor=0.7)
+    dos = _por(d, PROV2)
+
+    assert dos["actos"]["16"] == 5250.0 and dos["iva_pagado"]["16"] == 840.0           # 250 (S01) + 5,000 (efectivo)
+    assert dos["iva_pagado"]["total"] == dos["iva_acreditable"] + dos["iva_no_acreditable"]["total"]
+    assert d["cuadre_con_iva"]["cuadra"] is True
+    assert [a["codigo"] for a in d["advertencias"]] == []                               # no hay actos a 8 %
+
+
+def test_los_terceros_sin_actos_positivos_se_advierten(entorno):
+    db, e = entorno[0], entorno[3]
+    _recibido(db, e, 20, [_t(100, 16)], emisor="NEG010101DDD", nombre="SOLO DEVOLUCION", tipo_comprobante="E",
+              subtotal="100", iva_trasladado="16", total="116")
+    try:
+        t = _por(_diot(entorno), "NEG010101DDD")
+
+        assert "monto_no_positivo" in t["advertencias"] and "sin_catalogo" not in t["advertencias"]
+    finally:
+        db.execute("DELETE FROM cfdi WHERE uuid = %s", (_uuid(20),))

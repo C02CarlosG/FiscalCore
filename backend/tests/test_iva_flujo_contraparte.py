@@ -73,7 +73,9 @@ def test_cfdi_excluido_a_mano_o_reasignado_sigue_las_reglas_del_motor():
                ("R2", "acreditable"): {"accion": "reasignar", "periodo_destino": "2026-10", "motivo": "x"}}
     r = terceros(recibido("R1"), recibido("R2"), recibido("R3"), ajustes=ajustes)[0]
 
-    assert r["iva_acreditable"] == D("160.00") and r["iva_no_acreditable"]["por_motivo"]["manual"]["cfdi"] == 1
+    assert r["iva_acreditable"] == D("160.00")
+    assert r["excluidos"] == {"manual": 1}                                 # el ajuste manual no es IVA no acreditable
+    assert r["iva_no_acreditable"]["por_motivo"] == {}
 
 
 def test_extranjeros_con_el_rfc_generico_salen_separados_por_nombre():
@@ -95,3 +97,59 @@ def test_cobros_a_credito_cuentan_en_su_tercero_y_las_ventas_no():
                  pagos=[pago("R1", "580")])
 
     assert len(r) == 1 and r[0]["iva_pagado"]["16"] == D("80.00") and r[0]["actos"]["16"] == D("500.00")
+
+
+def _repartidos(n, iva, factor, **kw):
+    """n terceros con el mismo IVA a la tasa dada."""
+    docs = [recibido(f"R{i}", rfc_emisor=f"PRO0101{i:02d}AAA", nombre_emisor=f"P{i}", subtotal=D("100"), iva_trasladado=D(iva),
+                     impuestos=[tras("0.16", 100, iva)], **kw) for i in range(n)]
+    ev = eventos(*docs)
+    return ev, f.por_contraparte(ev, "2026-09", {}, D(factor)), f.resumen(ev, "2026-09", {}, D(factor))
+
+
+def test_el_cuadre_es_exacto_con_centavos_impares_y_varios_terceros():
+    for n, iva, factor in ((4, "16.01", "0.5"), (4, "16.01", "0.7"), (3, "10.03", "0.3333"), (7, "1.01", "0.85")):
+        _, r, resumen = _repartidos(n, iva, factor)
+
+        assert sum((t["iva_acreditable"] for t in r), D("0")) == resumen["acreditable"]["ajustado"], (n, iva, factor)
+
+
+def test_acreditable_mas_proporcion_es_el_neto_de_cada_tercero():
+    _, r, _ = _repartidos(4, "16.01", "0.5")
+
+    for t in r:
+        assert t["iva_acreditable"] + t["iva_no_acreditable"]["proporcion"] == t["iva_pagado"]["total"] - t["devoluciones"]["iva"]
+
+
+def test_cuadre_con_cobros_a_credito_prorrateados():
+    docs = [recibido(f"R{i}", metodo_pago="PPD", fecha_emision=date(2026, 8, 1), rfc_emisor=f"PRO0101{i:02d}AAA", nombre_emisor=f"P{i}",
+                     total=D("1160")) for i in range(3)]
+    ev = eventos(*docs, pagos=[pago(f"R{i}", "333.33") for i in range(3)])
+    for factor in ("1", "0.5"):
+        r = f.por_contraparte(ev, "2026-09", {}, D(factor))
+
+        assert sum((t["iva_acreditable"] for t in r), D("0")) == f.resumen(ev, "2026-09", {}, D(factor))["acreditable"]["ajustado"]
+
+
+def test_aplicacion_de_anticipo_en_un_rep_no_produce_iva_no_acreditable_negativo():
+    c = recibido("C1", tipo_comprobante="E", forma_pago="30", subtotal=D("2000"), iva_trasladado=D("320"),
+                 impuestos=[tras("0.16", 2000, 320)], relacionados_info=[{"metodo_pago": "PPD", "forma_pago": "99", "total": "5800", "moneda": "MXN"}])
+    r = terceros(c, recibido("R1"))[0]
+
+    assert r["iva_no_acreditable"]["por_motivo"] == {} and r["iva_no_acreditable"]["total"] == D("0.00")
+    assert r["excluidos"] == {"aplicado_en_rep": 1} and r["iva_acreditable"] == D("160.00")
+
+
+def test_la_falta_de_datos_no_es_iva_no_acreditable_sino_un_aviso_del_tercero():
+    r = terceros(recibido("R1"), recibido("R2", moneda="USD", tipo_cambio=None))[0]
+
+    assert r["iva_no_acreditable"]["por_motivo"] == {} and r["excluidos"] == {"sin_tipo_cambio": 1}
+
+
+def test_los_actos_pagados_cuentan_aunque_el_iva_no_sea_acreditable():
+    r = terceros(recibido("R1"), recibido("R2", uso_cfdi="S01"), recibido("R3", forma_pago="01", total=D("5800"), subtotal=D("5000"),
+                                                                              iva_trasladado=D("800"), impuestos=[tras("0.16", 5000, 800)]))[0]
+
+    assert r["actos"]["16"] == D("7000.00") and r["iva_pagado"]["16"] == D("1120.00")
+    assert r["iva_acreditable"] == D("160.00")
+    assert r["iva_pagado"]["total"] == r["iva_acreditable"] + r["iva_no_acreditable"]["total"]

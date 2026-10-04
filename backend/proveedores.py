@@ -12,7 +12,7 @@ from . import db, diot_catalogos
 
 CAMPOS_EDITABLES = ("nombre", "nombre_editado", "tipo_tercero", "tipo_operacion", "pais", "jurisdiccion_detalle",
                     "id_fiscal", "efectos_fiscales")
-_COLUMNAS = ("id, rfc, nombre, nombre_editado, tipo_tercero, tipo_operacion, pais, jurisdiccion_detalle, id_fiscal, "
+_COLUMNAS = ("id, rfc, nombre, nombre_cfdi, nombre_editado, tipo_tercero, tipo_operacion, pais, jurisdiccion_detalle, id_fiscal, "
              "efectos_fiscales, origen, created_at, updated_at")
 
 
@@ -55,11 +55,11 @@ def sincronizar(empresa_id: str, rfc_empresa: str, usuario_id: Optional[str] = N
                     continue
                 if rfc == diot_catalogos.RFC_EXTRANJERO:
                     cur.execute(
-                        """INSERT INTO proveedores (empresa_id, rfc, nombre, tipo_tercero, tipo_operacion, origen)
-                           VALUES (%s, %s, %s, %s, %s, 'cfdi')
-                           ON CONFLICT (empresa_id, rfc, nombre) WHERE rfc = 'XEXX010101000' AND origen = 'cfdi'
+                        """INSERT INTO proveedores (empresa_id, rfc, nombre, nombre_cfdi, tipo_tercero, tipo_operacion, origen)
+                           VALUES (%s, %s, %s, %s, %s, %s, 'cfdi')
+                           ON CONFLICT (empresa_id, rfc, nombre_cfdi) WHERE rfc = 'XEXX010101000' AND nombre_cfdi IS NOT NULL
                            DO NOTHING RETURNING 1""",
-                        (empresa_id, rfc, nombre, diot_catalogos.tipo_tercero_por_defecto(rfc), diot_catalogos.OPERACION_POR_DEFECTO),
+                        (empresa_id, rfc, nombre, nombre, diot_catalogos.tipo_tercero_por_defecto(rfc), diot_catalogos.OPERACION_POR_DEFECTO),
                     )
                 else:
                     cur.execute(
@@ -122,10 +122,10 @@ def crear(empresa_id: str, rfc: str, datos: dict, usuario_id: str) -> dict:
         with db.get_conn() as conn:
             with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
                 cur.execute(
-                    """INSERT INTO proveedores (empresa_id, rfc, nombre, nombre_editado, tipo_tercero, tipo_operacion,
+                    """INSERT INTO proveedores (empresa_id, rfc, nombre, nombre_cfdi, nombre_editado, tipo_tercero, tipo_operacion,
                                                 pais, jurisdiccion_detalle, id_fiscal, efectos_fiscales, origen)
-                       VALUES (%s, %s, %s, TRUE, %s, %s, %s, %s, %s, %s, 'manual') RETURNING id""",
-                    (empresa_id, rfc, datos.get("nombre") or "", datos.get("tipo_tercero"), datos.get("tipo_operacion"),
+                       VALUES (%s, %s, %s, %s, TRUE, %s, %s, %s, %s, %s, %s, 'manual') RETURNING id""",
+                    (empresa_id, rfc, datos.get("nombre") or "", (datos.get("nombre") or "") if rfc == diot_catalogos.RFC_EXTRANJERO else None, datos.get("tipo_tercero"), datos.get("tipo_operacion"),
                      datos.get("pais"), datos.get("jurisdiccion_detalle"), datos.get("id_fiscal"), datos.get("efectos_fiscales")),
                 )
                 nuevo = str(cur.fetchone()["id"])

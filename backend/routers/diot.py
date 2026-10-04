@@ -163,6 +163,12 @@ async def operacion_de_un_cfdi(empresa_id: str, periodo: str, uuid: str, datos: 
         (empresa_id, uuid, empresa["rfc"]))
     if not cfdi:
         raise HTTPException(status_code=404, detail="CFDI recibido no encontrado")
+    ajustes = iva_flujo_datos.cargar_ajustes(empresa_id)
+    eventos = iva_flujo_datos.cargar_eventos(empresa_id, empresa["rfc"], periodo, ajustes)
+    if not any(ev["direccion"] == "acreditable" and iva_flujo.llave(ev["uuid"]) == iva_flujo.llave(cfdi["uuid"])
+               and iva_flujo.estado_en_periodo(ev, periodo, ajustes) is not None for ev in eventos):
+        # Atarlo a un mes donde no tiene efecto heredaría la clasificación entre meses sin que nadie lo vea
+        raise HTTPException(status_code=422, detail="El CFDI no tiene efecto en ese periodo")
     diot_datos.guardar_operacion_cfdi(empresa_id, periodo, cfdi["uuid"], datos.tipo_operacion, current_user["user_id"])
     return {"uuid": cfdi["uuid"].upper(), "periodo": periodo, "tipo_operacion": datos.tipo_operacion}
 

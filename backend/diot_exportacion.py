@@ -23,7 +23,7 @@ _COLUMNAS = [
     ("ID fiscal", lambda t: t["id_fiscal"], "texto"),
     ("CFDI", lambda t: t["cfdi"], "numero"),
     ("Actos 16 %", lambda t: t["actos"]["16"], "moneda"),
-    ("Actos 8 %", lambda t: t["actos"]["8"], "moneda"),
+    ("Actos 8 % (sin región)", lambda t: t["actos"]["8"], "moneda"),
     ("Actos 0 %", lambda t: t["actos"]["0"], "moneda"),
     ("Actos exentos", lambda t: t["actos"]["exento"], "moneda"),
     ("Actos otras tasas", lambda t: t["actos"]["otras"], "moneda"),
@@ -82,12 +82,13 @@ def construir(resultado: dict) -> bytes:
         ("IVA acreditable del resumen de IVA", c["iva_acreditable_resumen"], True),
         ("Cuadra con el resumen de IVA", "Sí" if c["cuadra"] else "NO", False),
         ("Terceros con advertencias", t["con_advertencias"], False),
+        *[("Aviso: " + a["codigo"], a["mensaje"], False) for a in resultado.get("advertencias", [])],
     ):
         wr.append([etiqueta, float(valor) if moneda else valor])
         if moneda:
             wr[wr.max_row][1].number_format = FORMATO_MONEDA
     wr.column_dimensions["A"].width = 38
-    wr.column_dimensions["B"].width = 20
+    wr.column_dimensions["B"].width = 60
     salida = BytesIO()
     wb.save(salida)
     return salida.getvalue()

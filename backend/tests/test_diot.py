@@ -83,3 +83,32 @@ def test_totales_suman_los_terceros():
 def iva_flujo_tras():
     from backend.tests.test_iva_flujo import tras
     return tras("0.16", 100, 16)
+
+
+def test_advierte_exclusiones_manuales_y_de_datos_y_montos_no_positivos():
+    ajustes = {("R1", "acreditable"): {"accion": "excluir", "periodo_destino": None, "motivo": "x"}}
+    terceros = iva_flujo.por_contraparte(eventos(recibido("R1"), recibido("R2", rfc_emisor="OTR010101BBB", nombre_emisor="OTRO"),
+                                                 recibido("R3", moneda="USD", tipo_cambio=None, rfc_emisor="TER010101CCC", nombre_emisor="TERCERO"),
+                                                 recibido("R4", tipo_comprobante="E", rfc_emisor="NEG010101DDD", nombre_emisor="SOLO DEVOLUCION")),
+                                         "2026-09", ajustes, D("1"))
+    r = diot.componer(terceros, diot.indice_de_catalogo([]), {})
+    por = {t["contraparte"]: t["advertencias"] for t in r["terceros"]}
+
+    assert "excluido_manual" in por["PROVEEDOR"] and "monto_no_positivo" in por["PROVEEDOR"]
+    assert "excluido_sin_datos" in por["TERCERO"]
+    assert "monto_no_positivo" in por["SOLO DEVOLUCION"]
+    assert "monto_no_positivo" not in por["OTRO"]
+
+
+def test_las_operaciones_07_y_08_solo_con_extranjeros():
+    r = componer(recibido("R1"), proveedores=[prov(tipo_operacion="07")])
+
+    assert "operacion_incompatible" in r["terceros"][0]["advertencias"]
+
+
+def test_avisa_de_los_actos_a_8_por_ciento_sin_region():
+    from backend.tests.test_iva_flujo import tras
+    ocho = recibido("R1", subtotal=D("500"), iva_trasladado=D("40"), impuestos=[tras("0.08", 500, 40)])
+
+    assert [a["codigo"] for a in componer(ocho, proveedores=[prov()])["advertencias"]] == ["sin_region"]
+    assert componer(recibido("R2"), proveedores=[prov()])["advertencias"] == []
