@@ -2867,6 +2867,105 @@ paths:
         '403':
           $ref: '#/components/responses/ForbiddenError'
 
+  /api/v1/empresas/{empresa_id}/proveedores:
+    get:
+      operationId: listarProveedores
+      tags: [Proveedores]
+      summary: Catalogo de proveedores de la empresa
+      description: |
+        Antes de listar agrega al catalogo los emisores de los CFDI recibidos vigentes que falten
+        (`agregados` dice cuantos). `q` busca en RFC y nombre.
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - { name: q, in: query, schema: { type: string, maxLength: 100 } }
+      responses:
+        '200':
+          description: Proveedores
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total: { type: integer }
+                  agregados: { type: integer }
+                  items: { type: array, items: { $ref: '#/components/schemas/Proveedor' } }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+    post:
+      operationId: crearProveedor
+      tags: [Proveedores]
+      summary: Alta manual de un proveedor
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [rfc]
+              properties:
+                rfc: { type: string }
+                nombre: { type: string, maxLength: 300 }
+                tipo_tercero: { type: string, pattern: '^[0-9]{2}$', nullable: true }
+                tipo_operacion: { type: string, pattern: '^[0-9]{2}$', nullable: true }
+                pais: { type: string, maxLength: 60, nullable: true }
+                id_fiscal: { type: string, maxLength: 40, nullable: true }
+      responses:
+        '201':
+          description: Proveedor creado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Proveedor'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '409':
+          description: El proveedor ya existe
+        '422':
+          description: RFC o codigos invalidos
+
+  /api/v1/empresas/{empresa_id}/proveedores/{rfc}:
+    patch:
+      operationId: editarProveedor
+      tags: [Proveedores]
+      summary: Edita el nombre, tipo de tercero y de operacion de un proveedor
+      description: Solo cambia los campos enviados y queda en la auditoria. Editar el nombre impide que la alimentacion desde los CFDI lo pise.
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - { name: rfc, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                nombre: { type: string, maxLength: 300 }
+                tipo_tercero: { type: string, pattern: '^[0-9]{2}$', nullable: true }
+                tipo_operacion: { type: string, pattern: '^[0-9]{2}$', nullable: true }
+                pais: { type: string, maxLength: 60, nullable: true }
+                id_fiscal: { type: string, maxLength: 40, nullable: true }
+      responses:
+        '200':
+          description: Proveedor actualizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Proveedor'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          description: Proveedor no encontrado
+        '422':
+          description: RFC o codigos invalidos
+
   /api/v1/empresas/{empresa_id}/cedula-iva/{periodo}:
     get:
       operationId: cedulaIva
@@ -3215,6 +3314,19 @@ components:
             detail: "Error SAT: Servicio no disponible"
 
   schemas:
+    Proveedor:
+      type: object
+      properties:
+        rfc: { type: string }
+        nombre: { type: string }
+        nombre_editado: { type: boolean }
+        tipo_tercero: { type: string, nullable: true }
+        tipo_operacion: { type: string, nullable: true }
+        pais: { type: string, nullable: true }
+        id_fiscal: { type: string, nullable: true }
+        origen: { type: string, enum: [cfdi, manual] }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
 
     ErrorResponse:
       type: object
