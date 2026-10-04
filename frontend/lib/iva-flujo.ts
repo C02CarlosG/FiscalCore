@@ -51,6 +51,14 @@ export const ETIQUETA_MARCA: Record<string, string> = {
   aproximado: "IVA aproximado",
   pago_v1: "REP 1.0",
   descuadre: "Descuadre con el encabezado",
+  descuadre_retencion: "Retención no cuadra con el encabezado",
+  retencion_sin_desglose: "Retención solo en el encabezado",
+  descuadre_rep: "No cuadra con el REP",
+  equivalencia_sospechosa: "Equivalencia sospechosa",
+  tc_distante: "Equivalencia lejos del tipo de cambio",
+  objeto_imp_inconsistente: "ObjetoImpDR contradice el CFDI",
+  objeto_sin_desglose: "Objeto sin desglose de IVA",
+  forma_pago_rep: "Forma de pago del REP desconocida",
   sin_desglose: "Sin desglose por tasa",
   sin_equivalencia: "Sin equivalencia",
   sin_tipo_cambio: "Sin tipo de cambio",
@@ -72,6 +80,7 @@ export const ETIQUETA_MOTIVO: Record<string, string> = {
   sin_tipo_cambio: "Sin tipo de cambio",
   sin_proporcion: "Total del documento en cero",
   pago_v1: "REP versión 1.0",
+  equivalencia_sospechosa: "Equivalencia invertida (no cuadra con el REP)",
 };
 
 export function siguientePeriodo(periodo: string): string {
