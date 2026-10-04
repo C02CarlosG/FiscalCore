@@ -36,8 +36,9 @@ Esta spec fija las reglas y el contrato de todo F5; el plan de F5.1 está en `do
 
 - **Solo vigentes.** Un CFDI cancelado no produce efectos. Un REP cancelado, tampoco. Un cancelado que ya se consideró en un periodo declarado se avisa en M3; aquí solo se excluye.
 - **Dirección.** Trasladado: la empresa es emisora del CFDI original. Acreditable: la empresa es receptora. Para un REP se usa la dirección del documento que paga, no la del REP.
+- **Anticipo con factura final PPD.** El REP de la factura final ya trae el remanente (factura − anticipo) en sus impuestos del documento; si además se restara el egreso de aplicación se descontaría el anticipo dos veces (16,000 + 144,000 − 16,000 = 144,000 en vez de 160,000). Por eso un egreso de forma de pago 30 que relaciona un Ingreso PPD queda como no considerado con motivo `aplicado_en_rep`. Con la factura final PUE sí resta.
 - **Anticipos (corrige a la cédula actual).** El anticipo (A) **sí** causa IVA en su fecha (se cobró); la factura final (B) causa el IVA completo; el egreso que aplica el anticipo (C, forma de pago 30) resta el IVA de A. Neto en el tiempo: A + B − C = B. La cédula actual excluye A y resta C, lo que descuenta el anticipo dos veces; F5.3 lo corrige. C aparece en origen "Notas de crédito" con la marca `aplicacion_anticipo`.
-- **Moneda extranjera.** Importes del CFDI × tipo de cambio del comprobante. En un cobro, la conversión usa el tipo de cambio del pago: pesos = (importe del documento ÷ `equivalencia_dr`) × tipo de cambio del pago (1 si el pago es en MXN). Si `equivalencia_dr` es nula y la moneda del documento difiere de la del pago, el renglón se marca `sin_equivalencia` y **no se suma** (no se asume 1).
+- **Moneda extranjera.** Importes del CFDI × tipo de cambio del comprobante. En un cobro, la conversión usa el tipo de cambio del pago: pesos = (importe del documento ÷ `equivalencia_dr`) × tipo de cambio del pago (1 si el pago es en MXN). Si `equivalencia_dr` es nula y la moneda del documento difiere de la del pago, el renglón se marca `sin_equivalencia` y **no se suma** (no se asume 1). Cuando `moneda_dr` viene vacío (filas anteriores al detalle fiscal sin reprocesar) se toma la moneda del documento: una factura en USD cobrada con un REP en MXN sin equivalencia queda sin dato, no se suma como pesos.
 
 ### Desglose por tasa
 
@@ -68,7 +69,8 @@ Se acredita solo la erogación deducible y pagada. No se consideran, con su moti
 | `manual` | El contador lo excluyó (ver ajustes) |
 | `sin_equivalencia` / `sin_tipo_cambio` / `sin_proporcion` | Falta la equivalencia del documento, el tipo de cambio o el total para calcular el IVA: no se suma y se advierte (nunca se asume 1) |
 
-- Las reglas de efectivo y de uso aplican a lo que se compra o se paga; **no** a una nota de crédito recibida. El efectivo se mide en pesos: el total del CFDI (contado) o lo pagado (crédito).
+- **Nota de crédito recibida de un CFDI que nunca se acreditó** (compra en efectivo mayor a $2,000, uso S01/CP01/CN01) no resta IVA acreditable (LIVA 7: solo se ajusta lo que se acreditó): hereda el motivo `original_no_acreditable`. El motor la resuelve con los CFDI que el Egreso relaciona (`cfdi_relacionados`).
+- Las reglas de efectivo y de uso aplican a lo que se compra o se paga; **no** a una nota de crédito recibida (esa hereda la del original, arriba). El efectivo se mide en pesos: el total del CFDI (contado) o lo pagado (crédito).
 - La forma de pago de un REP (`FormaDePagoP`) no se guarda: un pago en efectivo de una factura a crédito no se detecta y la pantalla lo advierte (`forma_pago_rep`). Se completa en F5.4.
 - **La retención de IVA se entera aunque el IVA no sea acreditable** (LIVA 1-A): `retenciones_a_enterar` incluye la de los CFDI no acreditables por efectivo o por uso; solo la exclusión manual del contador la quita.
 
@@ -80,7 +82,7 @@ Un REP trae un nodo de pago por fecha; cada documento relacionado trae su propio
 
 ### Interruptor "no considerar IVA" y periodo reasignado
 
-Decisiones del contador, **por CFDI y dirección**, que se guardan en `iva_ajustes` (migración 050) y quedan en `auditoria` con usuario, fecha y motivo:
+Decisiones del contador, **por CFDI y dirección**, que se guardan en `iva_ajustes` (migración 050) y quedan en `auditoria` con usuario, fecha y motivo. **El ajuste y su auditoría se escriben en la misma transacción**: si la auditoría falla, el ajuste se deshace y la API responde 500.
 
 - **No considerar**: el CFDI sale de las sumas (queda listado como `manual`). Reversible.
 - **Periodo reasignado**: el efecto del CFDI se mueve a otro periodo `YYYY-MM` (por ejemplo, una factura que el proveedor emitió en octubre pero se pagó en septiembre). Aplica a todos sus eventos; en el periodo original aparece en "Periodo reasignado" y no suma; en el destino suma como si hubiera ocurrido ahí.
@@ -138,6 +140,8 @@ Tres tarjetas-pestaña, como la referencia: **Trasladado**, **Acreditable** y **
 | D-F5-5 | Los ajustes son por CFDI y dirección, siempre permitidos y auditados | Sin cierre de periodo hasta M2 | M2 agrega el bloqueo |
 | D-F5-6 | `no_objeto` se informa como base, nunca suma al IVA ni a la base gravada | Informativo | — |
 | D-F5-7 | Un Egreso se resta en su emisión aunque relacione un PPD aún no cobrado. Si el PPD se cobra después, el REP ya trae el saldo reducido y el IVA se resta dos veces: ese caso se corrige con "no considerar" | Se resta en la emisión | Abierta: F5.4 puede cruzar `cfdi_relacionados` con el PPD y su saldo |
+| D-F5-9 | Pendientes de la segunda revisión que van a F5.3/F5.4: conceptos con `ObjetoImp` 03/04/05 sin base (se sumarán como "objeto sin desglose"), cuadre de la retención contra el encabezado, aviso de `EquivalenciaDR` invertida, código propio para filas sin reprocesar, tolerancia de descuadre revisada y un tipo de cambio por defecto de 1 en el parser (problema previo del carril A) | Abiertos | F5.3 / F5.4 |
+| D-F5-10 | El redondeo es medio hacia arriba **por tarjeta** y el total es la suma de las tarjetas ya redondeadas (lo que se ve suma exacto) | Por tarjeta | — |
 | D-F5-8 | Los CFDI en moneda extranjera sin tipo de cambio no se suman (no se asume 1) | Excluidos con advertencia | — |
 
 ## Criterios de aceptación (con datos sembrados en la E2E)

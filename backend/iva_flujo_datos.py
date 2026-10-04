@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from typing import Optional
 
+import psycopg2.extras
+
 from . import db, iva_flujo
 
 _FILAS_IMPUESTOS = """
@@ -46,7 +48,8 @@ def cargar_eventos(empresa_id: str, rfc: str, periodo: str, ajustes: dict) -> li
                c.rfc_emisor, c.nombre_emisor, c.rfc_receptor, c.nombre_receptor, c.fecha_emision,
                c.subtotal, c.descuento, c.total, c.iva_trasladado, c.moneda, c.tipo_cambio,
                COALESCE(i.impuestos, '[]'::json) AS impuestos,
-               COALESCE(n.base, 0) AS no_objeto
+               COALESCE(n.base, 0) AS no_objeto,
+               COALESCE(rel.info, '[]'::json) AS relacionados_info
         FROM cfdi c
         LEFT JOIN LATERAL (
             SELECT {_FILAS_IMPUESTOS} AS impuestos FROM cfdi_impuestos WHERE cfdi_id = c.id AND impuesto = '002'
@@ -54,6 +57,16 @@ def cargar_eventos(empresa_id: str, rfc: str, periodo: str, ajustes: dict) -> li
         LEFT JOIN LATERAL (
             SELECT SUM(importe - descuento) AS base FROM cfdi_conceptos WHERE cfdi_id = c.id AND objeto_imp = '01'
         ) n ON TRUE
+        LEFT JOIN LATERAL (
+            -- CFDI que un Egreso relaciona: define si su aplicación ya está en un REP y si el original se acreditó
+            SELECT json_agg(json_build_object(
+                       'metodo_pago', o.metodo_pago, 'forma_pago', o.forma_pago, 'uso_cfdi', o.uso_cfdi,
+                       'total', o.total::text, 'moneda', o.moneda, 'tipo_cambio', o.tipo_cambio::text)) AS info
+            FROM jsonb_array_elements(COALESCE(c.cfdi_relacionados, '[]'::jsonb)) r,
+                 jsonb_array_elements_text(COALESCE(r->'uuids', '[]'::jsonb)) u
+            JOIN cfdi o ON o.empresa_id = c.empresa_id AND UPPER(o.uuid) = UPPER(u)
+            WHERE c.tipo_comprobante = 'E'
+        ) rel ON TRUE
         WHERE c.empresa_id = %s
           AND c.estado = 'vigente'
           AND c.tipo_comprobante IN ('I', 'E')
@@ -95,3 +108,50 @@ def cargar_eventos(empresa_id: str, rfc: str, periodo: str, ajustes: dict) -> li
             continue
         eventos.extend(iva_flujo.eventos_de_pago(p, doc, rfc))
     return eventos
+
+
+# ── Ajustes: el cambio y su auditoría van en la misma transacción ─────────────
+
+def _auditar(cur, usuario_id: str, accion: str, empresa_id: str, uuid: str, metadata: dict) -> None:
+    """Inserta en ``auditoria`` con el cursor de la transacción en curso. A diferencia de
+    ``auditoria.registrar_evento`` (que nunca falla), aquí un error sí deshace el ajuste:
+    el plan exige que excluir y reasignar queden siempre auditados."""
+    cur.execute(
+        """INSERT INTO auditoria (usuario_id, empresa_id, accion, entidad, entidad_id, metadata)
+           VALUES (%s, %s, %s, 'cfdi', %s, %s)""",
+        (usuario_id, empresa_id, accion, uuid, psycopg2.extras.Json(metadata)),
+    )
+
+
+def guardar_ajuste(empresa_id: str, uuid: str, direccion: str, accion: str,
+                   periodo_destino: Optional[str], motivo: str, usuario_id: str) -> None:
+    """Crea o reemplaza el ajuste de un CFDI y lo audita, todo o nada."""
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO iva_ajustes (empresa_id, cfdi_uuid, direccion, accion, periodo_destino, motivo, usuario_id)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s)
+                   ON CONFLICT (empresa_id, cfdi_uuid, direccion) DO UPDATE
+                   SET accion = EXCLUDED.accion, periodo_destino = EXCLUDED.periodo_destino, motivo = EXCLUDED.motivo,
+                       usuario_id = EXCLUDED.usuario_id, updated_at = NOW()""",
+                (empresa_id, uuid, direccion, accion, periodo_destino, motivo, usuario_id),
+            )
+            _auditar(cur, usuario_id, "iva_ajuste", empresa_id, uuid,
+                     {"direccion": direccion, "accion": accion, "periodo_destino": periodo_destino, "motivo": motivo})
+
+
+def quitar_ajuste(empresa_id: str, uuid: str, direccion: str, usuario_id: str) -> Optional[dict]:
+    """Retira un ajuste y lo audita, todo o nada. Devuelve el ajuste retirado o ``None`` si no existía."""
+    with db.get_conn() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                """DELETE FROM iva_ajustes WHERE empresa_id = %s AND cfdi_uuid = UPPER(%s) AND direccion = %s
+                   RETURNING accion, periodo_destino""",
+                (empresa_id, uuid, direccion),
+            )
+            fila = cur.fetchone()
+            if fila is None:
+                return None
+            _auditar(cur, usuario_id, "iva_ajuste_retirado", empresa_id, uuid.upper(),
+                     {"direccion": direccion, "accion": fila["accion"], "periodo_destino": fila["periodo_destino"]})
+            return dict(fila)

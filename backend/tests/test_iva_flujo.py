@@ -637,3 +637,117 @@ def test_aviso_de_forma_de_pago_del_rep_en_acreditable_a_credito():
     r = f.resumen(_construir([d], [pago("R1")]), "2026-09", {})
 
     assert "forma_pago_rep" in {a["codigo"] for a in r["advertencias"]}
+
+
+# ── Segunda revisión fiscal (I-1 a I-3 y cifras exactas) ─────────────────────
+
+def _rel(metodo_pago="PUE", forma_pago="03", uso_cfdi="G03", total="11600", moneda="MXN", tipo_cambio="1"):
+    return {"metodo_pago": metodo_pago, "forma_pago": forma_pago, "uso_cfdi": uso_cfdi,
+            "total": total, "moneda": moneda, "tipo_cambio": tipo_cambio}
+
+
+def test_doc_en_usd_con_pago_sin_moneda_dr_no_se_suma_como_pesos():
+    d = doc("U1", metodo_pago="PPD", moneda="USD", tipo_cambio=D("20"), total=D("1160"),
+            impuestos=[tras("0.16", 1000, 160)], iva_trasladado=D("160"))
+    p = pago("U1", importe="1160", moneda_dr=None, equivalencia_dr=None, impuestos_dr=[tras("0.16", 1000, 160)])
+
+    e = f.evento_de_pago(p, d, RFC)
+
+    assert "sin_equivalencia" in e["marcas"] and e["iva_total"] == D("0")           # no 160 como si fueran pesos
+
+
+def test_doc_en_mxn_con_pago_sin_moneda_dr_si_se_suma():
+    p = pago("U1", moneda_dr=None, equivalencia_dr=None)
+
+    e = f.evento_de_pago(p, doc("U1", metodo_pago="PPD", total=D("1160")), RFC)
+
+    assert "sin_equivalencia" not in e["marcas"] and e["iva_total"] == D("80")
+
+
+def _anticipo_trasladado(b_metodo):
+    """A (anticipo, enero) + B (factura final) + C (aplicación, marzo). B PUE o PPD."""
+    A = doc("A1", es_anticipo_sat=True, fecha_emision=date(2026, 1, 10), impuestos=[tras("0.16", 100000, 16000)],
+            iva_trasladado=D("16000"), subtotal=D("100000"), total=D("116000"))
+    B = doc("B1", metodo_pago=b_metodo, fecha_emision=date(2026, 3, 10), impuestos=[tras("0.16", 1000000, 160000)],
+            iva_trasladado=D("160000"), subtotal=D("1000000"), total=D("1160000"))
+    C = doc("C1", tipo_comprobante="E", forma_pago="30", fecha_emision=date(2026, 3, 10),
+            impuestos=[tras("0.16", 100000, 16000)], iva_trasladado=D("16000"), subtotal=D("100000"), total=D("116000"),
+            relacionados_info=[_rel(metodo_pago=b_metodo, total="1160000")])
+    return A, B, C
+
+
+def test_anticipo_con_factura_final_pue_da_16000_en_enero_y_144000_en_marzo():
+    A, B, C = _anticipo_trasladado("PUE")
+    ev = _construir([A, B, C])
+
+    enero, marzo = f.resumen(ev, "2026-01", {}), f.resumen(ev, "2026-03", {})
+
+    assert enero["trasladado"]["total"]["iva"]["total"] == D("16000.00")
+    assert marzo["trasladado"]["total"]["iva"]["total"] == D("144000.00")
+
+
+def test_anticipo_con_factura_final_ppd_no_resta_dos_veces_la_aplicacion():
+    A, B, C = _anticipo_trasladado("PPD")
+    rep = pago("B1", importe="1044000", fecha=date(2026, 3, 20), impuestos_dr=[tras("0.16", 900000, 144000)])    # el remanente
+    ev = _construir([A, B, C], [rep])
+
+    enero, marzo = f.resumen(ev, "2026-01", {}), f.resumen(ev, "2026-03", {})
+
+    assert enero["trasladado"]["total"]["iva"]["total"] == D("16000.00")
+    assert marzo["trasladado"]["total"]["iva"]["total"] == D("144000.00")                  # y no 128,000
+    total = enero["trasladado"]["total"]["iva"]["total"] + marzo["trasladado"]["total"]["iva"]["total"]
+    assert total == D("160000.00")                                                            # A + remanente de B = B
+    motivos = [r["motivo"] for r in f.detalle(ev, "2026-03", "trasladado", "no_considerados", {})["items"]]
+    assert motivos == ["aplicado_en_rep"]
+
+
+def test_anticipo_recibido_tambien_netea_del_lado_acreditable():
+    A = recibido("A1", es_anticipo_sat=True, fecha_emision=date(2026, 1, 10), impuestos=[tras("0.16", 100000, 16000)],
+                 iva_trasladado=D("16000"), subtotal=D("100000"), total=D("116000"))
+    B = recibido("B1", fecha_emision=date(2026, 3, 10), impuestos=[tras("0.16", 1000000, 160000)],
+                 iva_trasladado=D("160000"), subtotal=D("1000000"), total=D("1160000"))
+    C = recibido("C1", tipo_comprobante="E", forma_pago="30", fecha_emision=date(2026, 3, 10),
+                 impuestos=[tras("0.16", 100000, 16000)], iva_trasladado=D("16000"), subtotal=D("100000"), total=D("116000"),
+                 relacionados_info=[_rel(total="1160000")])
+    ev = _construir([A, B, C])
+
+    assert f.resumen(ev, "2026-01", {})["acreditable"]["total"]["iva"]["total"] == D("16000.00")
+    assert f.resumen(ev, "2026-03", {})["acreditable"]["total"]["iva"]["total"] == D("144000.00")
+
+
+def test_moneda_extranjera_1000_usd_con_160_de_iva_a_tc_20_son_3200_pesos():
+    e = f.eventos_de_documento(doc(moneda="USD", tipo_cambio=D("20"), subtotal=D("1000"), total=D("1160"),
+                                   impuestos=[tras("0.16", 1000, 160)], iva_trasladado=D("160")), RFC)[0]
+
+    assert e["iva_total"] == D("3200") and e["bases"]["16"] == D("20000")
+
+
+@pytest.mark.parametrize("original", [
+    _rel(forma_pago="01", total="11600"),                    # compra en efectivo: nunca se acreditó
+    _rel(uso_cfdi="S01"),
+    _rel(forma_pago="01", total="1000", moneda="USD", tipo_cambio="20"),     # 20,000 pesos en efectivo
+])
+def test_nota_de_credito_recibida_hereda_la_exclusion_del_original(original):
+    nc = recibido("NC1", tipo_comprobante="E", impuestos=[tras("0.16", 1000, 160)], iva_trasladado=D("160"),
+                  relacionados_info=[original])
+    e = f.eventos_de_documento(nc, RFC)[0]
+
+    assert "original_no_acreditable" in e["marcas"] and f.motivo_exclusion(e) == "original_no_acreditable"
+    assert f.resumen([e], "2026-09", {})["acreditable"]["total"]["iva"]["total"] == D("0.00")
+
+
+def test_nota_de_credito_recibida_de_un_original_acreditable_si_resta():
+    nc = recibido("NC1", tipo_comprobante="E", impuestos=[tras("0.16", 1000, 160)], iva_trasladado=D("160"),
+                  relacionados_info=[_rel(forma_pago="03", total="11600")])
+
+    e = f.eventos_de_documento(nc, RFC)[0]
+
+    assert f.motivo_exclusion(e) is None
+
+
+def test_la_herencia_de_la_exclusion_solo_aplica_al_acreditable():
+    nc = doc("NC1", tipo_comprobante="E", relacionados_info=[_rel(forma_pago="01", total="11600")])
+
+    e = f.eventos_de_documento(nc, RFC)[0]
+
+    assert f.motivo_exclusion(e) is None

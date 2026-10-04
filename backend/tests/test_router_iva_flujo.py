@@ -89,24 +89,30 @@ def _cfdi(**kw):
 
 @pytest.fixture
 def ajustes_db(con_acceso, monkeypatch):
-    estado = {"cfdi": _cfdi(), "ejecutados": [], "eventos": []}
+    estado = {"cfdi": _cfdi(), "guardados": []}
     monkeypatch.setattr(router.db, "query_one", lambda *a, **k: estado["cfdi"])
-    monkeypatch.setattr(router.db, "execute", lambda *a, **k: estado["ejecutados"].append(a))
-    monkeypatch.setattr(router, "registrar_evento", lambda *a, **k: estado["eventos"].append((a, k)))
+    monkeypatch.setattr(iva_flujo_datos, "guardar_ajuste", lambda *a: estado["guardados"].append(a))
     return estado
 
 
-def test_excluir_guarda_y_audita(ajustes_db):
+def test_excluir_guarda_con_el_motivo_limpio(ajustes_db):
     r = client.put(f"{BASE}/ajustes", json={"uuid": UUID.lower(), "direccion": "trasladado", "accion": "excluir", "motivo": " duplicado "})
 
     assert r.status_code == 200, r.text
     assert r.json() == {"uuid": UUID, "direccion": "trasladado", "accion": "excluir", "periodo_destino": None, "motivo": "duplicado"}
-    sql, params = ajustes_db["ejecutados"][0]
-    assert "iva_ajustes" in sql and params[:5] == ("emp-1", UUID, "trasladado", "excluir", None)
-    (args, kwargs) = ajustes_db["eventos"][0]
-    assert args[:2] == ("u1", "iva_ajuste")
-    assert kwargs["empresa_id"] == "emp-1" and kwargs["entidad_id"] == UUID
-    assert kwargs["metadata"]["motivo"] == "duplicado"
+    assert ajustes_db["guardados"] == [("emp-1", UUID, "trasladado", "excluir", None, "duplicado", "u1")]
+
+
+def test_si_la_auditoria_falla_el_ajuste_responde_500(ajustes_db, monkeypatch):
+    def _falla(*a):
+        raise RuntimeError("auditoría caída")
+
+    monkeypatch.setattr(iva_flujo_datos, "guardar_ajuste", _falla)
+    sin_propagar = TestClient(main.app, raise_server_exceptions=False)
+
+    r = sin_propagar.put(f"{BASE}/ajustes", json={"uuid": UUID, "direccion": "trasladado", "accion": "excluir", "motivo": "x"})
+
+    assert r.status_code == 500
 
 
 def test_reasignar_guarda_el_periodo_destino(ajustes_db):
@@ -126,7 +132,7 @@ def test_ajuste_invalido_es_422_y_no_escribe(ajustes_db, cuerpo):
     r = client.put(f"{BASE}/ajustes", json={"uuid": UUID, "direccion": "trasladado", "motivo": "x", **cuerpo})
 
     assert r.status_code == 422
-    assert ajustes_db["ejecutados"] == [] and ajustes_db["eventos"] == []
+    assert ajustes_db["guardados"] == []
 
 
 def test_reasignar_un_ppd_al_mes_de_su_emision_si_se_permite(ajustes_db):
@@ -146,7 +152,7 @@ def test_el_motivo_es_obligatorio(ajustes_db, motivo):
     r = client.put(f"{BASE}/ajustes", json=cuerpo)
 
     assert r.status_code == 422
-    assert ajustes_db["ejecutados"] == [] and ajustes_db["eventos"] == []
+    assert ajustes_db["guardados"] == []
 
 
 def test_cfdi_inexistente_o_de_otra_direccion_es_404(ajustes_db):
@@ -158,7 +164,7 @@ def test_cfdi_inexistente_o_de_otra_direccion_es_404(ajustes_db):
     tipo = client.put(f"{BASE}/ajustes", json={"uuid": UUID, "direccion": "trasladado", "accion": "excluir", "motivo": "x"})
 
     assert (inexistente.status_code, direccion.status_code, tipo.status_code) == (404, 404, 404)
-    assert ajustes_db["ejecutados"] == []
+    assert ajustes_db["guardados"] == []
 
 
 def test_uuid_demasiado_largo_es_422(ajustes_db):
@@ -167,20 +173,18 @@ def test_uuid_demasiado_largo_es_422(ajustes_db):
     assert r.status_code == 422
 
 
-def test_quitar_ajuste_lo_audita(con_acceso, monkeypatch):
-    eventos = []
-    monkeypatch.setattr(router.db, "query_one", lambda *a, **k: {"accion": "excluir", "periodo_destino": None})
-    monkeypatch.setattr(router, "registrar_evento", lambda *a, **k: eventos.append((a, k)))
+def test_quitar_ajuste_delega_con_el_usuario(con_acceso, monkeypatch):
+    visto = []
+    monkeypatch.setattr(iva_flujo_datos, "quitar_ajuste", lambda *a: visto.append(a) or {"accion": "excluir", "periodo_destino": None})
 
     r = client.delete(f"{BASE}/ajustes/trasladado/{UUID}")
 
     assert r.status_code == 204
-    assert eventos[0][0][:2] == ("u1", "iva_ajuste_retirado")
+    assert visto == [("emp-1", UUID, "trasladado", "u1")]
 
 
 def test_quitar_ajuste_inexistente_es_404(con_acceso, monkeypatch):
-    monkeypatch.setattr(router.db, "query_one", lambda *a, **k: None)
-    monkeypatch.setattr(router, "registrar_evento", lambda *a, **k: pytest.fail("no debía auditar"))
+    monkeypatch.setattr(iva_flujo_datos, "quitar_ajuste", lambda *a: None)
 
     assert client.delete(f"{BASE}/ajustes/trasladado/{UUID}").status_code == 404
     assert client.delete(f"{BASE}/ajustes/otra/{UUID}").status_code == 422

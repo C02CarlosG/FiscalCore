@@ -1,5 +1,6 @@
 """E2E del IVA base flujo contra Postgres real: tasas, crédito con REP 2.0 y 1.0, notas de
 crédito, anticipo, moneda extranjera, exclusiones, ajustes con auditoría y aislamiento."""
+import json
 from decimal import Decimal
 
 import pytest
@@ -130,6 +131,28 @@ def _sembrar(db, e):
                " SELECT id, 'retencion', '002', 'Tasa', 0.106667, 250, 26.67 FROM cfdi WHERE uuid = %s", (_uuid(25),))
 
 
+def _sembrar_anticipo_con_factura_ppd(db, e):
+    """Anticipo en enero (100,000 + 16,000), factura final PPD y su REP en febrero con el remanente
+    (144,000), y el egreso que aplica el anticipo (forma de pago 30) relacionado a la factura."""
+    _cfdi(db, e, 60, [_t("0.16", 100000, 16000)], es_anticipo_sat=True, fecha_emision="2026-01-10 10:00:00",
+          iva_trasladado="16000", subtotal="100000", total="116000")
+    _cfdi(db, e, 61, [_t("0.16", 1000000, 160000)], metodo_pago="PPD", forma_pago="99", fecha_emision="2026-01-20 10:00:00",
+          iva_trasladado="160000", subtotal="1000000", total="1160000")
+    _rep(db, e, 62, [(_uuid(61), 1044000, [("0.16", 900000, 144000)], "MXN", 1)], fecha="2026-02-15 12:00:00")
+    _cfdi(db, e, 63, [_t("0.16", 100000, 16000)], tipo_comprobante="E", forma_pago="30", fecha_emision="2026-02-15 12:05:00",
+          iva_trasladado="16000", subtotal="100000", total="116000",
+          cfdi_relacionados=json.dumps([{"tipo_relacion": "07", "uuids": [_uuid(61)]}]))
+
+
+def _sembrar_nota_de_credito_de_una_compra_en_efectivo(db, e):
+    """Compra en efectivo (no acreditable) y su nota de crédito: la nota no debe restar acreditable."""
+    _recibido(db, e, 70, [_t("0.16", 10000, 1600)], forma_pago="01", fecha_emision="2026-03-05 10:00:00",
+              iva_trasladado="1600", subtotal="10000", total="11600")
+    _recibido(db, e, 71, [_t("0.16", 1000, 160)], tipo_comprobante="E", fecha_emision="2026-03-06 10:00:00",
+              iva_trasladado="160", subtotal="1000", total="1160",
+              cfdi_relacionados=json.dumps([{"tipo_relacion": "01", "uuids": [_uuid(70)]}]))
+
+
 @pytest.fixture(scope="module")
 def entorno():
     from fastapi.testclient import TestClient
@@ -146,6 +169,8 @@ def entorno():
         assert r.status_code == 201, r.text
         empresa_id = r.json()["empresa_id"]
         _sembrar(db, empresa_id)
+        _sembrar_anticipo_con_factura_ppd(db, empresa_id)
+        _sembrar_nota_de_credito_de_una_compra_en_efectivo(db, empresa_id)
         yield db, client, headers, empresa_id
     finally:
         _limpiar(db)
@@ -355,3 +380,45 @@ def test_el_detalle_pagina(entorno):
     d = _detalle(entorno, "2026-09", "trasladado", "contado", por_pagina=2, pagina=2)
 
     assert d["total"] == 5 and d["pagina"] == 2 and len(d["items"]) == 2
+
+
+def test_anticipo_con_factura_final_ppd_no_descuenta_dos_veces(entorno):
+    enero = _resumen(entorno, "2026-01")["trasladado"]
+    febrero = _resumen(entorno, "2026-02")["trasladado"]
+
+    assert enero["total"]["iva"]["total"] == 16000.0                          # el anticipo, cuando se cobró
+    assert febrero["origenes"]["credito"]["iva"]["total"] == 144000.0         # el remanente de la factura, con ImpuestosDR
+    assert febrero["total"]["iva"]["total"] == 144000.0                       # la aplicación (C) no resta otra vez
+    assert enero["total"]["iva"]["total"] + febrero["total"]["iva"]["total"] == 160000.0
+    motivos = {i["uuid"]: i["motivo"] for i in _detalle(entorno, "2026-02", "trasladado", "no_considerados")["items"]}
+    assert motivos == {_uuid(63): "aplicado_en_rep"}
+
+
+def test_nota_de_credito_de_una_compra_en_efectivo_no_resta_acreditable(entorno):
+    r = _resumen(entorno, "2026-03")["acreditable"]
+
+    assert r["total"]["iva"]["total"] == 0.0 and r["origenes"]["notas_credito"]["iva"]["total"] == 0.0
+    motivos = {i["uuid"]: i["motivo"] for i in _detalle(entorno, "2026-03", "acreditable", "no_considerados")["items"]}
+    assert motivos == {_uuid(70): "efectivo", _uuid(71): "original_no_acreditable"}
+
+
+def test_si_la_auditoria_falla_el_ajuste_no_queda_guardado(entorno, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    import backend.main_api as main
+    from backend import iva_flujo_datos
+
+    db, _client, headers, empresa_id = entorno
+
+    def _falla(*a, **k):
+        raise RuntimeError("auditoría caída")
+
+    monkeypatch.setattr(iva_flujo_datos, "_auditar", _falla)
+    sin_propagar = TestClient(main.app, raise_server_exceptions=False)
+
+    r = sin_propagar.put(_url(entorno, "ajustes"), headers=headers,
+                         json={"uuid": _uuid(41), "direccion": "trasladado", "accion": "excluir", "motivo": "x"})
+
+    assert r.status_code == 500
+    n = db.query_one("SELECT COUNT(*) AS n FROM iva_ajustes WHERE empresa_id = %s", (empresa_id,))
+    assert n["n"] == 0                                           # el cambio se deshizo junto con la auditoría

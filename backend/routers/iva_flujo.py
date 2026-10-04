@@ -11,7 +11,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, field_validator
 
 from .. import db, iva_flujo, iva_flujo_datos
-from ..auditoria import registrar_evento
 from ..deps import empresa_or_404, get_current_user, validar_acceso_empresa
 
 router = APIRouter(tags=["IVA por flujo"])
@@ -103,21 +102,10 @@ async def guardar_ajuste(empresa_id: str, datos: AjusteIn, current_user: dict = 
         raise HTTPException(status_code=422, detail="el periodo destino es el mismo de la emisión")
 
     uuid = cfdi["uuid"].upper()
-    db.execute(
-        """INSERT INTO iva_ajustes (empresa_id, cfdi_uuid, direccion, accion, periodo_destino, motivo, usuario_id)
-           VALUES (%s, %s, %s, %s, %s, %s, %s)
-           ON CONFLICT (empresa_id, cfdi_uuid, direccion) DO UPDATE
-           SET accion = EXCLUDED.accion, periodo_destino = EXCLUDED.periodo_destino, motivo = EXCLUDED.motivo,
-               usuario_id = EXCLUDED.usuario_id, updated_at = NOW()""",
-        (empresa_id, uuid, datos.direccion, datos.accion, datos.periodo_destino, datos.motivo.strip(), current_user["user_id"]),
-    )
-    registrar_evento(
-        current_user["user_id"], "iva_ajuste", empresa_id=empresa_id, entidad="cfdi", entidad_id=uuid,
-        metadata={"direccion": datos.direccion, "accion": datos.accion,
-                  "periodo_destino": datos.periodo_destino, "motivo": datos.motivo.strip()},
-    )
+    iva_flujo_datos.guardar_ajuste(
+        empresa_id, uuid, datos.direccion, datos.accion, datos.periodo_destino, datos.motivo, current_user["user_id"])
     return {"uuid": uuid, "direccion": datos.direccion, "accion": datos.accion,
-            "periodo_destino": datos.periodo_destino, "motivo": datos.motivo.strip()}
+            "periodo_destino": datos.periodo_destino, "motivo": datos.motivo}
 
 
 @router.delete(_BASE + "/ajustes/{direccion}/{uuid}", status_code=204)
@@ -127,16 +115,8 @@ async def quitar_ajuste(empresa_id: str, direccion: Literal["trasladado", "acred
     validar_acceso_empresa(empresa_id, current_user)
     if len(uuid) > _UUID_MAX:
         raise HTTPException(status_code=404, detail="Ajuste no encontrado")
-    fila = db.query_one(
-        "DELETE FROM iva_ajustes WHERE empresa_id = %s AND cfdi_uuid = UPPER(%s) AND direccion = %s RETURNING accion, periodo_destino",
-        (empresa_id, uuid, direccion),
-    )
-    if not fila:
+    if iva_flujo_datos.quitar_ajuste(empresa_id, uuid, direccion, current_user["user_id"]) is None:
         raise HTTPException(status_code=404, detail="Ajuste no encontrado")
-    registrar_evento(
-        current_user["user_id"], "iva_ajuste_retirado", empresa_id=empresa_id, entidad="cfdi", entidad_id=uuid.upper(),
-        metadata={"direccion": direccion, "accion": fila["accion"], "periodo_destino": fila["periodo_destino"]},
-    )
 
 
 @router.get(_BASE + "/{periodo}")

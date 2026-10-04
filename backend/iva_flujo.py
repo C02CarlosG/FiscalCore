@@ -203,6 +203,31 @@ def _desglose_de_documento(doc: dict, k: Decimal) -> tuple[dict, Decimal, set]:
     return d, d["iva"]["total"], marcas
 
 
+def _no_acreditable_por_si_mismo(rel: dict) -> bool:
+    """El CFDI relacionado nunca se acreditó (efectivo mayor a $2,000 o uso sin efectos)."""
+    tc = _tc_documento({"moneda": rel.get("moneda"), "tipo_cambio": rel.get("tipo_cambio")}) or UNO
+    efectivo = rel.get("forma_pago") == "01" and _dec(rel.get("total")) * tc > UMBRAL_EFECTIVO
+    return efectivo or rel.get("uso_cfdi") in USOS_NO_ACREDITABLES
+
+
+def _marcas_por_originales(doc: dict, direccion: str) -> set:
+    """Marcas de un Egreso según los CFDI que relaciona (``relacionados_info``, que carga el SQL).
+
+    - ``aplicado_en_rep``: el egreso que aplica un anticipo (forma de pago 30) a una factura final
+      **PPD**: el REP de esa factura ya trae el remanente, así que restarlo otra vez lo descontaría
+      dos veces (anticipo + remanente = factura).
+    - ``original_no_acreditable``: una nota de crédito **recibida** de un CFDI que nunca se acreditó
+      no resta IVA acreditable (LIVA 7: solo se ajusta lo que se acreditó).
+    """
+    relacionados = doc.get("relacionados_info") or []
+    marcas: set = set()
+    if doc.get("forma_pago") == "30" and any(r.get("metodo_pago") == "PPD" for r in relacionados):
+        marcas.add("aplicado_en_rep")
+    if direccion == "acreditable" and any(_no_acreditable_por_si_mismo(r) for r in relacionados):
+        marcas.add("original_no_acreditable")
+    return marcas
+
+
 def eventos_de_documento(doc: dict, rfc: str) -> list[dict]:
     """Eventos que un CFDI causa por sí mismo: los PUE y las notas de crédito (en su emisión).
 
@@ -226,10 +251,20 @@ def eventos_de_documento(doc: dict, rfc: str) -> list[dict]:
             marcas.add("anticipo")
         if tipo == "E" and doc.get("forma_pago") == "30":
             marcas.add("aplicacion_anticipo")
+        if tipo == "E":
+            marcas |= _marcas_por_originales(doc, direccion)
         origen = "notas_credito" if tipo == "E" else "contado"
         eventos.append(_evento(doc, direccion, origen, doc["fecha_emision"], d, iva_total, marcas,
                                monto_efecto=_dec(doc.get("total")) * (tc or UNO)))
     return eventos
+
+
+def _factor_del_pago(pago: dict, doc: dict) -> Optional[Decimal]:
+    """Factor a pesos de un cobro. Si el pago no trae ``moneda_dr`` (filas anteriores al detalle
+    fiscal) se usa la moneda del documento: un CFDI en USD con un REP en MXN y sin equivalencia
+    queda sin dato, no se suma como si fueran pesos."""
+    return factor_a_pesos(pago.get("moneda_dr") or doc.get("moneda"), pago.get("equivalencia_dr"),
+                          pago.get("pago_moneda"), pago.get("pago_tipo_cambio"))
 
 
 def iva_de_pago(pago: dict, doc: dict) -> tuple[dict, Decimal, set]:
@@ -241,7 +276,7 @@ def iva_de_pago(pago: dict, doc: dict) -> tuple[dict, Decimal, set]:
     versión que además lee ``pago20:Totales``, ``ImpuestosP`` y ``ObjetoImpDR``.
     """
     marcas: set = set()
-    f = factor_a_pesos(pago.get("moneda_dr"), pago.get("equivalencia_dr"), pago.get("pago_moneda"), pago.get("pago_tipo_cambio"))
+    f = _factor_del_pago(pago, doc)
     if f is None:
         return _desglose_vacio(), CERO, {"sin_equivalencia"}
     if pago.get("impuestos_dr"):
@@ -267,7 +302,7 @@ def eventos_de_pago(pago: dict, doc: dict, rfc: str) -> list[dict]:
     if doc.get("tipo_comprobante") != "I" or doc.get("metodo_pago") != "PPD":
         return []             # un PUE ya causó en su emisión; solo el crédito se cobra por partes
     d, iva_total, marcas = iva_de_pago(pago, doc)
-    f = factor_a_pesos(pago.get("moneda_dr"), pago.get("equivalencia_dr"), pago.get("pago_moneda"), pago.get("pago_tipo_cambio"))
+    f = _factor_del_pago(pago, doc)
     pagado = _dec(pago.get("importe_pagado")) * (f if f is not None else CERO)
     eventos = []
     for direccion in _direcciones(doc, rfc):
@@ -293,7 +328,7 @@ MOTIVOS_QUE_CONSERVAN_RETENCION = frozenset({"efectivo", "uso_no_deducible"})
 
 def motivo_exclusion(ev: dict) -> Optional[str]:
     """Por qué un evento no se considera (regla automática), o ``None`` si se considera."""
-    for marca in ("sin_equivalencia", "sin_tipo_cambio", "sin_proporcion"):
+    for marca in ("sin_equivalencia", "sin_tipo_cambio", "sin_proporcion", "aplicado_en_rep", "original_no_acreditable"):
         if marca in ev["marcas"]:
             return marca
     if "pago_v1" in ev["marcas"] and PAGOS_V1_MODO == "excluir":
