@@ -303,21 +303,38 @@ def _factor_del_pago(pago: dict, doc: dict) -> Optional[Decimal]:
 
 
 def _equivalencia_invertida(pago: dict) -> bool:
-    """``True`` si la equivalencia del documento no cuadra con lo que el propio REP declara: la suma de
-    ``importe pagado / equivalencia`` de todos los documentos del pago debe ser el ``Monto`` del pago, en la moneda
-    del pago. Una equivalencia invertida (p. ej. 20 en lugar de 0.05) rompe esa igualdad por órdenes de magnitud;
-    un redondeo no. Sin ``Monto`` o sin la suma no hay con qué comparar y se da por buena."""
+    """``True`` si la equivalencia del documento no cuadra con lo que el propio REP declara.
+
+    El Anexo 20 (Pagos 2.0) exige ``Σ importe pagado / equivalencia ≤ Monto`` del pago, en la moneda del pago: un
+    ``Monto`` mayor es válido (remanente sin aplicar a documentos). Por eso solo se sospecha cuando la suma **excede** el
+    ``Monto`` (más la tolerancia) o es **menos de la mitad** de él: una equivalencia invertida (20 en lugar de 0.05) rompe
+    esa relación por órdenes de magnitud, un redondeo o un remanente no. Sin ``Monto`` o sin la suma no hay con qué
+    comparar y se da por buena. Nota: una equivalencia mala excluye todo el cobro de ese documento (y, si el REP trae varios
+    documentos con la misma equivalencia mala, todos)."""
     monto, suma = _dec(pago.get("pago_monto")), pago.get("suma_equivalente")
     if monto <= 0 or suma is None:
         return False
     suma = _dec(suma)
-    return abs(suma - monto) > max(TOLERANCIA_DESCUADRE * max(1, int(pago.get("n_relaciones") or 1)), monto * TOLERANCIA_RELATIVA_MONTO)
+    tolerancia = max(TOLERANCIA_DESCUADRE * max(1, int(pago.get("n_relaciones") or 1)), monto * TOLERANCIA_RELATIVA_MONTO)
+    return suma > monto + tolerancia or suma < monto / 2
 
 
 def _doc_tiene_iva(doc: dict) -> bool:
+    """El CFDI pagado declara IVA trasladado: en el encabezado, o con cualquier renglón de traslado de IVA (incluidos los de
+    tasa 0 % y exento: un ObjetoImpDR 01/03 sobre ellos es una contradicción, no «no objeto»)."""
     return _dec(doc.get("iva_trasladado")) != 0 or any(
-        i.get("impuesto") == IVA and i.get("ambito") == "traslado" and i.get("tipo_factor") != "Exento"
-        and _dec(i.get("importe")) != 0 for i in doc.get("impuestos") or [])
+        i.get("impuesto") == IVA and i.get("ambito") == "traslado" for i in doc.get("impuestos") or [])
+
+
+def _estimado_de_excluido(pago: dict, doc: dict) -> tuple[dict, Decimal]:
+    """Desglose e IVA **estimados** de un cobro excluido por equivalencia sospechosa: proporción pagada del documento con el
+    tipo de cambio del propio CFDI (no se usa la equivalencia dudosa). Solo informativo: el cobro está excluido, así que no
+    suma a lo considerado, pero el renglón y ``no_considerados`` muestran cuánto IVA está en juego."""
+    tc, total = _tc_documento(doc), _dec(doc.get("total"))
+    if tc is None or total <= 0:
+        return _desglose_vacio(), CERO
+    d, iva_total, _ = _desglose_de_documento(doc, _dec(pago.get("importe_pagado")) / total * tc)
+    return d, iva_total
 
 
 def iva_de_pago(pago: dict, doc: dict) -> tuple[dict, Decimal, set]:
@@ -329,10 +346,12 @@ def iva_de_pago(pago: dict, doc: dict) -> tuple[dict, Decimal, set]:
     Después, según ``ObjetoImpDR`` del documento pagado (``objeto_imp_dr``):
 
     - ``01`` (no objeto) y ``04`` (sí objeto y no causa impuesto): lo pagado es base sin IVA, en ``no_objeto``
-      (el 04 se mezcla con lo no objeto, que tampoco causa IVA). Si el documento sí trae IVA el REP se contradice
-      con el CFDI que paga: se marca ``objeto_imp_inconsistente`` y se calcula por proporción del documento.
-    - ``03`` (sí objeto y no obligado a desglose) sin ``ImpuestosDR``: no hay IVA que sumar; lo pagado va como base
-      en ``otras`` con la marca ``objeto_sin_desglose``. Nada se aproxima.
+      (el 04 se mezcla con lo no objeto, que tampoco causa IVA). Si el documento declara IVA (en el encabezado o con
+      cualquier renglón de traslado, también a tasa 0 % o exento) el REP se contradice con el CFDI que paga: se marca
+      ``objeto_imp_inconsistente`` y se calcula por proporción del documento, que reparte la base en su tasa.
+    - ``03`` (sí objeto y no obligado a desglose) sin ``ImpuestosDR``: si el CFDI pagado no trae IVA no hay IVA que sumar y lo
+      pagado va como base en ``otras`` con la marca ``objeto_sin_desglose`` (nada se aproxima); si sí lo trae, igual que en
+      01/04: ``objeto_imp_inconsistente`` y proporción del documento.
     - con REP 2.0 y ``ImpuestosDR``: el desglose del documento relacionado.
     - sin ``ImpuestosDR`` (Pagos 1.0, o 2.0 sin desglose): se aproxima por la proporción ``importe pagado / total``.
 
@@ -344,7 +363,8 @@ def iva_de_pago(pago: dict, doc: dict) -> tuple[dict, Decimal, set]:
     if f is None:
         return _desglose_vacio(), CERO, {"sin_equivalencia"}
     if _equivalencia_invertida(pago):
-        return _desglose_vacio(), CERO, {"equivalencia_sospechosa"}
+        d, iva_estimado = _estimado_de_excluido(pago, doc)
+        return d, iva_estimado, {"equivalencia_sospechosa"}
     tc_doc = _tc_documento(doc)
     if tc_doc is not None and not (Decimal("0.5") <= f / tc_doc <= Decimal("2")):
         marcas.add("tc_distante")                  # solo advierte: el REP es la fuente y cuadró consigo mismo
@@ -356,9 +376,11 @@ def iva_de_pago(pago: dict, doc: dict) -> tuple[dict, Decimal, set]:
             return d, CERO, marcas
         marcas.add("objeto_imp_inconsistente")
     elif objeto == "03" and not pago.get("impuestos_dr"):
-        d = _desglose_vacio()
-        d["bases"]["otras"] = _dec(pago.get("importe_pagado")) * f
-        return d, CERO, marcas | {"objeto_sin_desglose"}
+        if not _doc_tiene_iva(doc):
+            d = _desglose_vacio()
+            d["bases"]["otras"] = _dec(pago.get("importe_pagado")) * f
+            return d, CERO, marcas | {"objeto_sin_desglose"}
+        marcas.add("objeto_imp_inconsistente")      # el CFDI pagado sí trae IVA: el REP se contradice
     if pago.get("impuestos_dr") and "objeto_imp_inconsistente" not in marcas:
         d = escalar(desglose(pago["impuestos_dr"]), f)
         return d, d["iva"]["total"], marcas

@@ -102,14 +102,11 @@ def _cargar(empresa_id: str, rfc: str, desde: str, hasta: str, reasignados: list
     pagos = db.query_all(
         f"""
         SELECT pc.id AS pago_id, pc.uuid_cfdi_pago AS uuid_pago, pc.fecha_pago, pc.version_pago, pc.monto AS pago_monto,
-               (SELECT SUM(x.importe_pagado / COALESCE(NULLIF(x.equivalencia_dr, 0), 1))::text
-                FROM pagos_relaciones x WHERE x.pago_id = pc.id) AS suma_equivalente,
+               agg.suma_equivalente, agg.n_relaciones, np.n_pagos_rep,
                pc.moneda AS pago_moneda, pc.tipo_cambio AS pago_tipo_cambio, rep.estado AS pago_estado,
                pr.cfdi_uuid, pr.parcialidad, pr.importe_pagado, pr.moneda_dr, pr.equivalencia_dr, pr.objeto_imp_dr,
                COALESCE(ri.impuestos, '[]'::json) AS impuestos_dr,
                COALESCE(ip.impuestos, '[]'::json) AS impuestos_p,
-               (SELECT COUNT(*) FROM pagos_relaciones x WHERE x.pago_id = pc.id) AS n_relaciones,
-               (SELECT COUNT(*) FROM pagos_cfdi y WHERE y.cfdi_id = pc.cfdi_id) AS n_pagos_rep,
                CASE WHEN tot.cfdi_id IS NULL THEN NULL ELSE jsonb_build_object(
                    'total_traslados_iva16', tot.total_traslados_iva16::text,
                    'total_traslados_iva8', tot.total_traslados_iva8::text) END AS totales
@@ -117,6 +114,12 @@ def _cargar(empresa_id: str, rfc: str, desde: str, hasta: str, reasignados: list
         JOIN pagos_cfdi pc ON pc.id = pr.pago_id
         JOIN cfdi rep ON rep.id = pc.cfdi_id
         LEFT JOIN cfdi_pagos_totales tot ON tot.cfdi_id = pc.cfdi_id
+        CROSS JOIN LATERAL (
+            SELECT SUM(x.importe_pagado / COALESCE(NULLIF(x.equivalencia_dr, 0), 1))::text AS suma_equivalente,
+                   COUNT(*) AS n_relaciones
+            FROM pagos_relaciones x WHERE x.pago_id = pc.id
+        ) agg
+        CROSS JOIN LATERAL (SELECT COUNT(*) AS n_pagos_rep FROM pagos_cfdi y WHERE y.cfdi_id = pc.cfdi_id) np
         LEFT JOIN LATERAL (
             SELECT {_FILAS_IMPUESTOS} AS impuestos FROM pagos_impuestos WHERE pago_id = pc.id AND impuesto = '002'
         ) ip ON TRUE

@@ -829,7 +829,10 @@ def test_equivalencia_invertida_contra_el_monto_del_rep_se_excluye():
 
     e = f.evento_de_pago(p, d, RFC)
 
-    assert e["iva_total"] == 0 and f.motivo_exclusion(e) == "equivalencia_sospechosa"
+    assert f.motivo_exclusion(e) == "equivalencia_sospechosa"
+    assert e["iva_total"] == D("1600")                  # IVA estimado en juego (proporción con el TC del CFDI): se muestra, no se suma
+    res = f.resumen([e], "2026-09", {})
+    assert res["trasladado"]["total"]["total"] == 0 and res["trasladado"]["no_considerados"]["iva"] == D("1600.00")
     assert "equivalencia_sospechosa" in {a["codigo"] for a in f.resumen([e], "2026-09", {})["advertencias"]}
 
 
@@ -935,7 +938,8 @@ def test_objeto_imp_dr_01_por_error_sobre_un_cfdi_con_iva_se_marca_y_usa_la_prop
 
 
 def test_objeto_imp_dr_03_sin_desglose_es_base_en_otras_con_su_marca():
-    e = f.evento_de_pago(pago("U1", importe="1000", objeto_imp_dr="03", impuestos_dr=[]), _ppd(total=D("1160")), RFC)
+    sin_iva = _ppd(iva_trasladado=D("0"), impuestos=[], total=D("1000"))
+    e = f.evento_de_pago(pago("U1", importe="1000", objeto_imp_dr="03", impuestos_dr=[]), sin_iva, RFC)
 
     assert e["iva_total"] == 0 and e["bases"]["otras"] == D("1000")
     assert "objeto_sin_desglose" in e["marcas"] and "aproximado" not in e["marcas"]
@@ -971,3 +975,40 @@ def test_aplicacion_de_anticipo_tiene_su_aviso():
     avisos = {a["codigo"] for a in f.resumen(f.eventos_de_documento(d, RFC), "2026-09", {})["advertencias"]}
 
     assert "aplicacion_anticipo" in avisos
+
+
+def test_monto_mayor_que_la_suma_es_un_remanente_valido_y_no_se_excluye():
+    d = doc("U1", metodo_pago="PPD", total=D("1160"))
+    p = pago("U1", importe="1160", pago_monto=D("1500"), suma_equivalente="1160", impuestos_dr=[tras("0.16", 1000, 160)])
+
+    e = f.evento_de_pago(p, d, RFC)
+
+    assert f.motivo_exclusion(e) is None and e["iva_total"] == D("160")
+
+
+@pytest.mark.parametrize("suma,monto,sospechosa", [
+    ("1160", "1160", False), ("1160", "1500", False), ("700", "1160", False),     # exacto, remanente, algo menor
+    ("1500", "1160", True),                                                       # la suma excede el Monto
+    ("2.9", "1160", True),                                                        # menos de la mitad: inversión
+])
+def test_limites_de_la_validacion_de_la_equivalencia(suma, monto, sospechosa):
+    d = doc("U1", metodo_pago="PPD", total=D("1160"))
+    p = pago("U1", importe="580", pago_monto=D(monto), suma_equivalente=suma)
+
+    assert (f.motivo_exclusion(f.evento_de_pago(p, d, RFC)) == "equivalencia_sospechosa") is sospechosa
+
+
+def test_objeto_imp_dr_03_sobre_un_cfdi_con_iva_es_inconsistente():
+    e = f.evento_de_pago(pago("U1", importe="580", objeto_imp_dr="03", impuestos_dr=[]), _ppd(), RFC)
+
+    assert "objeto_imp_inconsistente" in e["marcas"] and "objeto_sin_desglose" not in e["marcas"]
+    assert e["iva_total"] == D("80")
+
+
+@pytest.mark.parametrize("renglon,clave", [(tras("0.00", 1000, 0), "0"), (imp("traslado", "002", "Exento", None, 1000, 0), "exento")])
+def test_objeto_imp_dr_01_sobre_un_cfdi_a_tasa_cero_o_exento_reparte_la_base_en_su_tasa(renglon, clave):
+    d = _ppd(iva_trasladado=D("0"), impuestos=[renglon], total=D("1000"))
+    e = f.evento_de_pago(pago("U1", importe="500", objeto_imp_dr="01"), d, RFC)
+
+    assert "objeto_imp_inconsistente" in e["marcas"] and e["bases"]["no_objeto"] == 0
+    assert e["bases"][clave] == D("500") and e["iva_total"] == 0

@@ -180,12 +180,12 @@ Ejemplos de la revisión fiscal que deben salir exactos:
 - **CFDI sin desglose guardado** (anteriores a la migración 028): el IVA sale del encabezado y la base de
   `subtotal − descuento − no objeto`, en la tasa que dicta iva/base (16 %, 8 % u otras). Se avisa con `sin_desglose`.
 - **Retención solo en el encabezado:** se usa y se marca `retencion_sin_desglose` (distinta de `descuadre_retencion`).
-- **Pendiente para F5.4:** tratar `equivalencia_sospechosa` como `sin_equivalencia` cuando el cociente con el
-  tipo de cambio salga de [0.5, 2], y avisos informativos para las marcas `anticipo` y `aplicacion_anticipo`.
+- **Hecho en F5.4:** la equivalencia invertida se detecta con el `Monto` del propio REP (el cociente contra el tipo de cambio del
+  CFDI solo advierte con `tc_distante`) y hay avisos informativos para `anticipo` y `aplicacion_anticipo`.
 
 ## Notas de F5.4
 
-- **`equivalencia_sospechosa` ya no suma**: si el factor a pesos del pago sale de [0.5, 2] respecto al tipo de cambio del CFDI (equivalencia invertida), se trata como `sin_equivalencia` (no se suma, se advierte) en vez de sumar un IVA cientos de veces menor.
+- **`equivalencia_sospechosa` ya no suma**: si `Σ importe/equivalencia` de los documentos del pago excede el `Monto` del REP o es menos de su mitad (equivalencia invertida), el cobro no se suma y se advierte, en vez de sumar un IVA cientos de veces menor. Un `Monto` mayor que la suma es válido (remanente sin aplicar, Anexo 20). Lo excluido muestra un **IVA estimado** por proporción con el tipo de cambio del CFDI, solo informativo. Una equivalencia mala excluye todo el cobro de ese documento.
 - **Anticipos**: aviso informativo `anticipo` (el IVA se causa al cobrar y la aplicación forma de pago 30 lo resta).
 - **Etiquetas del frontend** para las marcas nuevas (`descuadre_rep`, `retencion_sin_desglose`, `descuadre_retencion`, `equivalencia_sospechosa`, `forma_pago_rep`).
 - **Sigue abierto**: conceptos con `ObjetoImp` 03/04/05 sin base en `cfdi_impuestos` (M-1, "objeto sin desglose") y D-F5-7 (Egreso contra PPD sin cobrar).
