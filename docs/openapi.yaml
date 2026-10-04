@@ -1477,9 +1477,9 @@ paths:
       summary: IVA del ejercicio mes por mes (flujo de efectivo)
       description: |
         Trasladado cobrado, acreditable pagado y resultado de cada mes, calculados con
-        las mismas funciones que la cedula de IVA (`/cedula-iva/{periodo}`), por lo que
-        coinciden con ella. Hasta que se incorporen las retenciones el IVA retenido es 0
-        y el factor de prorrateo es 1 (`iva_retenido_incluido: false`). Con `periodo`,
+        el mismo motor (`iva_flujo`) que la cedula de IVA (`/cedula-iva/{periodo}`) y la
+        pantalla de IVA base flujo, por lo que coinciden con ellas. Incluye las retenciones de
+        IVA a favor (`iva_retenido_incluido: true`); el factor de prorrateo es 1. Con `periodo`,
         los meses posteriores salen en cero. `totales` trae `total_a_cargo` y `total_a_favor`
         por separado: no se compensa un mes a favor contra otro a cargo (LIVA 6).
       parameters:
@@ -2875,12 +2875,18 @@ paths:
       tags: [Reportes]
       summary: Cédula mensual de IVA por flujo de efectivo
       description: |
-        IVA trasladado, acreditable (con prorrateo Art. 5-V), resultado del
+        IVA trasladado, acreditable (con prorrateo Art. 5-V), retenciones, resultado del
         periodo y comparativo contra el IVA devengado (base DIOT). Art. 1-B LIVA.
+        Sale del mismo motor (`iva_flujo`) que la pantalla de IVA base flujo y el IVA anual del Inicio.
+        `trasladado` y `acreditable` traen `no_considerados` (CFDI e IVA que el motor dejo fuera, con
+        `por_motivo`) y `reasignados` (movidos a otro periodo por un ajuste); `excluido_efectivo` se
+        conserva por compatibilidad. `iva_retenido` son las retenciones a favor y `retenciones_a_enterar`
+        las que la empresa debe enterar. `advertencias` lista las limitaciones del calculo con su
+        numero de CFDI.
       parameters:
         - $ref: '#/components/parameters/EmpresaId'
         - { name: periodo, in: path, required: true, schema: { type: string, pattern: '^\d{4}-(0[1-9]|1[0-2])$' }, example: "2024-01" }
-        - { name: factor, in: query, schema: { type: number, default: 1.0 }, description: "Factor de prorrateo (Art. 5-V); 1.0 = 100% gravado" }
+        - { name: factor, in: query, schema: { type: number, minimum: 0, maximum: 1, default: 1.0 }, description: "Factor de prorrateo (Art. 5-V); 1.0 = 100% gravado" }
       responses:
         '200':
           description: Cédula de IVA del periodo
@@ -2888,12 +2894,31 @@ paths:
             application/json:
               schema:
                 type: object
+                properties:
+                  empresa_id: { type: string }
+                  periodo: { type: string }
+                  trasladado: { type: object, additionalProperties: true }
+                  acreditable: { type: object, additionalProperties: true }
+                  iva_retenido: { type: number }
+                  retenciones_a_enterar: { type: number }
+                  resultado: { type: object, additionalProperties: true }
+                  comparativo_sat: { type: object, additionalProperties: true }
+                  advertencias:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        codigo: { type: string }
+                        mensaje: { type: string }
+                        cfdi: { type: integer, nullable: true }
         '401':
           $ref: '#/components/responses/UnauthorizedError'
         '403':
           $ref: '#/components/responses/ForbiddenError'
+        '404':
+          description: Empresa no encontrada
         '422':
-          description: Periodo con formato inválido (se espera YYYY-MM)
+          description: Periodo con formato inválido (se espera YYYY-MM) o factor fuera de 0 a 1
           content:
             application/json:
               schema:
