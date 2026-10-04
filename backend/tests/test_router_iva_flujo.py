@@ -110,7 +110,7 @@ def test_excluir_guarda_y_audita(ajustes_db):
 
 
 def test_reasignar_guarda_el_periodo_destino(ajustes_db):
-    r = client.put(f"{BASE}/ajustes", json={"uuid": UUID, "direccion": "trasladado", "accion": "reasignar", "periodo_destino": "2026-10"})
+    r = client.put(f"{BASE}/ajustes", json={"uuid": UUID, "direccion": "trasladado", "accion": "reasignar", "periodo_destino": "2026-10", "motivo": "se cobró en octubre"})
 
     assert r.status_code == 200 and r.json()["periodo_destino"] == "2026-10"
 
@@ -123,7 +123,7 @@ def test_reasignar_guarda_el_periodo_destino(ajustes_db):
     {"accion": "inventar"},
 ])
 def test_ajuste_invalido_es_422_y_no_escribe(ajustes_db, cuerpo):
-    r = client.put(f"{BASE}/ajustes", json={"uuid": UUID, "direccion": "trasladado", **cuerpo})
+    r = client.put(f"{BASE}/ajustes", json={"uuid": UUID, "direccion": "trasladado", "motivo": "x", **cuerpo})
 
     assert r.status_code == 422
     assert ajustes_db["ejecutados"] == [] and ajustes_db["eventos"] == []
@@ -132,25 +132,37 @@ def test_ajuste_invalido_es_422_y_no_escribe(ajustes_db, cuerpo):
 def test_reasignar_un_ppd_al_mes_de_su_emision_si_se_permite(ajustes_db):
     ajustes_db["cfdi"] = _cfdi(metodo_pago="PPD")
 
-    r = client.put(f"{BASE}/ajustes", json={"uuid": UUID, "direccion": "trasladado", "accion": "reasignar", "periodo_destino": "2026-09"})
+    r = client.put(f"{BASE}/ajustes", json={"uuid": UUID, "direccion": "trasladado", "accion": "reasignar", "periodo_destino": "2026-09", "motivo": "x"})
 
     assert r.status_code == 200          # un PPD tiene un efecto por cada pago: no hay un solo mes natural
 
 
+@pytest.mark.parametrize("motivo", [None, "", "   "])
+def test_el_motivo_es_obligatorio(ajustes_db, motivo):
+    cuerpo = {"uuid": UUID, "direccion": "trasladado", "accion": "excluir"}
+    if motivo is not None:
+        cuerpo["motivo"] = motivo
+
+    r = client.put(f"{BASE}/ajustes", json=cuerpo)
+
+    assert r.status_code == 422
+    assert ajustes_db["ejecutados"] == [] and ajustes_db["eventos"] == []
+
+
 def test_cfdi_inexistente_o_de_otra_direccion_es_404(ajustes_db):
     ajustes_db["cfdi"] = None
-    inexistente = client.put(f"{BASE}/ajustes", json={"uuid": UUID, "direccion": "trasladado", "accion": "excluir"})
+    inexistente = client.put(f"{BASE}/ajustes", json={"uuid": UUID, "direccion": "trasladado", "accion": "excluir", "motivo": "x"})
     ajustes_db["cfdi"] = _cfdi(rfc_emisor="OTRO010101AAA")        # la empresa no es la emisora
-    direccion = client.put(f"{BASE}/ajustes", json={"uuid": UUID, "direccion": "trasladado", "accion": "excluir"})
+    direccion = client.put(f"{BASE}/ajustes", json={"uuid": UUID, "direccion": "trasladado", "accion": "excluir", "motivo": "x"})
     ajustes_db["cfdi"] = _cfdi(tipo_comprobante="P")
-    tipo = client.put(f"{BASE}/ajustes", json={"uuid": UUID, "direccion": "trasladado", "accion": "excluir"})
+    tipo = client.put(f"{BASE}/ajustes", json={"uuid": UUID, "direccion": "trasladado", "accion": "excluir", "motivo": "x"})
 
     assert (inexistente.status_code, direccion.status_code, tipo.status_code) == (404, 404, 404)
     assert ajustes_db["ejecutados"] == []
 
 
 def test_uuid_demasiado_largo_es_422(ajustes_db):
-    r = client.put(f"{BASE}/ajustes", json={"uuid": "X" * 40, "direccion": "trasladado", "accion": "excluir"})
+    r = client.put(f"{BASE}/ajustes", json={"uuid": "X" * 40, "direccion": "trasladado", "accion": "excluir", "motivo": "x"})
 
     assert r.status_code == 422
 
@@ -186,7 +198,7 @@ def test_sin_acceso_es_403(monkeypatch):
             ("get", f"{BASE}/2026-09", {}),
             ("get", f"{BASE}/2026-09/detalle?direccion=trasladado&origen=contado", {}),
             ("get", f"{BASE}/ajustes", {}),
-            ("put", f"{BASE}/ajustes", {"json": {"uuid": UUID, "direccion": "trasladado", "accion": "excluir"}}),
+            ("put", f"{BASE}/ajustes", {"json": {"uuid": UUID, "direccion": "trasladado", "accion": "excluir", "motivo": "x"}}),
             ("delete", f"{BASE}/ajustes/trasladado/{UUID}", {}),
         ):
             assert getattr(client, metodo)(ruta, **kw).status_code == 403, (metodo, ruta)

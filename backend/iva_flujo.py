@@ -11,7 +11,7 @@ importe es ``Decimal`` en pesos; el redondeo a centavos se hace solo al resumir.
 from __future__ import annotations
 
 from datetime import date, datetime
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, Optional
 
 CENTAVOS = Decimal("0.01")
@@ -37,7 +37,8 @@ def _dec(valor: Any) -> Decimal:
 
 
 def _q(valor: Decimal) -> Decimal:
-    return valor.quantize(CENTAVOS)
+    """Centavos, medio hacia arriba (no al par)."""
+    return valor.quantize(CENTAVOS, rounding=ROUND_HALF_UP)
 
 
 def _mes(fecha: Any) -> str:
@@ -51,11 +52,13 @@ def llave(uuid: Any) -> str:
     return str(uuid or "").upper()
 
 
-def _tc_documento(doc: dict) -> Decimal:
-    if (doc.get("moneda") or "MXN") == "MXN":
+def _tc_documento(doc: dict) -> Optional[Decimal]:
+    """Tipo de cambio a pesos del comprobante. En MXN (o XXX, sin moneda) es 1; en moneda
+    extranjera sin tipo de cambio no se adivina: devuelve ``None``."""
+    if (doc.get("moneda") or "MXN") in ("MXN", "XXX"):
         return UNO
     tc = _dec(doc.get("tipo_cambio"))
-    return tc if tc > 0 else UNO
+    return tc if tc > 0 else None
 
 
 # ── desglose por tasa ─────────────────────────────────────────────────────────
@@ -166,7 +169,9 @@ def _evento(doc: dict, direccion: str, origen: str, fecha_efecto: Any, d: dict, 
         "uso_cfdi": doc.get("uso_cfdi"),
         "contraparte_rfc": rfc_c,
         "contraparte": nombre_c,
-        "total_documento": _dec(doc.get("total")) * _tc_documento(doc),
+        "total_documento": _dec(doc.get("total")) * (_tc_documento(doc) or UNO),
+        # Lo que se mide contra el umbral de efectivo: el total del CFDI (contado) o lo pagado (crédito).
+        "monto_efecto": extra.get("monto_efecto"),
         "bases": d["bases"],
         "iva": d["iva"],
         "retencion": d["retencion"],
@@ -211,64 +216,92 @@ def eventos_de_documento(doc: dict, rfc: str) -> list[dict]:
     if tipo == "I" and doc.get("metodo_pago") != "PUE":
         return []
     eventos = []
+    tc = _tc_documento(doc)
     for direccion in _direcciones(doc, rfc):
-        d, iva_total, marcas = _desglose_de_documento(doc, _tc_documento(doc))
+        if tc is None:
+            d, iva_total, marcas = _desglose_vacio(), CERO, {"sin_tipo_cambio"}
+        else:
+            d, iva_total, marcas = _desglose_de_documento(doc, tc)
         if doc.get("es_anticipo_sat"):
             marcas.add("anticipo")
         if tipo == "E" and doc.get("forma_pago") == "30":
             marcas.add("aplicacion_anticipo")
         origen = "notas_credito" if tipo == "E" else "contado"
-        eventos.append(_evento(doc, direccion, origen, doc["fecha_emision"], d, iva_total, marcas))
+        eventos.append(_evento(doc, direccion, origen, doc["fecha_emision"], d, iva_total, marcas,
+                               monto_efecto=_dec(doc.get("total")) * (tc or UNO)))
+    return eventos
+
+
+def iva_de_pago(pago: dict, doc: dict) -> tuple[dict, Decimal, set]:
+    """Desglose, IVA total y marcas de **un** cobro/pago de un documento PPD, en pesos.
+
+    Es la única función que decide cómo se obtiene el IVA de un pago: con REP 2.0 usa los
+    impuestos del documento relacionado (``ImpuestosDR``); sin ellos (Pagos 1.0, o 2.0 sin
+    desglose) aproxima por la proporción ``importe pagado / total``. F5.4 la sustituye por la
+    versión que además lee ``pago20:Totales``, ``ImpuestosP`` y ``ObjetoImpDR``.
+    """
+    marcas: set = set()
+    f = factor_a_pesos(pago.get("moneda_dr"), pago.get("equivalencia_dr"), pago.get("pago_moneda"), pago.get("pago_tipo_cambio"))
+    if f is None:
+        return _desglose_vacio(), CERO, {"sin_equivalencia"}
+    if pago.get("impuestos_dr"):
+        d = escalar(desglose(pago["impuestos_dr"]), f)
+        return d, d["iva"]["total"], marcas
+    total = _dec(doc.get("total"))
+    if total <= 0:
+        return _desglose_vacio(), CERO, {"sin_proporcion"}
+    k = _dec(pago.get("importe_pagado")) / total
+    d, iva_total, marcas_doc = _desglose_de_documento(doc, k * f)
+    marcas |= marcas_doc | {"aproximado"}
+    if pago.get("version_pago") == "1.0":
+        marcas.add("pago_v1")
+    return d, iva_total, marcas
+
+
+def eventos_de_pago(pago: dict, doc: dict, rfc: str) -> list[dict]:
+    """Eventos de cobro (trasladado) o pago (acreditable) de un documento PPD, en la fecha del
+    pago; uno por dirección (una autofactura causa en ambas). Un REP o un documento cancelado,
+    y un documento que no es un Ingreso PPD, no producen eventos."""
+    if pago.get("pago_estado") != "vigente" or doc.get("estado") != "vigente":
+        return []
+    if doc.get("tipo_comprobante") != "I" or doc.get("metodo_pago") != "PPD":
+        return []             # un PUE ya causó en su emisión; solo el crédito se cobra por partes
+    d, iva_total, marcas = iva_de_pago(pago, doc)
+    f = factor_a_pesos(pago.get("moneda_dr"), pago.get("equivalencia_dr"), pago.get("pago_moneda"), pago.get("pago_tipo_cambio"))
+    pagado = _dec(pago.get("importe_pagado")) * (f if f is not None else CERO)
+    eventos = []
+    for direccion in _direcciones(doc, rfc):
+        ev = _evento(doc, direccion, "credito", pago["fecha_pago"], d, iva_total, set(marcas),
+                     uuid_pago=pago.get("uuid_pago"), parcialidad=pago.get("parcialidad"), monto_efecto=pagado)
+        ev["importe_pagado"] = pagado
+        eventos.append(ev)
     return eventos
 
 
 def evento_de_pago(pago: dict, doc: dict, rfc: str) -> Optional[dict]:
-    """Evento de cobro (trasladado) o pago (acreditable) de un documento PPD, en la fecha del pago.
-
-    Con REP 2.0 se usan los impuestos del documento relacionado (``ImpuestosDR``). Sin ellos
-    (Pagos 1.0, o 2.0 sin desglose) se aproxima por proporción ``importe pagado / total`` sobre
-    el desglose del CFDI y se marca ``aproximado``. ``sin_equivalencia`` deja el renglón en cero:
-    no se asume tipo de cambio.
-    """
-    if pago.get("pago_estado") != "vigente" or doc.get("estado") != "vigente":
-        return None
-    if doc.get("tipo_comprobante") != "I" or doc.get("metodo_pago") != "PPD":
-        return None             # un PUE ya causó en su emisión; solo el crédito se cobra por partes
-    direcciones = _direcciones(doc, rfc)
-    if not direcciones:
-        return None
-    marcas: set = set()
-    f = factor_a_pesos(pago.get("moneda_dr"), pago.get("equivalencia_dr"), pago.get("pago_moneda"), pago.get("pago_tipo_cambio"))
-    if f is None:
-        d, iva_total = _desglose_vacio(), CERO
-        marcas.add("sin_equivalencia")
-    elif pago.get("impuestos_dr"):
-        d = escalar(desglose(pago["impuestos_dr"]), f)
-        iva_total = d["iva"]["total"]
-    else:
-        total = _dec(doc.get("total"))
-        k = (_dec(pago.get("importe_pagado")) / total) if total > 0 else CERO
-        d, iva_total, marcas_doc = _desglose_de_documento(doc, k * f)
-        marcas |= marcas_doc | {"aproximado"}
-        if pago.get("version_pago") == "1.0":
-            marcas.add("pago_v1")
-    direccion = direcciones[0]
-    ev = _evento(doc, direccion, "credito", pago["fecha_pago"], d, iva_total, marcas,
-                 uuid_pago=pago.get("uuid_pago"), parcialidad=pago.get("parcialidad"))
-    ev["importe_pagado"] = _dec(pago.get("importe_pagado")) * (f if f is not None else CERO)
-    return ev
+    """El primer evento de ``eventos_de_pago`` (o ``None``): atajo para el caso de una sola dirección."""
+    eventos = eventos_de_pago(pago, doc, rfc)
+    return eventos[0] if eventos else None
 
 
 # ── exclusiones y ajustes ─────────────────────────────────────────────────────
 
+# Motivos de exclusión que **no** liberan al contribuyente de enterar la retención de IVA (LIVA 1-A):
+# el IVA que le cobran no es acreditable, pero lo que la empresa retuvo a su proveedor se entera igual.
+MOTIVOS_QUE_CONSERVAN_RETENCION = frozenset({"efectivo", "uso_no_deducible"})
+
+
 def motivo_exclusion(ev: dict) -> Optional[str]:
     """Por qué un evento no se considera (regla automática), o ``None`` si se considera."""
-    if "sin_equivalencia" in ev["marcas"]:
-        return "sin_equivalencia"
+    for marca in ("sin_equivalencia", "sin_tipo_cambio", "sin_proporcion"):
+        if marca in ev["marcas"]:
+            return marca
     if "pago_v1" in ev["marcas"] and PAGOS_V1_MODO == "excluir":
         return "pago_v1"
-    if ev["direccion"] == "acreditable":
-        if ev.get("forma_pago") == "01" and ev["total_documento"] > UMBRAL_EFECTIVO:
+    # Las reglas de deducibilidad aplican a lo que se compra o se paga, no a una nota de crédito recibida.
+    if ev["direccion"] == "acreditable" and ev["origen"] != "notas_credito":
+        monto = ev["monto_efecto"] if ev.get("monto_efecto") is not None else ev["total_documento"]
+        if ev.get("forma_pago") == "01" and monto > UMBRAL_EFECTIVO:
             return "efectivo"
         if ev.get("uso_cfdi") in USOS_NO_ACREDITABLES:
             return "uso_no_deducible"
@@ -312,6 +345,9 @@ MENSAJES = {
     "descuadre": "El desglose por tasa no coincide con el IVA del encabezado; se usó el del encabezado.",
     "sin_desglose": "Hay CFDI sin desglose por tasa guardado (reprocesar el detalle fiscal): se usó el IVA del encabezado.",
     "sin_equivalencia": "Hay pagos en otra moneda sin equivalencia del documento: no se suman, falta el tipo de cambio.",
+    "sin_tipo_cambio": "Hay CFDI en moneda extranjera sin tipo de cambio: no se suman.",
+    "sin_proporcion": "Hay pagos de documentos con total en cero: no se puede calcular su IVA.",
+    "forma_pago_rep": "La forma de pago del REP no se guarda: un pago en efectivo de una factura a crédito no se detecta como no acreditable.",
 }
 _ORDEN_ADVERTENCIAS = tuple(MENSAJES)
 
@@ -349,11 +385,33 @@ def _signo(ev: dict) -> int:
     return -1 if ev["origen"] == "notas_credito" else 1
 
 
+def _total_de_origenes(origenes: dict) -> dict:
+    """Bloque total = contado + crédito − notas de crédito, sumando los valores **ya redondeados**
+    de cada origen: así lo que se ve en las tarjetas suma exactamente el total."""
+    sumas = {
+        "bases": {k: CERO for k in CLAVES_TASA},
+        "iva": {"16": CERO, "8": CERO, "otras": CERO, "total": CERO},
+        "retenciones": CERO,
+    }
+    docs: set = set()
+    pagos = 0
+    for nombre, b in origenes.items():
+        signo = -1 if nombre == "notas_credito" else 1
+        for k, v in b["bases"].items():
+            sumas["bases"][k] += signo * v
+        for k, v in b["iva"].items():
+            sumas["iva"][k] += signo * v
+        sumas["retenciones"] += signo * b["retenciones"]
+        pagos += b["pagos"]
+    return {"sumas": sumas, "pagos": pagos, "docs": docs}
+
+
 def resumen(eventos: list[dict], periodo: str, ajustes: dict, factor: Decimal = UNO) -> dict:
     """Trasladado y acreditable del periodo por origen y tasa, con lo no considerado, lo
     reasignado, las retenciones, el resultado del mes y las advertencias.
 
-    Las notas de crédito restan en el total; cada origen se muestra en positivo.
+    Las notas de crédito restan en el total; cada origen se muestra en positivo. La retención
+    que la empresa debe enterar incluye la de los CFDI no acreditables por efectivo o por uso.
     """
     factor = _dec(factor)
     por_direccion = {}
@@ -361,8 +419,9 @@ def resumen(eventos: list[dict], periodo: str, ajustes: dict, factor: Decimal = 
 
     for direccion in DIRECCIONES:
         origenes = {o: _Bloque() for o in ORIGENES}
-        total = _Bloque()
+        docs_total: set = set()
         fuera = {"no_considerados": [set(), CERO], "reasignados": [set(), CERO]}
+        retencion_que_se_entera = CERO       # retención de CFDI no acreditables que igual se entera
         for ev in eventos:
             if ev["direccion"] != direccion:
                 continue
@@ -375,33 +434,49 @@ def resumen(eventos: list[dict], periodo: str, ajustes: dict, factor: Decimal = 
             kind = estado[0]
             if kind == "considerado":
                 origenes[ev["origen"]].sumar(ev, 1)
-                total.sumar(ev, _signo(ev))
+                docs_total.add(llave(ev["uuid"]))
+                if direccion == "acreditable" and ev["origen"] == "credito":
+                    avisos["forma_pago_rep"].add(llave(ev["uuid"]))
             else:
                 clave = "reasignados" if kind == "reasignado" else "no_considerados"
                 fuera[clave][0].add(llave(ev["uuid"]))
                 fuera[clave][1] += _signo(ev) * ev["iva_total"]
-        bloque_total = total.publico()
-        bloque_total["pagos"] = sum(b.eventos for b in origenes.values())
+                if kind == "no_considerado" and estado[1] in MOTIVOS_QUE_CONSERVAN_RETENCION:
+                    retencion_que_se_entera += _signo(ev) * ev["retencion"]
+        publicos = {o: b.publico() for o, b in origenes.items()}
+        t = _total_de_origenes(publicos)
+        s = t["sumas"]
+        bloque_total = {
+            "cfdi": len(docs_total),
+            "pagos": t["pagos"],
+            "bases": s["bases"],
+            "iva": s["iva"],
+            "retenciones": s["retenciones"],
+            "total": s["iva"]["total"],
+        }
         salida = {
-            "origenes": {o: b.publico() for o, b in origenes.items()},
+            "origenes": publicos,
             "total": bloque_total,
             "no_considerados": {"cfdi": len(fuera["no_considerados"][0]), "iva": _q(fuera["no_considerados"][1])},
             "reasignados": {"cfdi": len(fuera["reasignados"][0]), "iva": _q(fuera["reasignados"][1])},
         }
         if direccion == "acreditable":
-            salida["ajustado"] = _q(total.iva["total"] * factor)
+            salida["ajustado"] = _q(bloque_total["iva"]["total"] * factor)
+            salida["retenciones_no_acreditables"] = _q(retencion_que_se_entera)
         por_direccion[direccion] = salida
 
     trasladado = por_direccion["trasladado"]["total"]["total"]
     acreditable = por_direccion["acreditable"]["ajustado"]
     retenciones_a_favor = por_direccion["trasladado"]["total"]["retenciones"]
     por_pagar = _q(trasladado - acreditable - retenciones_a_favor)
+    a_enterar = _q(por_direccion["acreditable"]["total"]["retenciones"]
+                   + por_direccion["acreditable"]["retenciones_no_acreditables"])
     return {
         "periodo": periodo,
         "factor_prorrateo": factor,
         "trasladado": por_direccion["trasladado"],
         "acreditable": por_direccion["acreditable"],
-        "retenciones_a_enterar": por_direccion["acreditable"]["total"]["retenciones"],
+        "retenciones_a_enterar": a_enterar,
         "resultado": {
             "trasladado": trasladado,
             "acreditable": acreditable,

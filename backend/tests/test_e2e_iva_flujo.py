@@ -113,6 +113,17 @@ def _sembrar(db, e):
     _recibido(db, e, 22, [_t("0.16", 5000, 800)], forma_pago="01", iva_trasladado="800", subtotal="5000", total="5800")
     _recibido(db, e, 23, [_t("0.16", 1000, 160)], metodo_pago="PPD", forma_pago="99", fecha_emision="2026-08-10 09:00:00")
     _rep(db, e, 24, [(_uuid(23), 580, [("0.16", 500, 80)], "MXN", 1)], rfc_emisor=PROV, rfc_receptor=RFC)
+    # un REP que paga DOS documentos PPD en septiembre; el UUID de uno viene en minúsculas en la relación
+    _cfdi(db, e, 50, [_t("0.16", 250, 40)], metodo_pago="PPD", forma_pago="99", fecha_emision="2026-08-12 09:00:00",
+          iva_trasladado="40", subtotal="250", total="290")
+    _cfdi(db, e, 51, [_t("0.16", 250, 40)], metodo_pago="PPD", forma_pago="99", fecha_emision="2026-08-13 09:00:00",
+          iva_trasladado="40", subtotal="250", total="290")
+    _rep(db, e, 52, [(_uuid(50), 290, [("0.16", 250, 40)], "MXN", 1),
+                     (_uuid(51).lower(), 290, [("0.16", 250, 40)], "MXN", 1)], fecha="2026-09-29 12:00:00")
+    # recibido en efectivo con retención: no es acreditable, pero la retención se entera
+    _recibido(db, e, 26, [_t("0.16", 250, 40)], forma_pago="01", iva_trasladado="40", subtotal="250", total="2900")
+    db.execute("INSERT INTO cfdi_impuestos (cfdi_id, ambito, impuesto, tipo_factor, tasa_o_cuota, base, importe)"
+               " SELECT id, 'retencion', '002', 'Tasa', 0.106667, 250, 26.67 FROM cfdi WHERE uuid = %s", (_uuid(26),))
     # retención que la empresa hace a su proveedor
     _recibido(db, e, 25, [_t("0.16", 250, 40)], iva_trasladado="40", subtotal="250", total="263.33")
     db.execute("INSERT INTO cfdi_impuestos (cfdi_id, ambito, impuesto, tipo_factor, tasa_o_cuota, base, importe)"
@@ -177,9 +188,10 @@ def test_contado_separa_las_tasas_y_suma_con_el_encabezado(entorno):
 def test_credito_toma_solo_el_pago_del_mes_con_impuestos_dr(entorno):
     cred = _resumen(entorno)["trasladado"]["origenes"]["credito"]
 
-    # REP 2.0 de septiembre (80) + REP 1.0 aproximado (160 × 580/1160 = 80); el de octubre y el cancelado no; el USD sin equivalencia no suma
-    assert cred["iva"]["total"] == 160.0
-    assert cred["pagos"] == 2 and cred["cfdi"] == 2
+    # REP 2.0 de septiembre (80) + REP 1.0 aproximado (160 × 580/1160 = 80) + un REP de dos documentos (40 + 40);
+    # el de octubre y el cancelado no; el USD sin equivalencia no suma
+    assert cred["iva"]["total"] == 240.0
+    assert cred["pagos"] == 4 and cred["cfdi"] == 4
     octubre = _resumen(entorno, "2026-10")["trasladado"]["origenes"]["credito"]
     assert octubre["iva"]["total"] == 80.0 and octubre["pagos"] == 1
 
@@ -200,34 +212,42 @@ def test_notas_de_credito_y_anticipo_neteados(entorno):
 
     assert sep["origenes"]["notas_credito"]["iva"]["total"] == 48 + 320                # NC + aplicación del anticipo
     assert agosto["origenes"]["contado"]["iva"]["total"] == 320                        # el anticipo, cuando se cobró
-    marcas = [i["marcas"] for i in _detalle(entorno, "2026-09", "trasladado", "notas_credito")["items"]]
-    assert any("aplicacion_anticipo" in m for m in marcas)
+    marcas = {i["uuid"]: i["marcas"] for i in _detalle(entorno, "2026-09", "trasladado", "notas_credito")["items"]}
+    assert "aplicacion_anticipo" in marcas[_uuid(42)] and "aplicacion_anticipo" not in marcas[_uuid(3)]
 
 
 def test_total_trasladado_y_resultado(entorno):
     r = _resumen(entorno)
 
-    contado = 160 + 40 + 64 + 800 + 16 + 32
-    assert r["trasladado"]["total"]["iva"]["total"] == contado + 160 - (48 + 320)
+    # contado 1112 + crédito 240 − notas 368 = 984; menos el acreditable (160) y la retención a favor (42.67)
+    assert r["trasladado"]["total"]["iva"]["total"] == 984.0
     assert r["resultado"]["retenciones_a_favor"] == 42.67
-    esperado = r["trasladado"]["total"]["total"] - r["acreditable"]["ajustado"] - 42.67
-    assert r["resultado"]["iva_por_pagar"] == round(esperado, 2)
+    assert r["resultado"]["iva_por_pagar"] == 781.33
+    assert (r["resultado"]["saldo_a_cargo"], r["resultado"]["saldo_a_favor"]) == (781.33, 0.0)
+
+
+def test_un_rep_con_dos_documentos_y_uuid_en_minusculas_cuenta_los_dos(entorno):
+    items = {i["uuid"]: i for i in _detalle(entorno, "2026-09", "trasladado", "credito")["items"]}
+
+    assert items[_uuid(50)]["uuid_pago"] == _uuid(52) and items[_uuid(51)]["uuid_pago"] == _uuid(52)
+    assert items[_uuid(50)]["iva_total"] == 40.0 and items[_uuid(51)]["iva_total"] == 40.0
 
 
 def test_acreditable_excluye_efectivo_y_uso_no_deducible_y_los_lista(entorno):
     r = _resumen(entorno)["acreditable"]
 
-    # 20 (40) + 25 (40) + REP 24 de septiembre (80); 21 (S01) y 22 (efectivo) no
+    # 20 (40) + 25 (40) + REP 24 de septiembre (80); 21 (S01), 22 y 26 (efectivo) no
     assert r["total"]["iva"]["total"] == 160.0
-    assert r["no_considerados"] == {"cfdi": 2, "iva": 816.0}
+    assert r["no_considerados"] == {"cfdi": 3, "iva": 856.0}
     motivos = {i["uuid"]: i["motivo"] for i in _detalle(entorno, "2026-09", "acreditable", "no_considerados")["items"]}
-    assert motivos == {_uuid(21): "uso_no_deducible", _uuid(22): "efectivo"}
+    assert motivos == {_uuid(21): "uso_no_deducible", _uuid(22): "efectivo", _uuid(26): "efectivo"}
 
 
-def test_retencion_que_hace_la_empresa_no_reduce_el_acreditable(entorno):
+def test_retencion_que_hace_la_empresa_no_reduce_el_acreditable_y_se_entera_aunque_no_sea_acreditable(entorno):
     r = _resumen(entorno)
 
-    assert r["retenciones_a_enterar"] == 26.67
+    # 26.67 del CFDI 25 (acreditable) + 26.67 del CFDI 26 (pagado en efectivo: no acreditable, pero la retención se entera)
+    assert r["retenciones_a_enterar"] == 53.34
     assert r["acreditable"]["ajustado"] == 160.0
 
 
@@ -291,7 +311,7 @@ def test_reasignar_mueve_el_efecto_al_periodo_destino(entorno):
 def test_reasignar_un_ppd_mueve_todos_sus_cobros_al_destino(entorno):
     client, headers = entorno[1], entorno[2]
     client.put(_url(entorno, "ajustes"), headers=headers,
-               json={"uuid": _uuid(10), "direccion": "trasladado", "accion": "reasignar", "periodo_destino": "2026-11"})
+               json={"uuid": _uuid(10), "direccion": "trasladado", "accion": "reasignar", "periodo_destino": "2026-11", "motivo": "x"})
 
     nov = _resumen(entorno, "2026-11")["trasladado"]["origenes"]["credito"]
 
@@ -303,14 +323,14 @@ def test_ajuste_de_un_cfdi_ajeno_o_de_otra_direccion_es_404(entorno):
     client, headers = entorno[1], entorno[2]
 
     assert client.put(_url(entorno, "ajustes"), headers=headers,
-                      json={"uuid": _uuid(41), "direccion": "acreditable", "accion": "excluir"}).status_code == 404
+                      json={"uuid": _uuid(41), "direccion": "acreditable", "accion": "excluir", "motivo": "x"}).status_code == 404
     assert client.put(_url(entorno, "ajustes"), headers=headers,
-                      json={"uuid": "no-existe", "direccion": "trasladado", "accion": "excluir"}).status_code == 404
+                      json={"uuid": "no-existe", "direccion": "trasladado", "accion": "excluir", "motivo": "x"}).status_code == 404
 
 
 def test_listar_ajustes(entorno):
     client, headers = entorno[1], entorno[2]
-    client.put(_url(entorno, "ajustes"), headers=headers, json={"uuid": _uuid(2), "direccion": "trasladado", "accion": "excluir"})
+    client.put(_url(entorno, "ajustes"), headers=headers, json={"uuid": _uuid(2), "direccion": "trasladado", "accion": "excluir", "motivo": "x"})
 
     items = client.get(_url(entorno, "ajustes"), headers=headers).json()["items"]
 
@@ -325,7 +345,7 @@ def test_otra_empresa_no_ve_ni_ajusta(entorno):
     for metodo, ruta, kw in (
         ("get", "2026-09", {}), ("get", "2026-09/detalle?direccion=trasladado&origen=contado", {}),
         ("get", "ajustes", {}),
-        ("put", "ajustes", {"json": {"uuid": _uuid(41), "direccion": "trasladado", "accion": "excluir"}}),
+        ("put", "ajustes", {"json": {"uuid": _uuid(41), "direccion": "trasladado", "accion": "excluir", "motivo": "x"}}),
     ):
         r = getattr(client, metodo)(f"/api/v1/empresas/{empresa_id}/iva-flujo/{ruta}", headers=ajeno, **kw)
         assert r.status_code == 403, (metodo, ruta)

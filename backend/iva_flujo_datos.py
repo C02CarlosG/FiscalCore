@@ -60,8 +60,8 @@ def cargar_eventos(empresa_id: str, rfc: str, periodo: str, ajustes: dict) -> li
           AND (c.rfc_emisor = %s OR c.rfc_receptor = %s)
           AND (
                 (c.fecha_emision >= {_MES} AND c.fecha_emision < {_MES} + INTERVAL '1 month')
-             OR (c.metodo_pago = 'PPD' AND c.uuid IN (
-                    SELECT pr.cfdi_uuid FROM pagos_relaciones pr JOIN pagos_cfdi pc ON pc.id = pr.pago_id
+             OR (c.metodo_pago = 'PPD' AND UPPER(c.uuid) IN (
+                    SELECT UPPER(pr.cfdi_uuid) FROM pagos_relaciones pr JOIN pagos_cfdi pc ON pc.id = pr.pago_id
                     WHERE pc.empresa_id = %s AND pc.fecha_pago >= {_MES} AND pc.fecha_pago < {_MES} + INTERVAL '1 month'))
              OR UPPER(c.uuid) = ANY(%s)
           )
@@ -93,7 +93,5 @@ def cargar_eventos(empresa_id: str, rfc: str, periodo: str, ajustes: dict) -> li
         doc: Optional[dict] = por_uuid.get(iva_flujo.llave(p["cfdi_uuid"]))
         if doc is None:
             continue
-        ev = iva_flujo.evento_de_pago(p, doc, rfc)
-        if ev is not None:
-            eventos.append(ev)
+        eventos.extend(iva_flujo.eventos_de_pago(p, doc, rfc))
     return eventos

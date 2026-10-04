@@ -14,7 +14,8 @@
 - [x] **Endpoints** (`test_router_iva_flujo.py`, 23): resumen, detalle, listar/guardar/quitar ajustes; validación 422, 404 de CFDI ajeno o de otra dirección, 403 sin acceso; auditoría `iva_ajuste` / `iva_ajuste_retirado`.
 - [x] **E2E contra Postgres** (`test_e2e_iva_flujo.py`, 17): las cuatro tasas en un CFDI, crédito con dos REP en meses distintos, REP 1.0 aproximado, USD sin equivalencia, REP cancelado, anticipo + factura − aplicación, efectivo y uso S01 fuera del acreditable, retenciones a favor y a enterar, ajustes con auditoría, reasignación de un PPD, aislamiento entre empresas.
 - [x] **OpenAPI** (`test_openapi_sync.py`).
-- [ ] Revisión de `dominio-fiscal` y `migration-validator`; PR `C·F5.1`.
+- [x] Revisión de `dominio-fiscal` y `migration-validator` (migración apta). Corregido tras la revisión: UUID en minúsculas en `pagos_relaciones` (el PPD se perdía), la retención a enterar ya no depende de la exclusión por efectivo o uso, efectivo medido en pesos y sobre lo pagado, nota de crédito recibida fuera de las reglas de deducibilidad, tipo de cambio ausente sin asumir 1, autofactura PPD en ambas direcciones, motivo obligatorio, CFDI vigentes en los ajustes, redondeo medio hacia arriba y total = suma de las tarjetas redondeadas. Pendiente a propósito: Egreso contra PPD sin cobrar (D-F5-7), forma de pago del REP (F5.4).
+- [ ] PR `C·F5.1`.
 
 ## Review focus
 

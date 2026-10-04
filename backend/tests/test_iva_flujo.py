@@ -540,3 +540,100 @@ def test_detalle_rechaza_origen_o_direccion_invalidos():
 def test_un_pago_solo_aplica_a_ingresos_ppd():
     assert f.evento_de_pago(pago("U1"), doc("U1", metodo_pago="PUE"), RFC) is None             # PUE ya causó en su emisión
     assert f.evento_de_pago(pago("N1"), doc("N1", tipo_comprobante="E", metodo_pago="PPD"), RFC) is None
+
+
+# ── Correcciones de la revisión fiscal ───────────────────────────────────────
+
+def test_moneda_extranjera_sin_tipo_de_cambio_no_se_convierte_a_uno():
+    for tc in (None, D("0")):
+        e = f.eventos_de_documento(doc(moneda="USD", tipo_cambio=tc), RFC)[0]
+
+        assert "sin_tipo_cambio" in e["marcas"] and e["iva_total"] == D("0")
+        assert f.motivo_exclusion(e) == "sin_tipo_cambio"
+
+
+def test_xxx_sin_tipo_de_cambio_cuenta_como_pesos():
+    e = f.eventos_de_documento(doc(moneda="XXX", tipo_cambio=None), RFC)[0]
+
+    assert "sin_tipo_cambio" not in e["marcas"] and e["iva_total"] == D("160")
+
+
+def test_una_nota_de_credito_recibida_no_se_excluye_por_efectivo_ni_por_uso():
+    for kw in ({"forma_pago": "01", "total": D("5000")}, {"uso_cfdi": "S01"}):
+        e = f.eventos_de_documento(recibido("R9", tipo_comprobante="E", **kw), RFC)[0]
+
+        assert e["origen"] == "notas_credito" and f.motivo_exclusion(e) is None
+
+
+def test_el_efectivo_de_un_ppd_se_mide_con_lo_pagado_no_con_el_total_del_documento():
+    d = recibido("R1", metodo_pago="PPD", forma_pago="01", total=D("9000"))
+
+    chico = f.evento_de_pago(pago("R1", importe="1500", impuestos_dr=[tras("0.16", 1000, 160)]), d, RFC)
+    grande = f.evento_de_pago(pago("R1", importe="2500", impuestos_dr=[tras("0.16", 1000, 160)]), d, RFC)
+
+    assert f.motivo_exclusion(chico) is None
+    assert f.motivo_exclusion(grande) == "efectivo"
+
+
+def test_autofactura_ppd_genera_el_cobro_en_ambas_direcciones():
+    d = doc("U1", metodo_pago="PPD", total=D("1160"), rfc_receptor=RFC)
+
+    evs = f.eventos_de_pago(pago(), d, RFC)
+
+    assert sorted(e["direccion"] for e in evs) == ["acreditable", "trasladado"]
+
+
+def test_iva_de_pago_es_la_funcion_aislada_que_decide_el_iva_de_un_cobro():
+    d = doc(metodo_pago="PPD", total=D("1160"))
+
+    desg, iva_total, marcas = f.iva_de_pago(pago(), d)
+
+    assert iva_total == D("80") and desg["bases"]["16"] == D("500") and marcas == set()
+
+
+def test_pago_de_un_documento_con_total_en_cero_se_marca_y_no_suma():
+    d = doc(metodo_pago="PPD", total=D("0"))
+    e = f.evento_de_pago(pago(version_pago="1.0", impuestos_dr=[]), d, RFC)
+
+    assert "sin_proporcion" in e["marcas"] and f.motivo_exclusion(e) == "sin_proporcion"
+
+
+def test_la_retencion_de_un_cfdi_no_acreditable_por_efectivo_o_uso_igual_se_entera():
+    ret = imp("retencion", "002", "Tasa", "0.106667", 250, "26.67")
+    docs = [
+        recibido("R1", impuestos=[tras("0.16", 250, 40), ret], iva_trasladado=D("40")),                                   # considerado
+        recibido("R2", forma_pago="01", total=D("5000"), impuestos=[tras("0.16", 250, 40), ret], iva_trasladado=D("40")),  # efectivo
+        recibido("R3", uso_cfdi="S01", impuestos=[tras("0.16", 250, 40), ret], iva_trasladado=D("40")),                    # uso
+        recibido("R4", impuestos=[tras("0.16", 250, 40), ret], iva_trasladado=D("40")),                                    # excluido a mano
+    ]
+    aj = {("R4", "acreditable"): {"accion": "excluir", "periodo_destino": None, "motivo": "duplicado"}}
+
+    r = f.resumen(_construir(docs), "2026-09", aj)
+
+    assert r["acreditable"]["total"]["iva"]["total"] == D("40.00")        # solo R1 es acreditable
+    assert r["retenciones_a_enterar"] == D("80.01")                       # R1 + R2 + R3; R4 salió por decisión del contador
+
+
+def test_el_total_suma_los_valores_redondeados_de_cada_origen():
+    chico = [tras("0.16", "0.0375", "0.006")]
+    contado = doc("U1", impuestos=chico, iva_trasladado=D("0.006"))
+    credito = doc("U2", metodo_pago="PPD", total=D("1160"))
+    r = f.resumen(_construir([contado, credito], [pago("U2", impuestos_dr=chico)]), "2026-09", {})
+
+    t = r["trasladado"]
+    assert t["origenes"]["contado"]["iva"]["total"] == D("0.01") and t["origenes"]["credito"]["iva"]["total"] == D("0.01")
+    assert t["total"]["iva"]["total"] == D("0.02")                         # no 0.01 por redondear 0.012 una sola vez
+
+
+def test_el_redondeo_es_medio_hacia_arriba():
+    e = f.eventos_de_documento(doc("U1", impuestos=[tras("0.16", "0.78125", "0.125")], iva_trasladado=D("0.125")), RFC)[0]
+    r = f.resumen([e], "2026-09", {})
+
+    assert r["trasladado"]["total"]["iva"]["total"] == D("0.13")           # al par daría 0.12
+
+
+def test_aviso_de_forma_de_pago_del_rep_en_acreditable_a_credito():
+    d = recibido("R1", metodo_pago="PPD", total=D("1160"))
+    r = f.resumen(_construir([d], [pago("R1")]), "2026-09", {})
+
+    assert "forma_pago_rep" in {a["codigo"] for a in r["advertencias"]}

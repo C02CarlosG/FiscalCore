@@ -8,7 +8,7 @@ from decimal import Decimal
 from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from .. import db, iva_flujo, iva_flujo_datos
 from ..auditoria import registrar_evento
@@ -26,7 +26,15 @@ class AjusteIn(BaseModel):
     direccion: Literal["trasladado", "acreditable"]
     accion: Literal["excluir", "reasignar"]
     periodo_destino: Optional[str] = None
-    motivo: str = Field("", max_length=500)
+    motivo: str = Field(..., max_length=500, description="Obligatorio: queda en la auditoría")
+
+    @field_validator("motivo")
+    @classmethod
+    def _motivo_con_texto(cls, valor: str) -> str:
+        valor = valor.strip()
+        if not valor:
+            raise ValueError("el motivo es obligatorio")
+        return valor
 
 
 def _json(obj):
@@ -79,7 +87,7 @@ async def guardar_ajuste(empresa_id: str, datos: AjusteIn, current_user: dict = 
 
     cfdi = db.query_one(
         """SELECT uuid, tipo_comprobante, metodo_pago, fecha_emision, rfc_emisor, rfc_receptor
-           FROM cfdi WHERE empresa_id = %s AND UPPER(uuid) = UPPER(%s)""",
+           FROM cfdi WHERE empresa_id = %s AND UPPER(uuid) = UPPER(%s) AND estado = 'vigente'""",
         (empresa_id, datos.uuid),
     )
     propio = cfdi and (

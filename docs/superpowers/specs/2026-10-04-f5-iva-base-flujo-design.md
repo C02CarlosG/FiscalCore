@@ -66,6 +66,11 @@ Se acredita solo la erogación deducible y pagada. No se consideran, con su moti
 | `uso_no_deducible` | Uso de CFDI `S01` (sin efectos fiscales), `CP01` y `CN01`: no son una erogación acreditable |
 | `pago_v1` | El REP es versión 1.0 y no trae impuestos del documento: se usa la proporción `importe pagado ÷ total` sobre el desglose del CFDI original y el renglón se marca `aproximado` (regla común del plan maestro). *La referencia, en cambio, no considera los REP 1.0; es una diferencia deliberada que se revisa en el cuadre.* |
 | `manual` | El contador lo excluyó (ver ajustes) |
+| `sin_equivalencia` / `sin_tipo_cambio` / `sin_proporcion` | Falta la equivalencia del documento, el tipo de cambio o el total para calcular el IVA: no se suma y se advierte (nunca se asume 1) |
+
+- Las reglas de efectivo y de uso aplican a lo que se compra o se paga; **no** a una nota de crédito recibida. El efectivo se mide en pesos: el total del CFDI (contado) o lo pagado (crédito).
+- La forma de pago de un REP (`FormaDePagoP`) no se guarda: un pago en efectivo de una factura a crédito no se detecta y la pantalla lo advierte (`forma_pago_rep`). Se completa en F5.4.
+- **La retención de IVA se entera aunque el IVA no sea acreditable** (LIVA 1-A): `retenciones_a_enterar` incluye la de los CFDI no acreditables por efectivo o por uso; solo la exclusión manual del contador la quita.
 
 Los CFDI no considerados no suman, pero **se listan** con su motivo.
 
@@ -95,14 +100,14 @@ Todos requieren acceso a la empresa; periodos `YYYY-MM`; importes con dos decima
     "origenes": {
       "contado":      {"cfdi": 0, "bases": {"16": 0, "8": 0, "0": 0, "exento": 0, "otras": 0, "no_objeto": 0},
                        "iva": {"16": 0, "8": 0, "otras": 0, "total": 0}, "retenciones": 0, "total": 0},
-      "credito":      {"…": "…", "pagos": 0, "documentos": 0},
+      "credito":      {"…": "…", "pagos": 0, "cfdi": 0},        // pagos = cobros del mes; cfdi = documentos distintos
       "notas_credito": {"…": "…"}
     },
     "total": {"bases": {}, "iva": {}, "retenciones": 0, "total": 0},
     "no_considerados": {"cfdi": 0, "iva": 0}, "reasignados": {"cfdi": 0, "iva": 0}
   },
   "acreditable": {"…": "misma forma, con origen \"credito\" = pago de facturas de crédito, más ajustado = bruto × factor"},
-  "retenciones_a_enterar": 0,
+  "retenciones_a_enterar": 0,        // incluye la de los CFDI no acreditables por efectivo o por uso
   "resultado": {"trasladado": 0, "acreditable": 0, "retenciones_a_favor": 0, "iva_por_pagar": 0, "saldo_a_cargo": 0, "saldo_a_favor": 0},
   "advertencias": [{"codigo": "pago_v1", "mensaje": "…", "cfdi": 2}]
 }
@@ -116,7 +121,7 @@ Lista paginada de lo que compone una cifra: UUID, fecha de emisión, **fecha de 
 
 ### `PUT /api/v1/empresas/{id}/iva-flujo/ajustes` · `DELETE …/ajustes/{direccion}/{uuid}`
 
-`PUT` con `{"uuid", "direccion", "accion": "excluir"|"reasignar", "periodo_destino"?, "motivo"}`; crea o reemplaza el ajuste y deja `auditoria` (`iva_ajuste`). `DELETE` lo retira y también audita. 404 si el CFDI no es de la empresa; 422 con `reasignar` sin `periodo_destino`, con `periodo_destino` igual al periodo de efecto, o con periodo mal formado.
+`PUT` con `{"uuid", "direccion", "accion": "excluir"|"reasignar", "periodo_destino"?, "motivo"}`; el **motivo es obligatorio** (queda en `auditoria`); crea o reemplaza el ajuste y deja `auditoria` (`iva_ajuste`). Solo CFDI vigentes de Ingreso o Egreso. `DELETE` lo retira y también audita. 404 si el CFDI no es de la empresa; 422 con `reasignar` sin `periodo_destino`, con `periodo_destino` igual al periodo de efecto, o con periodo mal formado.
 
 ## Pantalla (F5.2)
 
@@ -132,8 +137,16 @@ Tres tarjetas-pestaña, como la referencia: **Trasladado**, **Acreditable** y **
 | D-F5-4 | Tasas distintas de 16, 8, 0 y exento caen en "otras" | Aparte | — |
 | D-F5-5 | Los ajustes son por CFDI y dirección, siempre permitidos y auditados | Sin cierre de periodo hasta M2 | M2 agrega el bloqueo |
 | D-F5-6 | `no_objeto` se informa como base, nunca suma al IVA ni a la base gravada | Informativo | — |
+| D-F5-7 | Un Egreso se resta en su emisión aunque relacione un PPD aún no cobrado. Si el PPD se cobra después, el REP ya trae el saldo reducido y el IVA se resta dos veces: ese caso se corrige con "no considerar" | Se resta en la emisión | Abierta: F5.4 puede cruzar `cfdi_relacionados` con el PPD y su saldo |
+| D-F5-8 | Los CFDI en moneda extranjera sin tipo de cambio no se suman (no se asume 1) | Excluidos con advertencia | — |
 
 ## Criterios de aceptación (con datos sembrados en la E2E)
+
+Ejemplos de la revisión fiscal que deben salir exactos:
+
+- **Anticipo.** Anticipo de 100,000 + 16,000 de IVA en enero; factura final de 1,000,000 + 160,000 y egreso de aplicación de 100,000 + 16,000 en marzo: trasladado de **16,000 en enero** y **144,000 en marzo**, tanto en trasladado como en acreditable.
+- **Moneda extranjera.** Factura de 1,000 USD + 160 USD de IVA a tipo de cambio 20: **3,200** de IVA en pesos, no 160. Un cobro de esa factura pagado en MXN usa `ImpuestosDR` ÷ `equivalencia_dr` × tipo de cambio del pago; con `equivalencia_dr` nula y monedas distintas queda sin dato.
+- **REP cancelado.** Un REP cancelado y su sustituto suman una sola vez.
 
 1. Un CFDI PUE con renglones al 16 %, 8 %, 0 % y exento aparece en "contado" con cada base e IVA en su columna; la suma por tasa coincide con el IVA del encabezado.
 2. Un PPD cobrado en dos pagos de meses distintos suma en cada mes solo el IVA de **su** pago, con la fecha de pago visible; un REP 2.0 usa `ImpuestosDR`; un REP 1.0 usa la proporción y genera la advertencia `pago_v1`.
