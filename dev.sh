@@ -11,14 +11,16 @@ echo ""
 
 BACKEND_PID=""
 FRONTEND_PID=""
+WORKER_PID=""
 BACKEND_URL="http://localhost:8000/docs"
 FRONTEND_URL="http://localhost:3000"
 
-# Limpieza de procesos de backend y frontend al salir
+# Limpieza de procesos de backend, worker y frontend al salir
 cleanup() {
   echo ""
   echo " Deteniendo procesos..."
   [ -n "$BACKEND_PID" ] && kill "$BACKEND_PID" 2>/dev/null || true
+  [ -n "$WORKER_PID" ] && kill "$WORKER_PID" 2>/dev/null || true
   [ -n "$FRONTEND_PID" ] && kill "$FRONTEND_PID" 2>/dev/null || true
   wait 2>/dev/null || true
   exit 0
@@ -74,6 +76,17 @@ if port_busy 8000; then
 else
   "$PYTHON" -m uvicorn backend.main_api:app --reload --port 8000 &
   BACKEND_PID=$!
+fi
+
+# Worker de descarga automática del SAT (proceso aparte). Necesita FIEL_ENCRYPTION_KEY
+# para leer las e.firmas guardadas; sin ella no se levanta.
+if grep -qs '^FIEL_ENCRYPTION_KEY=.' "${ROOT}/.env" || [ -n "${FIEL_ENCRYPTION_KEY:-}" ]; then
+  "$PYTHON" -m backend.worker &
+  WORKER_PID=$!
+  echo "       Worker de descarga automática iniciado"
+else
+  echo "       (worker de descarga automática omitido: define FIEL_ENCRYPTION_KEY en .env;"
+  echo "        genérala con: python -c \"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())\")"
 fi
 
 echo "[4/4] Iniciando frontend (Next.js puerto 3000)..."
