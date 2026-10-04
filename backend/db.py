@@ -225,6 +225,9 @@ def init_db() -> None:
         # 030 es idempotente — índices del listado de CFDI y preferencias de tabla por usuario
         _run_sql_file("030_listado_cfdi.sql")
 
+        # 060 es idempotente — documentos_fiscales: constancia y opinión de cumplimiento en PDF (F8, carril D)
+        _run_sql_file("060_documentos_fiscales.sql")
+
         # Seed inicial: usuario admin si la base aún no tiene usuarios
         _seed_admin()
 
