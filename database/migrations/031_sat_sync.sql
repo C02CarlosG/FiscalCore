@@ -75,6 +75,9 @@ CREATE TABLE IF NOT EXISTS sat_sync_config (
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- Inicio de la corrida en curso (NULL = ninguna). Lo fija el worker (F2.2).
+ALTER TABLE sat_sync_config ADD COLUMN IF NOT EXISTS corrida_inicio TIMESTAMPTZ;
+
 CREATE INDEX IF NOT EXISTS idx_sat_sync_config_proxima
     ON sat_sync_config (proxima_corrida)
     WHERE activa;

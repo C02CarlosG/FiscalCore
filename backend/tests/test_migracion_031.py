@@ -57,7 +57,7 @@ def test_031_se_puede_repetir_y_agrega_columnas_y_tabla():
         "SELECT column_name FROM information_schema.columns WHERE table_name = 'sat_sync_config'")}
     assert config == {"empresa_id", "activa", "consentimiento_por", "consentimiento_el",
                       "carga_inicial_ok", "ultima_exitosa", "proxima_corrida", "estado",
-                      "motivo_pausa", "updated_at"}
+                      "motivo_pausa", "updated_at", "corrida_inicio"}
 
 
 def test_031_solicitud_sin_usuario_y_origen_manual_por_defecto(empresa):
