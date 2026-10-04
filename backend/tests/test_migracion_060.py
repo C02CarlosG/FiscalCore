@@ -45,6 +45,12 @@ def test_060_rechaza_otro_tipo_y_el_mismo_pdf_dos_veces():
             db.execute(insertar, (empresa["id"], "constancia", b"pdf", "a" * 64, RFC))
         with pytest.raises(psycopg2.errors.CheckViolation):
             db.execute(insertar, (empresa["id"], "acta", b"pdf", "b" * 64, RFC))
+        with pytest.raises(psycopg2.errors.CheckViolation):
+            db.execute(
+                "INSERT INTO documentos_fiscales (empresa_id, tipo, nombre_archivo, contenido, tamano_bytes, sha256, rfc) "
+                "VALUES (%s, 'opinion', 'g.pdf', %s, 1, %s, %s)",
+                (empresa["id"], b"x" * (5 * 1024 * 1024 + 1), "c" * 64, RFC),
+            )
         # Se borra en cascada con la empresa.
         db.execute("DELETE FROM empresas WHERE id = %s", (empresa["id"],))
         fila = db.query_one("SELECT COUNT(*) AS n FROM documentos_fiscales WHERE rfc = %s", (RFC,))

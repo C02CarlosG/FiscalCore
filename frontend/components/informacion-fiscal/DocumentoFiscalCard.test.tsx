@@ -126,6 +126,11 @@ describe("DocumentoFiscalCard", () => {
     expect(screen.getByText(/más de 30 días/)).toBeInTheDocument();
   });
 
+  it("sin fecha leída lo dice en lugar de un guion", () => {
+    renderCard("constancia", documento({ tipo: "constancia", fecha_emision: null, antiguedad_dias: null, datos: {} }));
+    expect(screen.getByText("Fecha no identificada")).toBeInTheDocument();
+  });
+
   it("valida extensión y tamaño antes de llamar a la API", async () => {
     const user = userEvent.setup({ applyAccept: false });
     renderCard("constancia", null);

@@ -137,6 +137,21 @@ def test_constancia_no_tiene_vigencia(monkeypatch):
     assert constancia["antiguedad_dias"] == 39
 
 
+def test_resumen_elige_por_fecha_de_emision(monkeypatch):
+    vistos = []
+    base = _Db()
+    base.query_all = lambda sql, params=(): vistos.append(sql) or []
+    base.instalar(monkeypatch)
+    client.get(BASE)
+    assert "ORDER BY tipo, fecha_emision DESC NULLS LAST, created_at DESC" in " ".join(vistos[0].split())
+
+
+def test_nombre_de_archivo_sin_caracteres_de_control():
+    assert router_if._nombre_seguro("CSF\r\nX-Evil: 1.pdf") == "CSFX-Evil: 1.pdf"
+    assert router_if._nombre_seguro("../../etc/passwd") == "passwd"
+    assert router_if._nombre_seguro("\x00") == "documento.pdf"
+
+
 def test_historial_filtra_por_tipo(monkeypatch):
     base = _Db(filas=[_fila("opinion"), _fila("opinion")])
     vistos = []

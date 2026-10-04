@@ -91,6 +91,25 @@ def test_ciclo_completo(entorno):
     assert client.get(f"{base}/documentos/{doc['id']}/pdf", headers=headers).status_code == 404
 
 
+def test_vigente_es_la_de_fecha_de_emision_mas_reciente(entorno):
+    from backend.tests.pdf_sintetico import pdf_con_texto
+
+    _db, client, headers, base = entorno
+    reciente = _subir(client, headers, base, "opinion", opinion_sintetica(rfc=RFC, sentido="NEGATIVO"))
+    assert reciente.status_code == 201, reciente.text
+    vieja = pdf_con_texto([
+        "Opinión del cumplimiento de obligaciones fiscales",
+        f"Clave de R.F.C.: {RFC}",
+        "Revisión practicada el día 01 de junio de 2026, a las 09:00 horas",
+        "se emite opinión en sentido POSITIVO",
+    ])
+    # Se sube después, pero es más antigua: no reemplaza a la del 03/10.
+    assert _subir(client, headers, base, "opinion", vieja).status_code == 201
+    opinion = client.get(base, headers=headers).json()["opinion"]
+    assert opinion["fecha_emision"] == "2026-10-03"
+    assert opinion["id"] == reciente.json()["id"]
+
+
 def test_otro_usuario_no_ve_ni_sube(entorno):
     db, client, headers, base = entorno
     ajeno = headers_usuario_e2e(db, EMAIL_AJENO)

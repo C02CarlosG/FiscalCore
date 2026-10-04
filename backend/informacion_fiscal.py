@@ -14,6 +14,13 @@ from typing import Optional
 from zoneinfo import ZoneInfo
 
 from . import constancia_parser as cp
+from .cfdi_parser import validar_rfc
+
+try:
+    from pdfminer.pdfdocument import PDFPasswordIncorrect
+except ImportError:  # sin pdfplumber/pdfminer, leer_pdf falla antes con RuntimeError
+    class PDFPasswordIncorrect(Exception):
+        pass
 
 TIPOS = ("constancia", "opinion")
 MAX_BYTES = 5 * 1024 * 1024
@@ -90,7 +97,7 @@ def leer_pdf(contenido: bytes) -> str:
     except DocumentoInvalido:
         raise
     except Exception as e:
-        if "Password" in type(e).__name__:
+        if isinstance(e, PDFPasswordIncorrect) or isinstance(e.__cause__, PDFPasswordIncorrect):
             raise DocumentoInvalido("El PDF está protegido con contraseña.")
         raise DocumentoInvalido(_ILEGIBLE)
     if not texto.strip():
@@ -109,8 +116,10 @@ def detectar_tipo(texto: str) -> Optional[str]:
 
 def buscar_rfc(texto: str) -> Optional[str]:
     """RFC tras la etiqueta "RFC" o "R.F.C."; si no hay etiqueta, el primero del texto."""
-    m = _RE_RFC_ETIQUETADO.search(texto) or _RE_RFC_LIBRE.search(texto.upper())
-    return m.group(1).upper() if m else None
+    for m in (_RE_RFC_ETIQUETADO.search(texto), _RE_RFC_LIBRE.search(texto.upper())):
+        if m and validar_rfc(m.group(1)):
+            return m.group(1).upper()
+    return None
 
 
 def _buscar_sentido(texto: str) -> Optional[str]:
@@ -161,10 +170,8 @@ def analizar_documento(tipo: str, contenido: bytes, rfc_empresa: str, hoy: Optio
         leido = cp.parsear_texto_constancia(texto)
         rfc = buscar_rfc(texto)
         fecha = leido["fecha_emision"]
-        datos = {k: leido[k] for k in (
-            "razon_social", "regimenes", "obligaciones", "cp_fiscal", "curp",
-            "id_cif", "estatus_padron",
-        )}
+        # Solo lo que la pantalla muestra: no se guarda la CURP (dato personal) ni las obligaciones.
+        datos = {k: leido[k] for k in ("razon_social", "regimenes", "cp_fiscal", "id_cif", "estatus_padron")}
     else:
         leido = parsear_opinion(texto)
         rfc = leido["rfc"]

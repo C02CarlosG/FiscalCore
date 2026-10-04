@@ -74,10 +74,14 @@ CREATE INDEX IF NOT EXISTS idx_documentos_fiscales_empresa
 - El PDF se guarda en Postgres (`BYTEA`), no en disco: el contenedor de despliegue es
   efímero y así el archivo se borra junto con la empresa. Con el tope de 5 MB y
   documentos de 1 a 3 páginas (100–400 KB en la práctica) el volumen es chico.
-- `datos` guarda lo leído que no necesita columna: razón social, regímenes, código
-  postal, estatus, idCIF, sentido y folio.
-- "Último documento" = el de `created_at` más reciente por empresa y tipo. No se
-  ordena por `fecha_emision` porque puede venir nula.
+- `datos` guarda solo lo que la pantalla muestra: razón social (en persona física,
+  nombre y apellidos), regímenes, código postal, estatus, idCIF, sentido y folio. No se
+  guardan la CURP ni las obligaciones.
+- Documento vigente = el de `fecha_emision` más reciente por empresa y tipo (nulas al
+  final; a igual fecha, el último subido). Subir hoy una opinión vieja no reemplaza a
+  la más reciente.
+- `contenido` lleva `CHECK (octet_length(contenido) <= 5242880)` y `tamano_bytes > 0`
+  como defensa en la base del tope del backend.
 - El mismo PDF (mismo `sha256`) dos veces para la misma empresa y tipo responde 409.
 
 ## Módulos
@@ -107,7 +111,7 @@ acceso a la empresa (403 si no lo tiene, 404 si la empresa no existe).
 
 | Método y ruta | Qué hace | Respuestas |
 |---|---|---|
-| `GET /` | Último documento de cada tipo: `{"constancia": Documento \| null, "opinion": Documento \| null}` | 200 |
+| `GET /` | Documento vigente de cada tipo (fecha de emisión más reciente): `{"constancia": Documento \| null, "opinion": Documento \| null}` | 200 |
 | `GET /documentos?tipo=` | Historial (sin el PDF), más reciente primero; `tipo` opcional | 200, 422 tipo inválido |
 | `POST /documentos/{tipo}` (multipart `archivo`) | Valida, lee y guarda | 201 `Documento`; 400 extensión o tipo de contenido; 413 tamaño; 409 ya cargado; 422 PDF ilegible, de otro tipo o de otro RFC |
 | `GET /documentos/{documento_id}/pdf?descargar=` | El PDF tal cual se subió. `inline` por defecto (visor), `attachment` con `descargar=true` | 200 `application/pdf`, 404 |

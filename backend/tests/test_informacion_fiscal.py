@@ -171,7 +171,8 @@ def test_analizar_constancia():
     assert r["datos"]["cp_fiscal"] == "68000"
     assert r["datos"]["id_cif"] == "12345678901"
     assert r["datos"]["estatus_padron"] == "ACTIVO"
-    assert "texto_completo" not in r["datos"]
+    # Solo lo que la pantalla muestra: ni el texto, ni la CURP, ni las obligaciones.
+    assert set(r["datos"]) == {"razon_social", "regimenes", "cp_fiscal", "id_cif", "estatus_padron"}
 
 
 def test_analizar_opinion():
@@ -206,11 +207,14 @@ def test_analizar_acepta_emitido_hoy():
 
 
 def test_leer_pdf_con_contrasena(monkeypatch):
-    class PDFPasswordIncorrect(Exception):
-        pass
+    from pdfminer.pdfdocument import PDFPasswordIncorrect
 
     def _abrir(*a, **k):
-        raise PDFPasswordIncorrect()
+        try:
+            raise PDFPasswordIncorrect()
+        except PDFPasswordIncorrect as e:
+            # pdfplumber la envuelve en su propia excepción
+            raise RuntimeError("no se pudo abrir") from e
 
     monkeypatch.setattr(inf.cp.pdfplumber, "open", _abrir)
     with pytest.raises(inf.DocumentoInvalido, match="contraseña"):

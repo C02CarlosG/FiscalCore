@@ -176,3 +176,24 @@ def test_campos_nuevos_ausentes_son_none():
     assert resultado["fecha_emision"] is None
     assert resultado["id_cif"] is None
     assert resultado["estatus_padron"] is None
+
+
+def test_rfc_patron_deriva_del_canonico_de_cfdi_parser():
+    import re
+    from backend import cfdi_parser
+    assert re.fullmatch(cp.RFC_PATRON, "ACM010101AA1")
+    assert re.fullmatch(cp.RFC_PATRON, "GAHC800101AB3")
+    assert cp.RFC_PATRON == re.sub(r"\((?!\?)", "(?:", cfdi_parser.RFC_REGEX.pattern.strip("^$"))
+
+
+def test_nombre_de_persona_fisica_se_arma_con_nombre_y_apellidos():
+    texto = (
+        "CONSTANCIA DE SITUACIÓN FISCAL\nRFC: GAHC800101AB3\n"
+        "Nombre (s): CARLOS\nPrimer Apellido: GARCIA\nSegundo Apellido: HERNANDEZ\n"
+    )
+    assert cp.parsear_texto_constancia(texto)["razon_social"] == "CARLOS GARCIA HERNANDEZ"
+
+
+def test_persona_fisica_sin_segundo_apellido():
+    texto = "Nombre (s): ANA\nPrimer Apellido: LOPEZ\nSegundo Apellido:\nFecha inicio"
+    assert cp.parsear_texto_constancia(texto)["razon_social"] == "ANA LOPEZ"

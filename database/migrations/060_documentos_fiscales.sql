@@ -5,7 +5,8 @@
 -- Constancia de situación fiscal y opinión del cumplimiento (32-D) que el
 -- contador sube en PDF por empresa. El PDF va en la base (BYTEA) y no en disco:
 -- el contenedor de despliegue es efímero y así se borra junto con la empresa.
--- Se conserva el historial; el documento vigente es el de created_at más reciente.
+-- Se conserva el historial; el documento vigente es el de fecha_emision más reciente
+-- (a igual fecha, el último subido).
 -- ============================================================
 
 CREATE TABLE IF NOT EXISTS documentos_fiscales (
@@ -13,8 +14,9 @@ CREATE TABLE IF NOT EXISTS documentos_fiscales (
     empresa_id     UUID NOT NULL REFERENCES empresas(id) ON DELETE CASCADE,
     tipo           VARCHAR(20) NOT NULL CHECK (tipo IN ('constancia', 'opinion')),
     nombre_archivo VARCHAR(255) NOT NULL,
-    contenido      BYTEA NOT NULL,
-    tamano_bytes   INTEGER NOT NULL,
+    -- Defensa en la base del mismo tope de 5 MB que valida el backend.
+    contenido      BYTEA NOT NULL CHECK (octet_length(contenido) <= 5242880),
+    tamano_bytes   INTEGER NOT NULL CHECK (tamano_bytes > 0),
     sha256         CHAR(64) NOT NULL,
     rfc            VARCHAR(13) NOT NULL,
     fecha_emision  DATE,

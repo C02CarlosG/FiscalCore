@@ -105,7 +105,7 @@ function DetalleDocumento({ documento }: { documento: DocumentoFiscal }) {
       {documento.tipo === "opinion" && <EstadoOpinion documento={documento} />}
       <dl className="grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2">
         <Dato etiqueta="Emitida">
-          {formatearFecha(documento.fecha_emision)}
+          {documento.fecha_emision ? formatearFecha(documento.fecha_emision) : "Fecha no identificada"}
           {antiguedad && <span className="text-muted-foreground">{antiguedad}</span>}
         </Dato>
         <Dato etiqueta="RFC">

@@ -13,9 +13,7 @@ export type MotivoNoVigente = "sentido_no_positivo" | "sentido_no_identificado" 
 export interface DatosConstancia {
   razon_social?: string | null;
   regimenes?: string[];
-  obligaciones?: { descripcion: string; periodicidad: string }[];
   cp_fiscal?: string | null;
-  curp?: string | null;
   id_cif?: string | null;
   estatus_padron?: string | null;
 }

@@ -9,6 +9,7 @@ NOTA: sin `from __future__ import annotations`: la carga va envuelta por
 """
 import hashlib
 import os
+import re
 import uuid
 from datetime import date
 from typing import Optional
@@ -76,20 +77,21 @@ def _documento(fila: dict) -> dict:
 
 
 def _nombre_seguro(nombre: Optional[str]) -> str:
-    base = os.path.basename((nombre or "").replace("\\", "/")).strip()
+    base = os.path.basename((nombre or "").replace("\\", "/"))
+    base = re.sub(r'[\x00-\x1f\x7f]', '', base).strip()
     return (base or "documento.pdf")[:255]
 
 
 @router.get("")
 async def resumen(empresa_id: uuid.UUID, current_user: dict = Depends(get_current_user)):
-    """Último documento de cada tipo, o ``null`` si nunca se ha subido."""
+    """Documento vigente de cada tipo (el de fecha de emisión más reciente), o ``null``."""
     _empresa(empresa_id, current_user)
     filas = db.query_all(
         f"""
         SELECT DISTINCT ON (tipo) {_COLUMNAS}
         FROM documentos_fiscales
         WHERE empresa_id = %s
-        ORDER BY tipo, created_at DESC
+        ORDER BY tipo, fecha_emision DESC NULLS LAST, created_at DESC
         """,
         (str(empresa_id),),
     )

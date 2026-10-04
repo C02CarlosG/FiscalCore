@@ -2665,8 +2665,10 @@ paths:
     get:
       operationId: resumenInformacionFiscal
       tags: [Información fiscal]
-      summary: Última constancia y última opinión de cumplimiento de la empresa
-      description: Cada clave es null si nunca se ha subido ese documento. F8, carril D.
+      summary: Constancia y opinión de cumplimiento vigentes de la empresa
+      description: |
+        De cada tipo, el documento con fecha de emisión más reciente (a igual fecha, el
+        último subido). Cada clave es null si nunca se ha subido ese documento. F8, carril D.
       parameters:
         - $ref: '#/components/parameters/EmpresaId'
       responses:
@@ -4023,8 +4025,8 @@ components:
         datos:
           type: object
           description: |
-            Lo leído del PDF. Constancia: razon_social, regimenes, obligaciones, cp_fiscal,
-            curp, id_cif, estatus_padron. Opinión: razon_social, sentido (positivo, negativo,
+            Lo leído del PDF. Constancia: razon_social (en persona física, nombre y apellidos),
+            regimenes, cp_fiscal, id_cif, estatus_padron. Opinión: razon_social, sentido (positivo, negativo,
             suspension_actividades, inscrito_sin_obligaciones, no_inscrito o null), folio.
             Todo se lee del PDF subido; no se verifica contra el SAT.
         antiguedad_dias: { type: integer, nullable: true }

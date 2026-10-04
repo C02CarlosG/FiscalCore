@@ -19,8 +19,11 @@ except ImportError:
 
 # ─── Regex SAT ───────────────────────────────────────────────────────────────
 
-# RFC: persona moral 12 chars, persona física 13 chars
-RFC_PATRON = r'[A-ZÑ&]{3,4}\d{6}[A-Z0-9]{3}'
+# RFC: persona moral 12 chars, persona física 13 chars. Se deriva del canónico de
+# cfdi_parser (sin anclas y con grupos no capturantes) para no mantener dos copias.
+from .cfdi_parser import RFC_REGEX as _RFC_CANONICO
+
+RFC_PATRON = re.sub(r'\((?!\?)', '(?:', _RFC_CANONICO.pattern.strip('^$'))
 _RE_RFC   = re.compile(r'\b(' + RFC_PATRON + r')\b')
 _RE_CURP  = re.compile(r'\b([A-Z]{4}\d{6}[HM][A-Z]{5}[A-Z0-9]\d)\b')
 _RE_CP    = re.compile(r'(?:C\.?P\.?|C[óo]digo\s+Postal)\s*:?\s*(\d{5})', re.IGNORECASE)
@@ -81,6 +84,25 @@ def _buscar_rfc(texto: str) -> Optional[str]:
     # Fallback: cualquier patrón RFC en el texto
     m = _RE_RFC.search(texto)
     return m.group(1).upper() if m else None
+
+
+def _campo(texto: str, etiqueta: str) -> Optional[str]:
+    m = re.search(etiqueta + r'\s*:[ \t]*([^\n]*)', texto, re.IGNORECASE)
+    valor = m.group(1).strip() if m else ""
+    return valor or None
+
+
+def _buscar_nombre_persona_fisica(texto: str) -> Optional[str]:
+    """La constancia de persona física separa Nombre (s), Primer y Segundo Apellido."""
+    if not re.search(r'Primer\s+Apellido', texto, re.IGNORECASE):
+        return None
+    partes = [
+        _campo(texto, r'Nombre\s*\(s\)'),
+        _campo(texto, r'Primer\s+Apellido'),
+        _campo(texto, r'Segundo\s+Apellido'),
+    ]
+    nombre = " ".join(p for p in partes if p)
+    return nombre or None
 
 
 def _buscar_razon_social(texto: str) -> Optional[str]:
@@ -223,7 +245,7 @@ def parsear_texto_constancia(texto: str) -> dict:
     """Igual que `parsear_constancia`, sobre el texto ya extraído del PDF."""
     return {
         "rfc":           _buscar_rfc(texto),
-        "razon_social":  _buscar_razon_social(texto),
+        "razon_social":  _buscar_nombre_persona_fisica(texto) or _buscar_razon_social(texto),
         "regimenes":     _buscar_regimenes(texto),
         "obligaciones":  _buscar_obligaciones(texto),
         "cp_fiscal":     _buscar_cp(texto),
