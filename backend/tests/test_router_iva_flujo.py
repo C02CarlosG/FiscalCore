@@ -78,6 +78,40 @@ def test_ajustes_no_se_confunde_con_un_periodo(con_acceso, monkeypatch):
     assert r.status_code == 200 and r.json() == {"items": []}
 
 
+# ── exportación ──────────────────────────────────────────────────────────────
+
+def test_exportar_devuelve_un_xlsx_y_audita(con_acceso, monkeypatch):
+    import openpyxl
+    from io import BytesIO
+
+    eventos = []
+    monkeypatch.setattr(iva_flujo_datos, "cargar_ajustes", lambda e: {})
+    monkeypatch.setattr(iva_flujo_datos, "cargar_eventos", lambda *a: [])
+    monkeypatch.setattr(router, "registrar_evento", lambda *a, **k: eventos.append((a, k)))
+
+    r = client.get(f"{BASE}/2026-09/exportar", params={"direccion": "trasladado", "origen": "contado"})
+
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("application/vnd.openxmlformats")
+    assert 'filename="iva_trasladado_contado_2026-09.xlsx"' in r.headers["content-disposition"]
+    assert openpyxl.load_workbook(BytesIO(r.content)).sheetnames == ["Detalle", "Resumen"]
+    assert eventos[0][0][:2] == ("u1", "iva_flujo_exportado") and eventos[0][1]["metadata"]["filas"] == 0
+
+
+def test_exportar_valida_y_pide_acotar_si_son_demasiados(con_acceso, monkeypatch):
+    monkeypatch.setattr(iva_flujo_datos, "cargar_ajustes", lambda e: {})
+    monkeypatch.setattr(iva_flujo_datos, "cargar_eventos", lambda *a: [])
+    params = {"direccion": "trasladado", "origen": "contado"}
+
+    assert client.get(f"{BASE}/2026-13/exportar", params=params).status_code == 422
+    assert client.get(f"{BASE}/2026-09/exportar", params={**params, "origen": "x"}).status_code == 422
+    assert client.get(f"{BASE}/2026-09/exportar", params={**params, "factor": 2}).status_code == 422
+
+    monkeypatch.setattr(router, "MAX_FILAS_EXPORTACION", 0)
+    monkeypatch.setattr(router.iva_flujo, "renglones", lambda *a: [{"x": 1}])
+    assert client.get(f"{BASE}/2026-09/exportar", params=params).status_code == 422
+
+
 # ── ajustes ──────────────────────────────────────────────────────────────────
 
 def _cfdi(**kw):
@@ -201,6 +235,7 @@ def test_sin_acceso_es_403(monkeypatch):
         for metodo, ruta, kw in (
             ("get", f"{BASE}/2026-09", {}),
             ("get", f"{BASE}/2026-09/detalle?direccion=trasladado&origen=contado", {}),
+            ("get", f"{BASE}/2026-09/exportar?direccion=trasladado&origen=contado", {}),
             ("get", f"{BASE}/ajustes", {}),
             ("put", f"{BASE}/ajustes", {"json": {"uuid": UUID, "direccion": "trasladado", "accion": "excluir", "motivo": "x"}}),
             ("delete", f"{BASE}/ajustes/trasladado/{UUID}", {}),

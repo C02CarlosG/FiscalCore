@@ -6,6 +6,7 @@ import { useState } from "react";
 import {
   ChevronDown,
   Building2,
+  Calculator,
   CloudDownload,
   FileCheck2,
   ListChecks,
@@ -27,6 +28,7 @@ const NAV_ITEMS = [
   { slug: "ingesta", label: "Ingesta", icon: Upload },
   { slug: "conciliacion", label: "Conciliación", icon: GitBranch },
   { slug: "cedula-iva", label: "Cédula de IVA", icon: FileText },
+  { slug: "iva-flujo", label: "IVA base flujo", icon: Calculator },
   { slug: "sat", label: "Conexión SAT", icon: CloudDownload },
   { slug: "informacion-fiscal", label: "Información fiscal", icon: FileCheck2 },
   { slug: "validaciones", label: "Validaciones", icon: ListChecks },
