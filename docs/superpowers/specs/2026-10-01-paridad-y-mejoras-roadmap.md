@@ -267,10 +267,10 @@ la **primera entrega no hecha** de su lista.
 
 | Carril | Tema | Fases y entregas, en orden | Migraciones |
 |---|---|---|---|
-| **A — CFDI** | Listado, extracción del XML, visor | F3.5a extracción v2 → F3.5b → M4 → M1 → M6 (F3.3 y F3.4 integradas con los PR #21 y #24) | `040`–`049` |
+| **A — CFDI** | Listado, extracción del XML, visor | F3.5a extracción v2 → F3.5b → F3.6 evidencias y etiquetas → M4 → M1 → M6 (F3.3 y F3.4 integradas con los PR #21 y #24) | `040`–`049` |
 | **B — SAT e infraestructura** | Descarga automática, worker, alertas | F2.1 (PR #17) → F2.2 → F2.3 → F2.4 → F2.5 → cierre de F0/F1 con datos reales → M3 | `031`–`039` |
-| **C — Cálculos fiscales** | Inicio, IVA, DIOT, ISR, papel de trabajo | F4 → F5 → F6 → F7 → M5 → M2 | `050`–`059` |
-| **D — Información fiscal y cuenta** | Constancia y opinión de cumplimiento, suscripción | F8 → M7 | `060`–`069` |
+| **C — Cálculos fiscales** | Inicio, IVA, DIOT, ISR, papel de trabajo | F4 → F5 (empieza ya; la parte de REP se completa al integrarse F3.5a) → F6 → F7 → M5 → M2 | `050`–`059` |
+| **D — Información fiscal y cuenta** | Constancia y opinión de cumplimiento, suscripción | F8 → V1 Validaciones de CFDI → U1 Usuarios y perfil → M7 | `060`–`069` |
 
 Detalle de las entregas que cambian respecto a las specs de su fase:
 
@@ -285,6 +285,19 @@ Detalle de las entregas que cambian respecto a las specs de su fase:
 - **M1 Trazabilidad (carril A)**: el clic en un importe abre el listado filtrado; el
   carril C expone en sus endpoints los filtros (o la lista de UUID) que componen cada
   cifra, y el carril A construye la navegación y la marca de riesgo en el listado.
+- **F3.6 Evidencias y etiquetas (carril A)**: adjuntar evidencias a un CFDI, etiquetas
+  por CFDI y casilla de selección para acciones en lote, como en la fila y el visor de la
+  referencia (`2026-10-01-referencia-plataforma.md`, "CFDIs emitidos / recibidos").
+- **F2.5 (carril B)** incluye el control de descargas **por día de emisión** con los
+  conteos "lo que tiene el SAT contra lo descargado", además de la descarga inicial
+  (referencia, "Descargas de CFDI").
+- **V1 Validaciones de CFDI (carril D)**: tarjetas con conteo del periodo y acumulado,
+  separadas en emitidos y recibidos (PUE con forma de pago 99, PUE con REP relacionados,
+  egresos sin CFDI relacionados, recibidos no bancarizados) y su configuración. Módulo y
+  router nuevos (`validaciones_cfdi.py`); no edita `riesgos.py` (carril C).
+- **U1 Usuarios y perfil (carril D)**: perfil del usuario y alta de usuarios por empresa
+  con su rol. Puede leer `auth.py` y `empresas.py` (carril B) pero sus cambios los hace
+  en módulos propios; si necesita tocar esos archivos, va a "Pedidos entre carriles".
 - **M3 Alertas (carril B)**: la parte de EFOS (69-B) espera a que F6 esté en `main`.
 - **Cierre de F0 y F1 con datos reales (carril B)**: cargar los CFDI de COPLASUR (lo
   hace la descarga de F2), reprocesar y cuadrar el IVA por tasa contra el encabezado.
@@ -350,6 +363,15 @@ ramifica desde la rama de otra sesión.
 | A · M1 (trazabilidad) | C · F5 en `main` | A hace M4 |
 | B · cierre F0/F1 con datos reales | B · F2.2 (worker) | — |
 
+### Límite de uso de Claude Code
+
+La sesión coordinadora revisa el límite de uso en cada check-in. Si alguna sesión
+reporta que el límite está por agotarse (o ya se agotó), ordena a **todas** las sesiones
+una pausa: terminan el paso en curso, suben su trabajo (commit y push, sin dejar nada
+sin guardar) y se detienen. Al restablecerse el límite, la coordinadora las reanuda
+con la entrega en la que iban. Ninguna sesión empieza una entrega nueva durante la
+pausa.
+
 ### Rutina de cada sesión
 
 1. `git fetch origin main` y crear la rama de la entrega desde `origin/main`.
@@ -387,11 +409,13 @@ ramifica desde la rama de otra sesión.
 | F2 | B | F2.1 en revisión (PR #17); F2.2 a F2.5 pendientes | `docs/superpowers/specs/2026-10-03-f2-descarga-automatica-design.md` (en PR #17) | un plan por entrega |
 | F3 | A | F3.1, F3.2, F3.3 (PR #21) y F3.4 (PR #24) integradas; F3.5a extracción v2 en curso; luego F3.5b | `docs/superpowers/specs/2026-10-02-f3-listado-cfdi-design.md` | `2026-10-02-f3-1-api-listado-cfdi.md`, `2026-10-03-f3-2-pantalla-cfdi.md`; un plan por entrega restante |
 | F4 | C | En curso | — | — |
-| F5, F6, F7 | C | Pendiente | — | — |
+| F5 | C | En curso (sin la parte de REP hasta que se integre F3.5a) |
+| F6, F7 | C | Pendiente | — | — |
 | F8 | D | En curso | — | — |
 | M1, M4, M6 | A | Pendiente | — | — |
 | M3 | B | Pendiente |
-| M7 | D | Pendiente (después de F8) | — | — |
+| V1, U1, M7 | D | Pendiente (después de F8) |
+| F3.6 | A | Pendiente (después de F3.5b) | — | — |
 | M2, M5 | C | Pendiente | — | — |
 
 ### Lista de verificación de F0
