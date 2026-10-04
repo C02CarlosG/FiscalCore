@@ -9,6 +9,10 @@ const PESTAÑAS: { tipo: Tipo; etiqueta: string }[] = [
   { tipo: "P", etiqueta: "Pago" },
 ];
 
+export const ETIQUETA_TIPO: Record<Tipo, string> = Object.fromEntries(
+  PESTAÑAS.map((p) => [p.tipo, p.etiqueta]),
+) as Record<Tipo, string>;
+
 const ENTERO = new Intl.NumberFormat("es-MX");
 
 /** Pestañas por tipo de comprobante. El conteo respeta los filtros de la barra. */
