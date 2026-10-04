@@ -650,3 +650,95 @@ def detalle(eventos: list[dict], periodo: str, direccion: str, origen: str, ajus
         "pagina": pagina,
         "por_pagina": por_pagina,
     }
+
+
+# ── por contraparte (DIOT, F6.2) ──────────────────────────────────────────────
+
+RFC_EXTRANJERO = "XEXX010101000"        # varios extranjeros comparten este RFC: se distinguen por nombre
+
+
+def clave_de_contraparte(rfc: Optional[str], nombre: Optional[str]) -> tuple:
+    """Llave de un tercero: su RFC, y su nombre si es un extranjero (que comparten el RFC genérico)."""
+    rfc = (rfc or "").strip().upper()
+    return (rfc, (nombre or "").strip() if rfc == RFC_EXTRANJERO else "")
+
+
+class _Tercero:
+    def __init__(self, rfc: str, nombre: str, operacion: Optional[str]) -> None:
+        self.rfc, self.nombre, self.operacion = rfc, nombre, operacion
+        self.bases = {k: CERO for k in CLAVES_TASA}
+        self.iva = {"16": CERO, "8": CERO, "otras": CERO, "total": CERO}
+        self.devoluciones = {"base": CERO, "iva": CERO}
+        self.retenciones = CERO
+        self.docs: set = set()
+        self.fuera: dict[str, list] = {}
+
+    def sumar(self, ev: dict) -> None:
+        self.docs.add(llave(ev["uuid"]))
+        if ev["origen"] == "notas_credito":
+            self.devoluciones["base"] += sum(ev["bases"].values(), CERO)
+            self.devoluciones["iva"] += ev["iva_total"]
+            self.retenciones -= ev["retencion"]
+            return
+        for k, v in ev["bases"].items():
+            self.bases[k] += v
+        for k in ("16", "8", "otras"):
+            self.iva[k] += ev["iva"][k]
+        self.iva["total"] += ev["iva_total"]
+        self.retenciones += ev["retencion"]
+
+    def excluir(self, ev: dict, motivo: str) -> None:
+        acum = self.fuera.setdefault(motivo, [set(), CERO, CERO])
+        signo = -1 if ev["origen"] == "notas_credito" else 1
+        acum[0].add(llave(ev["uuid"]))
+        acum[1] += signo * ev["iva_total"]
+        acum[2] += signo * sum(ev["bases"].values(), CERO)
+
+    def publico(self, factor: Decimal) -> dict:
+        neto = self.iva["total"] - self.devoluciones["iva"]
+        acreditable = neto * factor
+        return {
+            "contraparte_rfc": self.rfc,
+            "contraparte": self.nombre,
+            "tipo_operacion": self.operacion,
+            "cfdi": len(self.docs),
+            "actos": {k: _q(v) for k, v in self.bases.items()},        # incluye «no_objeto» y «exento»
+            "iva_pagado": {k: _q(v) for k, v in self.iva.items()},
+            "devoluciones": {"base": _q(self.devoluciones["base"]), "iva": _q(self.devoluciones["iva"])},
+            "iva_acreditable": _q(acreditable),
+            "iva_no_acreditable": {
+                "proporcion": _q(neto - acreditable),
+                "por_motivo": {m: {"cfdi": len(v[0]), "iva": _q(v[1]), "base": _q(v[2])} for m, v in self.fuera.items()},
+                "total": _q(neto - acreditable + sum((v[1] for v in self.fuera.values()), CERO)),
+            },
+            "retenciones": _q(self.retenciones),
+        }
+
+
+def por_contraparte(eventos: list[dict], periodo: str, ajustes: dict, factor: Decimal = UNO,
+                    operacion_de: Optional[Any] = None) -> list[dict]:
+    """El acreditable del periodo visto por tercero y tipo de operación (insumo de la DIOT).
+
+    Usa las mismas reglas que ``resumen`` (``estado_en_periodo``: excluidos, reasignados y ajustes), así que la suma de
+    ``iva_acreditable`` de todos los terceros es el ``acreditable.ajustado`` del resumen del mismo periodo. Las notas de
+    crédito recibidas van en ``devoluciones`` (valor e IVA aparte) y restan del neto. ``operacion_de(evento)`` devuelve el
+    tipo de operación que le toca a un CFDI (por defecto ``None``); un tercero con dos operaciones sale en dos renglones.
+    La región (zona norte/sur) no se calcula: no está en los datos."""
+    factor = _dec(factor)
+    terceros: dict[tuple, _Tercero] = {}
+    for ev in eventos:
+        if ev["direccion"] != "acreditable":
+            continue
+        est = estado_en_periodo(ev, periodo, ajustes)
+        if est is None or est[0] == "reasignado":
+            continue
+        rfc, nombre = clave_de_contraparte(ev["contraparte_rfc"], ev["contraparte"])
+        operacion = operacion_de(ev) if operacion_de else None
+        t = terceros.get((rfc, nombre, operacion))
+        if t is None:
+            t = terceros[(rfc, nombre, operacion)] = _Tercero(rfc, nombre or (ev["contraparte"] or ""), operacion)
+        if est[0] == "considerado":
+            t.sumar(ev)
+        else:
+            t.excluir(ev, est[1])
+    return [t.publico(factor) for t in sorted(terceros.values(), key=lambda x: (x.nombre, x.rfc, x.operacion or ""))]

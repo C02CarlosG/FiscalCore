@@ -41,8 +41,11 @@ genérico; la `87` solo aplica al `15`. **Las claves de ambos catálogos deben c
 el revisor fiscal las tomó de memoria porque el entorno no puede consultarlo. Si difieren se corrigen en `diot_catalogos.py` y en los
 CHECK de la 051 (misma lista).
 
-**`diot_terceros_periodo`** (052, F6.2): tipo de tercero y de operación **por periodo**. Un tercero puede tener **varias operaciones en
-un mismo periodo**: la llave es `(empresa_id, periodo, proveedor_id, tipo_operacion)`. Si no hay renglón, aplica el default del catálogo.
+**`diot_terceros_periodo`** (054, F6.2): tipo de tercero y de operación de un proveedor **en un periodo** (única por empresa, periodo
+y proveedor; si falta aplica el default del catálogo). **`diot_operaciones_cfdi`** (054): tipo de operación de **un CFDI** en un
+periodo, que manda sobre lo anterior; así un mismo tercero se declara con **varias operaciones en el mismo periodo** (sale en un
+renglón por operación). *Desviación del plan de la revisión*: la llave `(empresa, periodo, proveedor, tipo_operacion)` no
+alcanza para repartir los importes entre operaciones, por eso la asignación es por CFDI.
 
 Todo cambio del catálogo o del periodo queda en `auditoria` en la misma transacción.
 
@@ -75,8 +78,10 @@ ajustes del contador. Por tercero (`contraparte_rfc`):
 - Los CFDI reasignados a otro periodo o excluidos a mano siguen la regla del motor: no suman en este periodo.
 
 La suma de IVA acreditable de todos los terceros **es** el acreditable de la cédula de IVA del mismo periodo (prueba de
-cuadre obligatoria). El comparativo de la cédula contra "IVA devengado (DIOT)" deja de leer `cfdi.iva_trasladado` y usa
-esta DIOT.
+cuadre obligatoria; `cuadre_con_iva` en la respuesta). El comparativo de la cédula contra «IVA devengado (DIOT)» **se
+conserva** (lee `cfdi.iva_trasladado`): comparar la DIOT por flujo contra el acreditable del mismo motor siempre daría cero y
+perdería su función de control. `GET /diot/{periodo}` (devengado, tipo de operación fijo `03`) queda **obsoleto** y se retira
+cuando el frontend migre a `/diot-flujo`.
 
 **Trabajo de F6.2 dentro del motor `iva_flujo`** (no se calcula por fuera de él): la columna «no objeto», el IVA no acreditable
 por motivo y el 8 % por región (norte o sur) los tiene que producir el motor, por contraparte. La región no está en los datos hoy:
@@ -100,4 +105,5 @@ fronteriza (8 %); importaciones quedan fuera de F6 (no hay pedimentos).
 | D-F6-2 | Tipo de tercero/operación por periodo con default en el catálogo | Un solo valor por tercero | Decidida (el SAT los pide por periodo) |
 | D-F6-3 | El archivo de carga espera el layout oficial | Construirlo de blogs | Decidida: no se inventa el layout |
 | D-F6-5 | El RFC genérico no es único: los extranjeros se distinguen por `id` y por ID fiscal | RFC único por empresa | Decidida (si no, solo cabría un extranjero) |
-| D-F6-4 | `GET /diot/{periodo}` (devengado) se conserva hasta F6.2 y luego delega a la DIOT por flujo | Quitarlo ya | Abierta |
+| D-F6-4 | `GET /diot/{periodo}` (devengado) queda obsoleto; el comparativo de la cédula sigue contra el devengado | Que delegue a la DIOT por flujo | Decidida |
+| D-F6-6 | Clasificación por periodo (tercero) y por CFDI (operación); el 8 % por región y las importaciones quedan fuera | Una llave con `tipo_operacion` | Decidida |

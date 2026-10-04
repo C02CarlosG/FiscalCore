@@ -2977,6 +2977,165 @@ paths:
         '422':
           description: Codigos o reglas cruzadas invalidos
 
+  /api/v1/empresas/{empresa_id}/diot-flujo/{periodo}:
+    get:
+      operationId: diotFlujo
+      tags: [DIOT]
+      summary: DIOT del mes por flujo (por tercero y tipo de operacion)
+      description: |
+        El acreditable del mes visto por tercero, con el mismo motor, ajustes y factor de prorrateo que `/iva-flujo` y la
+        cedula de IVA: valor de actos por tasa (incluye exento y no objeto), IVA pagado por tasa, devoluciones, descuentos y
+        bonificaciones (valor e IVA en su propia columna), IVA acreditable e IVA no acreditable (por proporcion y por motivo)
+        y retenciones. `cuadre_con_iva` confirma que la suma coincide con el acreditable ajustado del resumen de IVA.
+        Un tercero con varios tipos de operacion en el periodo sale en varios renglones. **Escribe**: antes de calcular agrega
+        al catalogo los proveedores que falten. Las regiones (zona norte/sur) no se calculan: no estan en los datos.
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - { name: periodo, in: path, required: true, schema: { type: string, pattern: '^20[0-9]{2}-(0[1-9]|1[0-2])$' } }
+        - { name: factor, in: query, schema: { type: number, minimum: 0, maximum: 1, default: 1.0 } }
+      responses:
+        '200':
+          description: DIOT del periodo
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  empresa_id: { type: string }
+                  periodo: { type: string }
+                  factor_prorrateo: { type: number }
+                  terceros: { type: array, items: { type: object, additionalProperties: true } }
+                  totales: { type: object, additionalProperties: true }
+                  cuadre_con_iva: { type: object, additionalProperties: true }
+                  advertencias_iva: { type: array, items: { type: object, additionalProperties: true } }
+                  operaciones_por_cfdi: { type: integer }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '422':
+          description: periodo o factor invalido
+
+  /api/v1/empresas/{empresa_id}/diot-flujo/{periodo}/exportar:
+    get:
+      operationId: exportarDiotFlujo
+      tags: [DIOT]
+      summary: Excel de la DIOT del periodo
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - { name: periodo, in: path, required: true, schema: { type: string, pattern: '^20[0-9]{2}-(0[1-9]|1[0-2])$' } }
+        - { name: factor, in: query, schema: { type: number, minimum: 0, maximum: 1, default: 1.0 } }
+      responses:
+        '200':
+          description: Libro de Excel (hojas DIOT y Totales)
+          content:
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '422':
+          description: periodo o factor invalido
+
+  /api/v1/empresas/{empresa_id}/diot-flujo/{periodo}/terceros/{proveedor_id}:
+    put:
+      operationId: clasificarTerceroDiot
+      tags: [DIOT]
+      summary: Tipo de tercero y de operacion de un proveedor en este periodo
+      description: Lo que no se manda cae al catalogo. Valida las reglas cruzadas (el 05 exige ID fiscal y pais, el 04 un RFC no generico, la 87 solo con el 15). Queda en la auditoria.
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - { name: periodo, in: path, required: true, schema: { type: string, pattern: '^20[0-9]{2}-(0[1-9]|1[0-2])$' } }
+        - { name: proveedor_id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                tipo_tercero: { type: string, enum: ['04', '05', '15'], nullable: true }
+                tipo_operacion: { type: string, enum: ['02', '03', '06', '07', '08', '85', '87'], nullable: true }
+      responses:
+        '200':
+          description: Clasificacion guardada
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          description: Proveedor no encontrado
+        '422':
+          description: Codigos o reglas cruzadas invalidos
+    delete:
+      operationId: quitarClasificacionTerceroDiot
+      tags: [DIOT]
+      summary: Retira la clasificacion del periodo (vuelve a aplicar el catalogo)
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - { name: periodo, in: path, required: true, schema: { type: string, pattern: '^20[0-9]{2}-(0[1-9]|1[0-2])$' } }
+        - { name: proveedor_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '204':
+          description: Clasificacion retirada
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          description: Sin clasificacion para ese periodo
+
+  /api/v1/empresas/{empresa_id}/diot-flujo/{periodo}/cfdi/{uuid}:
+    put:
+      operationId: operacionDeCfdiDiot
+      tags: [DIOT]
+      summary: Tipo de operacion de un CFDI recibido en este periodo
+      description: Con esto un mismo tercero se declara con varias operaciones en el mismo periodo. Manda sobre la clasificacion del tercero. Queda en la auditoria.
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - { name: periodo, in: path, required: true, schema: { type: string, pattern: '^20[0-9]{2}-(0[1-9]|1[0-2])$' } }
+        - { name: uuid, in: path, required: true, schema: { type: string, maxLength: 36 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tipo_operacion]
+              properties:
+                tipo_operacion: { type: string, enum: ['02', '03', '06', '07', '08', '85', '87'] }
+      responses:
+        '200':
+          description: Operacion asignada
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          description: CFDI recibido no encontrado
+        '422':
+          description: Tipo de operacion invalido
+    delete:
+      operationId: quitarOperacionDeCfdiDiot
+      tags: [DIOT]
+      summary: Retira la operacion asignada al CFDI
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - { name: periodo, in: path, required: true, schema: { type: string, pattern: '^20[0-9]{2}-(0[1-9]|1[0-2])$' } }
+        - { name: uuid, in: path, required: true, schema: { type: string, maxLength: 36 } }
+      responses:
+        '204':
+          description: Operacion retirada
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          description: Sin operacion asignada a ese CFDI
+
   /api/v1/empresas/{empresa_id}/cedula-iva/{periodo}:
     get:
       operationId: cedulaIva

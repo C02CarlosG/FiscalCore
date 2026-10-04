@@ -238,6 +238,9 @@ def init_db() -> None:
         # 051 es idempotente — catálogo de proveedores de la empresa (F6.1)
         _run_sql_file("051_proveedores.sql")
 
+        # 054 es idempotente — DIOT por flujo: tipo de tercero/operación por periodo y por CFDI (F6.2)
+        _run_sql_file("054_diot.sql")
+
         # 060 es idempotente — documentos_fiscales: constancia y opinión de cumplimiento en PDF (F8, carril D)
         _run_sql_file("060_documentos_fiscales.sql")
 
