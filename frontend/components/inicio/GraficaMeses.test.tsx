@@ -21,7 +21,7 @@ describe("GraficaMeses", () => {
 
   it("la altura es proporcional al mayor valor de la serie", () => {
     const { container } = render(<GraficaMeses meses={meses()} periodo="2026-09" />);
-    const barras = [...container.querySelectorAll('rect[data-serie="ingresos"]')];
+    const barras = Array.from(container.querySelectorAll('rect[data-serie="ingresos"]'));
     const alto = (n: number) => Number(barras[n].getAttribute("height"));
 
     expect(alto(11)).toBeGreaterThan(alto(5));                    // diciembre de la serie > marzo

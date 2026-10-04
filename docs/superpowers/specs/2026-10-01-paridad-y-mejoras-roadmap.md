@@ -382,7 +382,7 @@ ramifica desde la rama de otra sesión.
 | F1 | B (cierre) | Integrada. Falta el cierre con datos reales: reprocesar los CFDI de COPLASUR y cuadrar el IVA por tasa contra el encabezado | este documento, sección "Fases" y "Reglas comunes" | `docs/superpowers/plans/2026-10-01-fase1-detalle-fiscal-cfdi.md` |
 | F2 | B | F2.1 en revisión (PR #17); F2.2 a F2.5 pendientes | `docs/superpowers/specs/2026-10-03-f2-descarga-automatica-design.md` (en PR #17) | un plan por entrega |
 | F3 | A | F3.1 y F3.2 integradas; F3.4 en curso; luego F3.5a extracción v2, F3.3, F3.5b | `docs/superpowers/specs/2026-10-02-f3-listado-cfdi-design.md` | `2026-10-02-f3-1-api-listado-cfdi.md`, `2026-10-03-f3-2-pantalla-cfdi.md`; un plan por entrega restante |
-| F4 | C | Por empezar (sesión "Acceso al proyecto") | — | — |
+| F4 | C | Implementada, en revisión (PR `C·F4`); falta cuadrar con los CFDI reales de COPLASUR | `docs/superpowers/specs/2026-10-04-f4-inicio-design.md` | `docs/superpowers/plans/2026-10-04-f4-inicio.md` |
 | F5, F6, F7 | C | Pendiente | — | — |
 | F8 | B | Pendiente (después de F2.5) | — | — |
 | M1, M4, M6 | A | Pendiente | — | — |

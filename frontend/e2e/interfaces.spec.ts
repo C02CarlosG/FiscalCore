@@ -28,6 +28,42 @@ const columnasCfdi = {
   ],
   concepto: [],
 };
+const mesesInicio = Array.from({ length: 12 }, (_, i) => {
+  const mes = ((9 + i) % 12) + 1;                                   // oct 2025 … sep 2026
+  const periodo = `${mes >= 10 ? 2025 : 2026}-${String(mes).padStart(2, "0")}`;
+  return {
+    periodo,
+    ingresos: { facturado: 1000 * (i + 1), notas_credito: 0, neto: 1000 * (i + 1), cfdi: i + 1 },
+    gastos: { neto: 400 * (i + 1) },
+  };
+});
+const resumenInicio = {
+  empresa_id: "empresa-demo",
+  periodo: "2026-09",
+  ejercicio: 2026,
+  ingresos: {
+    periodo: { facturado: 12000, notas_credito: 0, neto: 12000, cfdi: 12 },
+    acumulado: { facturado: 90000, notas_credito: 0, neto: 90000, cfdi: 80 },
+  },
+  gastos: {
+    periodo: { facturado: 4800, notas_credito: 0, neto: 4800, cfdi: 9, nomina: 1500 },
+    acumulado: { facturado: 30000, notas_credito: 0, neto: 30000, cfdi: 70, nomina: 0 },
+  },
+  meses: mesesInicio,
+};
+const ivaAnualInicio = {
+  empresa_id: "empresa-demo",
+  ejercicio: 2026,
+  factor_prorrateo: 1,
+  iva_retenido_incluido: false,
+  meses: Array.from({ length: 12 }, (_, i) => ({
+    periodo: `2026-${String(i + 1).padStart(2, "0")}`,
+    trasladado: { pue: 160 * (i + 1), ppd: 0, notas_credito: 0, total: 160 * (i + 1) },
+    acreditable: { pue: 100 * (i + 1), ppd: 0, notas_credito: 0, excluido_efectivo: 0, bruto: 100 * (i + 1), ajustado: 100 * (i + 1) },
+    resultado: { iva_retenido: 0, iva_por_pagar: 60 * (i + 1), saldo_a_cargo: 60 * (i + 1), saldo_a_favor: 0 },
+  })),
+  totales: { trasladado: 12480, acreditable: 7800, iva_retenido: 0, iva_por_pagar: 4680 },
+};
 const filasCfdi = [
   { uuid: "cfdi-demo-001", fecha_emision: "2026-09-01T10:00:00", folio: "001", contraparte: "Proveedor ficticio uno", total: 1250, estado: "vigente" },
   { uuid: "cfdi-demo-002", fecha_emision: "2026-09-02T11:30:00", folio: "002", contraparte: "Proveedor ficticio dos", total: 2500, estado: "vigente" },
@@ -156,6 +192,11 @@ test.beforeEach(async ({ page }) => {
         resultado: { iva_por_pagar: 0, saldo_a_cargo: 0, saldo_a_favor: 0 },
         comparativo_sat: { diot_iva_pagado: 0, diferencia: 0 },
       };
+    } else if (path.endsWith("/inicio/resumen")) {
+      const periodo = new URL(route.request().url()).searchParams.get("periodo");
+      body = { ...resumenInicio, periodo };
+    } else if (path.endsWith("/inicio/iva-anual")) {
+      body = ivaAnualInicio;
     } else if (path.endsWith("/cfdis/columnas")) {
       body = columnasCfdi;
     } else if (path.endsWith("/cfdis/resumen")) {
@@ -224,6 +265,47 @@ test("dashboard carga dentro del shell de empresa", async ({ page }) => {
   await page.goto(`/empresas/${empresaId}/dashboard`);
   await expect(page.getByRole("heading", { name: "Dashboard" })).toBeVisible();
   await expect(page.getByText("Score fiscal del periodo")).toBeVisible();
+});
+
+test("el Inicio muestra ingresos y gastos, la gráfica de 12 meses y el IVA del ejercicio", async ({ page }) => {
+  await page.goto(`/empresas/${empresaId}/dashboard?periodo=2026-09`);
+
+  await expect(page.getByText("Ingresos netos del periodo")).toBeVisible();
+  await expect(page.getByRole("region", { name: "Ingresos y gastos" })).toContainText("$12,000.00");
+  await expect(page.getByRole("img", { name: /últimos 12 meses/ })).toBeVisible();
+  await expect(page.getByRole("table", { name: "Ingresos por mes" }).getByRole("row")).toHaveCount(14);
+  await expect(page.getByRole("heading", { name: "IVA del ejercicio 2026" })).toBeVisible();
+  await expect(page.getByRole("table", { name: "IVA trasladado cobrado por mes" })).toBeVisible();
+  await expect(page.getByText("Score fiscal del periodo")).toBeVisible();     // lo de riesgos se conserva
+});
+
+test("el IVA del ejercicio cambia de pestaña y atenúa los meses posteriores al periodo", async ({ page }) => {
+  await page.goto(`/empresas/${empresaId}/dashboard?periodo=2026-03`);
+
+  await page.getByRole("tab", { name: "Resultado" }).click();
+  const tabla = page.getByRole("table", { name: "Resultado del IVA por mes" });
+  await expect(tabla.getByRole("row", { name: /2026 - Marzo/ })).toContainText("$180.00");
+  await expect(tabla.getByRole("row", { name: /2026 - Abril/ })).not.toContainText("$");
+});
+
+test("cambiar el periodo del Inicio vuelve a pedir ingresos y gastos de ese mes", async ({ page }) => {
+  await page.goto(`/empresas/${empresaId}/dashboard?periodo=2026-09`);
+  await expect(page.getByText("Ingresos netos del periodo")).toBeVisible();
+
+  const peticion = page.waitForRequest((r) => r.url().includes("/inicio/resumen?periodo=2026-08"));
+  await page.getByRole("combobox", { name: "Periodo" }).click();
+  await page.getByRole("option", { name: "2026 - Agosto" }).click();
+  await peticion;
+  await expect(page).toHaveURL(/periodo=2026-08/);
+});
+
+test("el Inicio sigue legible en móvil sin desbordar la página", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 800 });
+  await page.goto(`/empresas/${empresaId}/dashboard?periodo=2026-09`);
+  await expect(page.getByText("Ingresos netos del periodo")).toBeVisible();
+
+  const desborda = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
+  expect(desborda).toBe(false);
 });
 
 test("dashboard muestra skeleton mientras consulta", async ({ page }) => {

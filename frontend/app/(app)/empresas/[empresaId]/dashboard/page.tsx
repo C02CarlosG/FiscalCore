@@ -5,6 +5,7 @@ import { AlertTriangle, DollarSign, GitBranch, TrendingUp } from "lucide-react";
 import { useDashboard } from "@/hooks/useDashboard";
 import { usePeriodoGlobal } from "@/hooks/usePeriodoGlobal";
 import { usePeriodos } from "@/hooks/usePeriodos";
+import { InicioFinanciero } from "@/components/inicio/InicioFinanciero";
 import { ResumenRiesgos } from "@/components/dashboard/ResumenRiesgos";
 import { RiesgosTable } from "@/components/dashboard/RiesgosTable";
 import { ErrorState } from "@/components/shared/ErrorState";
@@ -36,6 +37,8 @@ export default function DashboardPage() {
         onChange={setPeriodo}
         periodosConDatos={periodos.data?.periodos ?? []}
       />
+
+      <InicioFinanciero empresaId={params.empresaId} periodo={periodo} />
 
       {dashboard.isLoading && <LoadingState label="Cargando dashboard" />}
       {dashboard.isError && (
