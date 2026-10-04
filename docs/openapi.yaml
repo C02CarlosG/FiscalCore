@@ -21,6 +21,8 @@ servers:
     description: Desarrollo local
 
 tags:
+  - name: Preferencias
+    description: Orden y visibilidad de columnas de las tablas, por usuario
   - name: Sistema
     description: Estado y salud del sistema
   - name: Auth
@@ -1263,6 +1265,109 @@ paths:
           $ref: '#/components/responses/ForbiddenError'
         '422':
           description: direccion o tipo invalido
+
+  /api/v1/empresas/{empresa_id}/cfdis/exportar:
+    get:
+      operationId: exportarCfdis
+      tags: [CFDI]
+      summary: Exportar a Excel el listado de CFDI filtrado
+      description: |
+        Libro .xlsx con todas las filas que cumplen los filtros (sin paginar),
+        las columnas de `columnas` en ese orden (sin `columnas`, las visibles por
+        defecto del catalogo) y una hoja `Totales` con el periodo y el
+        acumulado, las mismas cifras que `/cfdis/resumen`. Maximo 50,000 filas:
+        con mas responde 422 pidiendo acotar los filtros. Cada exportacion se
+        registra en la auditoria (`cfdi_exportado`).
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - { name: direccion, in: query, required: true, schema: { type: string, enum: [emitidos, recibidos] } }
+        - { name: periodo, in: query, required: true, schema: { type: string, pattern: '^\d{4}-(0[1-9]|1[0-2])$' } }
+        - { name: tipo, in: query, schema: { type: string, enum: [I, E, T, N, P], default: I } }
+        - { name: estado, in: query, schema: { type: string, enum: [vigente, cancelado, todos], default: vigente } }
+        - { name: metodo, in: query, schema: { type: string, enum: [PUE, PPD, todos], default: todos } }
+        - { name: pago, in: query, schema: { type: string, enum: [pendientes, pagadas, todos], default: todos } }
+        - { name: q, in: query, schema: { type: string, maxLength: 100 } }
+        - { name: filtros, in: query, schema: { type: string } }
+        - { name: orden, in: query, schema: { type: string, default: fecha_emision } }
+        - { name: dir, in: query, schema: { type: string, enum: [asc, desc], default: asc } }
+        - { name: columnas, in: query, schema: { type: string }, description: 'Claves de columna separadas por coma, en el orden deseado' }
+      responses:
+        '200':
+          description: Archivo Excel
+          content:
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema: { type: string, format: binary }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '422':
+          description: Parametro o columna fuera del catalogo, o mas de 50,000 filas
+
+  /api/v1/preferencias/tablas/{vista}:
+    parameters:
+      - { name: vista, in: path, required: true, schema: { type: string, pattern: '^[A-Za-z0-9][A-Za-z0-9-]{0,79}$' }, description: 'Tabla a la que aplica, por ejemplo cfdi-emitidos-I' }
+    get:
+      operationId: leerPreferenciaTabla
+      tags: [Preferencias]
+      summary: Orden y visibilidad de columnas guardados por el usuario
+      description: |
+        `columnas` es null si el usuario no ha guardado nada: la pantalla usa
+        entonces el orden y la visibilidad del catalogo. Las claves que ya no
+        existan en el catalogo se ignoran al aplicarlas.
+      responses:
+        '200':
+          description: Preferencia del usuario
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  columnas:
+                    type: array
+                    nullable: true
+                    items: { type: object, properties: { clave: { type: string }, visible: { type: boolean } } }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '422':
+          description: vista invalida
+    put:
+      operationId: guardarPreferenciaTabla
+      tags: [Preferencias]
+      summary: Guardar orden y visibilidad de columnas
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [columnas]
+              properties:
+                columnas:
+                  type: array
+                  maxItems: 200
+                  items:
+                    type: object
+                    required: [clave, visible]
+                    properties: { clave: { type: string }, visible: { type: boolean } }
+      responses:
+        '200':
+          description: Preferencia guardada
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '422':
+          description: vista, claves o cuerpo invalidos
+    delete:
+      operationId: restablecerPreferenciaTabla
+      tags: [Preferencias]
+      summary: Restablecer las columnas al catalogo
+      responses:
+        '204':
+          description: Preferencia eliminada
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '422':
+          description: vista invalida
 
   # ============================================================
   # DASHBOARD
