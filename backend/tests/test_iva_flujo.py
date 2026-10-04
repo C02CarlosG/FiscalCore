@@ -811,12 +811,12 @@ def test_equivalencia_invertida_se_detecta_contra_el_tipo_de_cambio_del_document
     assert ("equivalencia_sospechosa" in e["marcas"]) is sospechosa
 
 
-def test_equivalencia_sospechosa_se_advierte_pero_si_suma():
+def test_equivalencia_sospechosa_no_suma_y_se_advierte():
     d = doc("U1", metodo_pago="PPD", moneda="USD", tipo_cambio=D("20"), total=D("1160"))
     p = pago("U1", moneda_dr="USD", equivalencia_dr=D("20"), pago_moneda="MXN")
     e = f.evento_de_pago(p, d, RFC)
 
-    assert f.motivo_exclusion(e) is None
+    assert e["iva_total"] == 0 and f.motivo_exclusion(e) == "sin_equivalencia"
     assert "equivalencia_sospechosa" in {a["codigo"] for a in f.resumen([e], "2026-09", {})["advertencias"]}
 
 
@@ -836,3 +836,63 @@ def test_sin_desglose_a_tasa_de_8_o_distinta_cae_en_su_clave():
     otra = f.eventos_de_documento(doc("U2", subtotal=D("1000"), iva_trasladado=D("30"), impuestos=[]), RFC)[0]
 
     assert ocho["bases"]["8"] == D("1000") and otra["bases"]["otras"] == D("1000")
+
+
+# ── F5.4: REP completo ───────────────────────────────────────────────────────
+
+def _ppd(**kw):
+    return doc("U1", metodo_pago="PPD", **kw)
+
+
+@pytest.mark.parametrize("objeto", ["01", "04"])
+def test_objeto_imp_dr_sin_iva_es_base_no_objeto(objeto):
+    e = f.evento_de_pago(pago("U1", importe="580", objeto_imp_dr=objeto), _ppd(), RFC)
+
+    assert e["iva_total"] == 0 and e["bases"]["no_objeto"] == D("580") and not e["marcas"]
+
+
+def test_objeto_imp_dr_02_usa_el_desglose_del_documento():
+    e = f.evento_de_pago(pago("U1", objeto_imp_dr="02"), _ppd(), RFC)
+
+    assert e["iva_total"] == D("80") and "aproximado" not in e["marcas"]
+
+
+def test_forma_pago_del_rep_manda_sobre_la_del_ppd():
+    d = recibido("R1", metodo_pago="PPD", forma_pago="99", total=D("5800"), iva_trasladado=D("800"))
+    p = pago("R1", importe="2500", forma_pago_p="01", impuestos_dr=[tras("0.16", 2155, 345)])
+
+    e = f.evento_de_pago(p, d, RFC)
+
+    assert e["forma_pago"] == "01" and "forma_pago_rep" not in e["marcas"]
+    assert f.motivo_exclusion(e) == "efectivo"
+
+
+def test_sin_forma_de_pago_del_rep_se_advierte():
+    d = recibido("R1", metodo_pago="PPD", forma_pago="99")
+    e = f.evento_de_pago(pago("R1"), d, RFC)
+
+    assert "forma_pago_rep" in e["marcas"] and f.motivo_exclusion(e) is None
+
+
+@pytest.mark.parametrize("pago_extra,cuadra", [
+    ({"impuestos_p": [tras("0.16", 500, 80)]}, True),
+    ({"impuestos_p": [tras("0.16", 500, 90)]}, False),
+    ({"totales": {"total_traslados_iva16": D("80"), "total_traslados_iva8": None}, "n_pagos_rep": 1}, True),
+    ({"totales": {"total_traslados_iva16": D("70"), "total_traslados_iva8": None}, "n_pagos_rep": 1}, False),
+    ({}, True),
+])
+def test_cuadre_rep_contra_impuestos_p_y_totales(pago_extra, cuadra):
+    assert f.cuadre_rep(pago("U1", **pago_extra), D("80")) is cuadra
+
+
+def test_cuadre_rep_convierte_impuestos_p_con_el_tipo_de_cambio_del_pago():
+    p = pago("U1", pago_moneda="USD", pago_tipo_cambio=D("20"), impuestos_p=[tras("0.16", 100, 16)])
+
+    assert f.cuadre_rep(p, D("320")) is True and f.cuadre_rep(p, D("16")) is False
+
+
+def test_el_anticipo_se_avisa():
+    d = doc("U1", es_anticipo_sat=True)
+    avisos = {a["codigo"] for a in f.resumen(f.eventos_de_documento(d, RFC), "2026-09", {})["advertencias"]}
+
+    assert "anticipo" in avisos

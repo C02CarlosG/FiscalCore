@@ -71,14 +71,16 @@ Se acredita solo la erogación deducible y pagada. No se consideran, con su moti
 
 - **Nota de crédito recibida de un CFDI que nunca se acreditó** (compra en efectivo mayor a $2,000, uso S01/CP01/CN01) no resta IVA acreditable (LIVA 7: solo se ajusta lo que se acreditó): hereda el motivo `original_no_acreditable`. El motor la resuelve con los CFDI que el Egreso relaciona (`cfdi_relacionados`).
 - Las reglas de efectivo y de uso aplican a lo que se compra o se paga; **no** a una nota de crédito recibida (esa hereda la del original, arriba). El efectivo se mide en pesos: el total del CFDI (contado) o lo pagado (crédito).
-- La forma de pago de un REP (`FormaDePagoP`) no se guarda: un pago en efectivo de una factura a crédito no se detecta y la pantalla lo advierte (`forma_pago_rep`). Se completa en F5.4.
+- La forma de pago de un REP (`FormaDePagoP`) todavía no se guarda en `pagos_cfdi`: mientras falte, un pago en efectivo de una factura a crédito no se detecta y la pantalla lo advierte (`forma_pago_rep`). El motor ya la lee en un solo lugar (`forma_pago_del_cobro`, clave `forma_pago_p` del pago): en cuanto el carril A la guarde y el loader la seleccione, la exclusión por efectivo de un cobro a crédito se activa sola, sin otro cambio en el motor.
 - **La retención de IVA se entera aunque el IVA no sea acreditable** (LIVA 1-A): `retenciones_a_enterar` incluye la de los CFDI no acreditables por efectivo o por uso; solo la exclusión manual del contador la quita.
 
 Los CFDI no considerados no suman, pero **se listan** con su motivo.
 
 ### Pagos de varios documentos y de varios meses
 
-Un REP trae un nodo de pago por fecha; cada documento relacionado trae su propio desglose (`pagos_relaciones_impuestos`). Cada documento relacionado es un evento independiente con la fecha de **su pago**. Hasta F5.4 no se leen `pago20:Totales` ni `ImpuestosP`, de modo que no hay "control de cuadre" contra la cifra oficial del REP; el motor lo deja como función aislada (`iva_de_pago`) para que F5.4 la sustituya sin tocar el resto.
+Un REP trae un nodo de pago por fecha; cada documento relacionado trae su propio desglose (`pagos_relaciones_impuestos`). Cada documento relacionado es un evento independiente con la fecha de **su pago**. Desde F5.4 el motor también controla el cuadre contra lo que el propio REP declara (`cuadre_rep`): para cada pago compara el IVA calculado de **todos** sus documentos con `ImpuestosP` (convertido con el tipo de cambio del pago) y, si el REP trae un solo pago, con `pago20:Totales` (pesos). Si difiere más de un centavo por documento, marca `descuadre_rep` y advierte; el cálculo sigue usando el desglose del documento. Solo se compara cuando se cargaron todos los documentos del pago.
+
+`ObjetoImpDR` decide cómo se obtiene el IVA de un cobro: `01` (no objeto) y `04` (sí objeto y no causa impuesto) son base sin IVA (`no_objeto`); con `ImpuestosDR` manda el desglose del documento; sin ellos (`03`, Pagos 1.0) se aproxima por proporción.
 
 ### Interruptor "no considerar IVA" y periodo reasignado
 
@@ -172,3 +174,10 @@ Ejemplos de la revisión fiscal que deben salir exactos:
 - **Retención solo en el encabezado:** se usa y se marca `retencion_sin_desglose` (distinta de `descuadre_retencion`).
 - **Pendiente para F5.4:** tratar `equivalencia_sospechosa` como `sin_equivalencia` cuando el cociente con el
   tipo de cambio salga de [0.5, 2], y avisos informativos para las marcas `anticipo` y `aplicacion_anticipo`.
+
+## Notas de F5.4
+
+- **`equivalencia_sospechosa` ya no suma**: si el factor a pesos del pago sale de [0.5, 2] respecto al tipo de cambio del CFDI (equivalencia invertida), se trata como `sin_equivalencia` (no se suma, se advierte) en vez de sumar un IVA cientos de veces menor.
+- **Anticipos**: aviso informativo `anticipo` (el IVA se causa al cobrar y la aplicación forma de pago 30 lo resta).
+- **Etiquetas del frontend** para las marcas nuevas (`descuadre_rep`, `retencion_sin_desglose`, `descuadre_retencion`, `equivalencia_sospechosa`, `forma_pago_rep`).
+- **Sigue abierto**: conceptos con `ObjetoImp` 03/04/05 sin base en `cfdi_impuestos` (M-1, "objeto sin desglose") y D-F5-7 (Egreso contra PPD sin cobrar).

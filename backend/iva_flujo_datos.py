@@ -101,13 +101,21 @@ def _cargar(empresa_id: str, rfc: str, desde: str, hasta: str, reasignados: list
 
     pagos = db.query_all(
         f"""
-        SELECT pc.uuid_cfdi_pago AS uuid_pago, pc.fecha_pago, pc.version_pago, pc.moneda AS pago_moneda,
-               pc.tipo_cambio AS pago_tipo_cambio, rep.estado AS pago_estado,
-               pr.cfdi_uuid, pr.parcialidad, pr.importe_pagado, pr.moneda_dr, pr.equivalencia_dr,
-               COALESCE(ri.impuestos, '[]'::json) AS impuestos_dr
+        SELECT pc.id AS pago_id, pc.uuid_cfdi_pago AS uuid_pago, pc.fecha_pago, pc.version_pago,
+               pc.moneda AS pago_moneda, pc.tipo_cambio AS pago_tipo_cambio, rep.estado AS pago_estado,
+               pr.cfdi_uuid, pr.parcialidad, pr.importe_pagado, pr.moneda_dr, pr.equivalencia_dr, pr.objeto_imp_dr,
+               COALESCE(ri.impuestos, '[]'::json) AS impuestos_dr,
+               COALESCE(ip.impuestos, '[]'::json) AS impuestos_p,
+               (SELECT COUNT(*) FROM pagos_relaciones x WHERE x.pago_id = pc.id) AS n_relaciones,
+               (SELECT COUNT(*) FROM pagos_cfdi y WHERE y.cfdi_id = pc.cfdi_id) AS n_pagos_rep,
+               to_jsonb(tot) - 'cfdi_id' AS totales
         FROM pagos_relaciones pr
         JOIN pagos_cfdi pc ON pc.id = pr.pago_id
         JOIN cfdi rep ON rep.id = pc.cfdi_id
+        LEFT JOIN cfdi_pagos_totales tot ON tot.cfdi_id = pc.cfdi_id
+        LEFT JOIN LATERAL (
+            SELECT {_FILAS_IMPUESTOS} AS impuestos FROM pagos_impuestos WHERE pago_id = pc.id AND impuesto = '002'
+        ) ip ON TRUE
         LEFT JOIN LATERAL (
             SELECT {_FILAS_IMPUESTOS} AS impuestos FROM pagos_relaciones_impuestos WHERE relacion_id = pr.id AND impuesto = '002'
         ) ri ON TRUE
@@ -118,12 +126,33 @@ def _cargar(empresa_id: str, rfc: str, desde: str, hasta: str, reasignados: list
     )
 
     eventos = [e for d in docs for e in iva_flujo.eventos_de_documento(d, rfc)]
+    por_pago: dict = {}
     for p in pagos:
         doc: Optional[dict] = por_uuid.get(iva_flujo.llave(p["cfdi_uuid"]))
         if doc is None:
             continue
-        eventos.extend(iva_flujo.eventos_de_pago(p, doc, rfc))
+        nuevos = iva_flujo.eventos_de_pago(p, doc, rfc)
+        eventos.extend(nuevos)
+        if nuevos:
+            grupo = por_pago.setdefault(p["pago_id"], {"pago": p, "filas": 0, "eventos": []})
+            grupo["filas"] += 1
+            grupo["eventos"].extend(nuevos)
+    _marcar_descuadres_de_rep(por_pago)
     return eventos
+
+
+def _marcar_descuadres_de_rep(por_pago: dict) -> None:
+    """Compara, por pago, el IVA de todos sus documentos con lo que el REP declara. Solo cuando se
+    cargaron todos los documentos del pago (con uno reasignado a otro periodo la suma sería parcial)."""
+    for grupo in por_pago.values():
+        pago = grupo["pago"]
+        if grupo["filas"] != int(pago.get("n_relaciones") or 0):
+            continue
+        for direccion in iva_flujo.DIRECCIONES:
+            evs = [e for e in grupo["eventos"] if e["direccion"] == direccion]
+            if evs and not iva_flujo.cuadre_rep(pago, sum((e["iva_total"] for e in evs), iva_flujo.CERO)):
+                for e in evs:
+                    e["marcas"].add("descuadre_rep")
 
 
 # ── Ajustes: el cambio y su auditoría van en la misma transacción ─────────────

@@ -51,8 +51,11 @@ def _recibido(db, empresa_id, n, impuestos=(), **kw):
 
 
 def _rep(db, empresa_id, n, documentos, fecha="2026-09-25 12:00:00", version="2.0", estado="vigente",
-         moneda="MXN", tipo_cambio="1", rfc_emisor=RFC, rfc_receptor=OTRO):
-    """REP con un pago a ``documentos`` = [(uuid_docto, importe, [(tasa, base, importe)], moneda_dr, equivalencia)]."""
+         moneda="MXN", tipo_cambio="1", rfc_emisor=RFC, rfc_receptor=OTRO, objeto_imp_dr=None,
+         impuestos_p=None, totales=None):
+    """REP con un pago a ``documentos`` = [(uuid_docto, importe, [(tasa, base, importe)], moneda_dr, equivalencia)].
+    ``objeto_imp_dr`` va a todos los documentos; ``impuestos_p`` = [(tasa, base, importe)] (ImpuestosP) y
+    ``totales`` = {columna: valor} (pago20:Totales) son los controles que el REP declara."""
     rep = _cfdi(db, empresa_id, n, (), tipo_comprobante="P", subtotal="0", iva_trasladado="0", total="0",
                 metodo_pago=None, forma_pago=None, uso_cfdi="CP01", moneda="XXX", estado=estado,
                 rfc_emisor=rfc_emisor, rfc_receptor=rfc_receptor)
@@ -63,12 +66,19 @@ def _rep(db, empresa_id, n, documentos, fecha="2026-09-25 12:00:00", version="2.
     for i, (uuid_docto, importe, impuestos, moneda_dr, equivalencia) in enumerate(documentos, start=1):
         rel = db.execute(
             "INSERT INTO pagos_relaciones (pago_id, cfdi_uuid, parcialidad, importe_pagado, saldo_anterior, saldo_restante,"
-            " moneda_dr, equivalencia_dr) VALUES (%s, %s, %s, %s, %s, 0, %s, %s) RETURNING id",
-            (str(pago["id"]), uuid_docto, i, importe, importe, moneda_dr, equivalencia), returning=True)
+            " moneda_dr, equivalencia_dr, objeto_imp_dr) VALUES (%s, %s, %s, %s, %s, 0, %s, %s, %s) RETURNING id",
+            (str(pago["id"]), uuid_docto, i, importe, importe, moneda_dr, equivalencia, objeto_imp_dr), returning=True)
         for tasa, base, imp in impuestos:
             db.execute(
                 "INSERT INTO pagos_relaciones_impuestos (relacion_id, ambito, impuesto, tipo_factor, tasa_o_cuota, base, importe)"
                 " VALUES (%s, 'traslado', '002', 'Tasa', %s, %s, %s)", (str(rel["id"]), tasa, base, imp))
+    for tasa, base, imp in impuestos_p or ():
+        db.execute(
+            "INSERT INTO pagos_impuestos (pago_id, ambito, impuesto, tipo_factor, tasa_o_cuota, base, importe)"
+            " VALUES (%s, 'traslado', '002', 'Tasa', %s, %s, %s)", (str(pago["id"]), tasa, base, imp))
+    if totales:
+        db.execute(f"INSERT INTO cfdi_pagos_totales (cfdi_id, {', '.join(totales)}) VALUES (%s, {', '.join(['%s'] * len(totales))})",
+                   (rep, *totales.values()))
 
 
 def _limpiar(db):
@@ -131,6 +141,18 @@ def _sembrar(db, e):
                " SELECT id, 'retencion', '002', 'Tasa', 0.106667, 250, 26.67 FROM cfdi WHERE uuid = %s", (_uuid(25),))
 
 
+def _sembrar_rep_completo(db, e):
+    """Diciembre: tres PPD cobrados con REP 2.0 completo. El 81 cuadra con ImpuestosP y Totales; el 83 declara
+    un IVA de 90 contra 80 calculado; el 85 es de un documento ObjetoImpDR 01 (no objeto: base sin IVA)."""
+    for n in (80, 82, 84):
+        _cfdi(db, e, n, [_t("0.16", 1000, 160)], metodo_pago="PPD", forma_pago="99", fecha_emision="2026-11-20 09:00:00")
+    _rep(db, e, 81, [(_uuid(80), 580, [("0.16", 500, 80)], "MXN", 1)], fecha="2026-12-10 12:00:00",
+         impuestos_p=[("0.16", 500, 80)], totales={"total_traslados_base_iva16": 500, "total_traslados_iva16": 80})
+    _rep(db, e, 83, [(_uuid(82), 580, [("0.16", 500, 80)], "MXN", 1)], fecha="2026-12-11 12:00:00",
+         impuestos_p=[("0.16", 500, 90)], totales={"total_traslados_base_iva16": 500, "total_traslados_iva16": 90})
+    _rep(db, e, 85, [(_uuid(84), 500, [], "MXN", 1)], fecha="2026-12-12 12:00:00", objeto_imp_dr="01")
+
+
 def _sembrar_anticipo_con_factura_ppd(db, e):
     """Anticipo en enero (100,000 + 16,000), factura final PPD y su REP en febrero con el remanente
     (144,000), y el egreso que aplica el anticipo (forma de pago 30) relacionado a la factura."""
@@ -170,6 +192,7 @@ def entorno():
         empresa_id = r.json()["empresa_id"]
         _sembrar(db, empresa_id)
         _sembrar_anticipo_con_factura_ppd(db, empresa_id)
+        _sembrar_rep_completo(db, empresa_id)
         _sembrar_nota_de_credito_de_una_compra_en_efectivo(db, empresa_id)
         yield db, client, headers, empresa_id
     finally:
@@ -453,3 +476,15 @@ def test_exportar_de_otra_empresa_es_403(entorno):
                    params={"direccion": "trasladado", "origen": "contado"})
 
     assert r.status_code == 403
+
+
+def test_rep_completo_cuadre_con_impuestos_p_y_objeto_imp_dr(entorno):
+    r = _resumen(entorno, "2026-12")
+    cred = r["trasladado"]["origenes"]["credito"]
+
+    # 80 (cuadra) + 80 (declara 90: se usa el desglose del documento y se advierte) + 0 (ObjetoImpDR 01)
+    assert cred["iva"]["total"] == 160.0 and cred["pagos"] == 3
+    assert cred["bases"]["no_objeto"] == 500.0
+    avisos = {a["codigo"]: a["cfdi"] for a in r["advertencias"]}
+    assert avisos["descuadre_rep"] == 1
+    assert "aproximado" not in avisos            # los tres traen datos propios del REP, nada se aproxima
