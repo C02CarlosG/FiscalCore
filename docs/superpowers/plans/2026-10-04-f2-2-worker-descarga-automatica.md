@@ -43,11 +43,11 @@
 **Files:**
 - Modify: `database/migrations/031_sat_sync.sql`, `backend/tests/test_migracion_031.py`
 
-- [ ] **Step 1: Prueba que falla** — `sat_sync_config` tiene la columna `corrida_inicio` (timestamptz, nula por defecto). Se agrega al conjunto de columnas que ya comprueba `test_031_se_puede_repetir_y_agrega_columnas_y_tabla`.
-- [ ] **Step 2: Verificar que falla** — `python -m pytest backend/tests/test_migracion_031.py -v`.
-- [ ] **Step 3: Agregar** `ALTER TABLE sat_sync_config ADD COLUMN IF NOT EXISTS corrida_inicio TIMESTAMPTZ;` después del `CREATE TABLE` de la 031 (así también cubre bases donde la tabla ya existía con la 031 anterior).
-- [ ] **Step 4: Verificar** — pasa; `test_migraciones.py` en verde.
-- [ ] **Step 5: Commit** — `feat: corrida_inicio en sat_sync_config`.
+- [x] **Step 1: Prueba que falla** — `sat_sync_config` tiene la columna `corrida_inicio` (timestamptz, nula por defecto). Se agrega al conjunto de columnas que ya comprueba `test_031_se_puede_repetir_y_agrega_columnas_y_tabla`.
+- [x] **Step 2: Verificar que falla** — `python -m pytest backend/tests/test_migracion_031.py -v`.
+- [x] **Step 3: Agregar** `ALTER TABLE sat_sync_config ADD COLUMN IF NOT EXISTS corrida_inicio TIMESTAMPTZ;` después del `CREATE TABLE` de la 031 (así también cubre bases donde la tabla ya existía con la 031 anterior).
+- [x] **Step 4: Verificar** — pasa; `test_migraciones.py` en verde.
+- [x] **Step 5: Commit** — `feat: corrida_inicio en sat_sync_config`.
 
 ---
 
@@ -68,17 +68,17 @@ Reglas:
 - **Diaria** (`carga_inicial_ok=True`): por tipo, desde `ultima_exitosa − traslape_dias` hasta `hoy`, partido por mes. Origen `diaria`. Sin `ultima_exitosa` (dato inconsistente) se trata como carga inicial.
 - Orden determinista: por tipo y luego por fecha.
 
-- [ ] **Step 1: Pruebas que fallan** (sin base de datos)
+- [x] **Step 1: Pruebas que fallan** (sin base de datos)
   - Inicial con `hoy=2026-10-04`: 2 tipos × 22 meses (2025-01 a 2026-10); última ventana de cada tipo `2026-10-01..2026-10-04`; todas con origen `inicial`.
   - Inicial con 3 meses cerrados ya en `descargadas` → no aparecen; el mes en curso **sí** aparece aunque esté en `descargadas` (su `fin` es `hoy`, no cerrado).
   - Diaria con `ultima_exitosa=2026-10-02`, traslape 7 → desde `2026-09-25` hasta `2026-10-04`, partido: `09-25..09-30` y `10-01..10-04`, por cada tipo; origen `diaria`.
   - Diaria cruzando de año, y con traslape que cae en el mes anterior.
   - `carga_inicial_ok=True` y `ultima_exitosa=None` → se planea como inicial.
   - `proxima_corrida`: con `ahora` antes de las 03:00 locales → hoy 03:00 local (convertido a UTC); después de las 03:00 → mañana; exactamente a las 03:00 → mañana (estrictamente posterior); resultado con `tzinfo` UTC; `hora_local` inválida cae a `03:00`.
-- [ ] **Step 2: Verificar que fallan**.
-- [ ] **Step 3: Implementar** las dos funciones y el dataclass, sin importar `db`.
-- [ ] **Step 4: Verificar que pasan**.
-- [ ] **Step 5: Commit** — `feat: planeación pura de corridas de descarga del SAT`.
+- [x] **Step 2: Verificar que fallan**.
+- [x] **Step 3: Implementar** las dos funciones y el dataclass, sin importar `db`.
+- [x] **Step 4: Verificar que pasan**.
+- [x] **Step 5: Commit** — `feat: planeación pura de corridas de descarga del SAT`.
 
 ---
 
@@ -91,15 +91,15 @@ Reglas:
 **Interfaces:**
 - Produces: `@contextmanager candado_empresa(empresa_id: str) -> Iterator[bool]`. Abre una conexión dedicada del pool, ejecuta `pg_try_advisory_lock(hashtext(%s))` y cede `True` si lo obtuvo o `False` si otro proceso lo tiene. Siempre ejecuta `pg_advisory_unlock` al salir (también ante excepción) antes de devolver la conexión.
 
-- [ ] **Step 1: Pruebas que fallan** (Postgres real)
+- [x] **Step 1: Pruebas que fallan** (Postgres real)
   - Dos usos anidados para la misma empresa: el interior cede `False`.
   - Empresas distintas no se bloquean entre sí.
   - Tras salir (con y sin excepción) el candado queda libre: un uso nuevo cede `True`.
   - Con el pool de 5 conexiones, mantener el candado de una empresa no impide que `db.execute` y `db.query_one` funcionen dentro del bloque.
-- [ ] **Step 2: Verificar que fallan**.
-- [ ] **Step 3: Implementar**. El candado es de **sesión** (no `xact`) porque el trabajo de la empresa usa otras conexiones y puede tardar minutos.
-- [ ] **Step 4: Verificar que pasan**.
-- [ ] **Step 5: Commit** — `feat: candado por empresa para la descarga automática`.
+- [x] **Step 2: Verificar que fallan**.
+- [x] **Step 3: Implementar**. El candado es de **sesión** (no `xact`) porque el trabajo de la empresa usa otras conexiones y puede tardar minutos.
+- [x] **Step 4: Verificar que pasan**.
+- [x] **Step 5: Commit** — `feat: candado por empresa para la descarga automática`.
 
 ---
 
@@ -126,7 +126,7 @@ Flujo (todo dentro de `candado_empresa`):
    - Correr `_correr_pipeline` una vez por periodo afectado (los `periodo_inicio` de las solicitudes `descargado` de la corrida con `cfdi_importados > 0`).
    - Auditoría `sync_corrida_fin` con conteos (`solicitudes`, `cfdi_importados`, `fallidas`).
 
-- [ ] **Step 1: Pruebas que fallan** (DB y SAT simulados; `ahora` inyectado)
+- [x] **Step 1: Pruebas que fallan** (DB y SAT simulados; `ahora` inyectado)
   - Empresa inactiva o sin config → `'omitida'`, cero llamadas al SAT y cero lecturas de la e.firma.
   - e.firma vencida → `pausada`, `motivo_pausa`, cero llamadas al SAT, auditoría `sync_pausada`.
   - Corrida vencida sin carga inicial → crea las ventanas del plan (origen `inicial`) sin pasar de `max_en_vuelo` activas; la vuelta siguiente crea las restantes.
@@ -136,10 +136,10 @@ Flujo (todo dentro de `candado_empresa`):
   - Solicitud `pendiente` sin `id_solicitud_sat` y con `proximo_intento` vencido → se reenvía; rechazo definitivo → `fallo`.
   - Candado ocupado → `'omitida'` sin tocar nada.
   - Una excepción inesperada al crear o avanzar una solicitud no corrompe `sat_sync_config` (se registra y la empresa queda `sincronizando`).
-- [ ] **Step 2: Verificar que fallan**.
-- [ ] **Step 3: Implementar** `procesar_empresa`, `enviar_pendiente` y el parámetro `correr_pipeline` (por defecto `True`: los endpoints actuales no cambian).
-- [ ] **Step 4: Verificar** — nuevas pruebas y `test_router_sat.py` en verde.
-- [ ] **Step 5: Commit** — `feat: procesar_empresa del worker de descarga automática`.
+- [x] **Step 2: Verificar que fallan**.
+- [x] **Step 3: Implementar** `procesar_empresa`, `enviar_pendiente` y el parámetro `correr_pipeline` (por defecto `True`: los endpoints actuales no cambian).
+- [x] **Step 4: Verificar** — nuevas pruebas y `test_router_sat.py` en verde.
+- [x] **Step 5: Commit** — `feat: procesar_empresa del worker de descarga automática`.
 
 ---
 
@@ -148,14 +148,14 @@ Flujo (todo dentro de `candado_empresa`):
 **Files:**
 - Test: `backend/tests/test_e2e_worker.py` (`@pytest.mark.db`; SAT simulado)
 
-- [ ] **Step 1: Pruebas que fallan** (Postgres real, `solicitar_descarga`/`verificar_solicitud`/`descargar_paquete` simulados, un XML de ingreso válido de los fixtures)
+- [x] **Step 1: Pruebas que fallan** (Postgres real, `solicitar_descarga`/`verificar_solicitud`/`descargar_paquete` simulados, un XML de ingreso válido de los fixtures)
   - **Reinicio**: primera pasada importa el paquete 1 de 2 y la función "muere" (excepción en el paquete 2); una segunda invocación de `procesar_empresa` retoma desde el paquete 2; el total de CFDI en `cfdi` es el esperado, sin duplicados.
   - **Candado**: dos `procesar_empresa` simultáneos (hilos) sobre la misma empresa → uno cede `'omitida'` y el paquete se descarga una sola vez.
   - **Idempotencia**: ejecutar la corrida completa dos veces con los mismos paquetes no duplica CFDI ni pagos.
   - Carga completa de punta a punta: config activa con `proxima_corrida = ahora` → `al_dia`, CFDI importados y pipeline ejecutado.
-- [ ] **Step 2: Verificar que fallan o que exponen huecos**; corregir `procesar_empresa` en lo necesario.
-- [ ] **Step 3: Verificar que pasan** — `python -m pytest -m db -v`.
-- [ ] **Step 4: Commit** — `test: reinicio, candado e idempotencia del worker de descarga`.
+- [x] **Step 2: Verificar que fallan o que exponen huecos**; corregir `procesar_empresa` en lo necesario.
+- [x] **Step 3: Verificar que pasan** — `python -m pytest -m db -v`.
+- [x] **Step 4: Commit** — `test: reinicio, candado e idempotencia del worker de descarga`.
 
 ---
 
@@ -175,27 +175,40 @@ Comportamiento:
 - Bucle: `ciclo()` y espera `config_sync().intervalo_seg` en pasos cortos; `SIGTERM`/`SIGINT` terminan tras la empresa en curso.
 - `Procfile`: `worker: python -m backend.worker`.
 - `dev.sh`: levanta el worker junto al backend (si no hay `FIEL_ENCRYPTION_KEY` en `.env`, lo avisa y no lo levanta), guarda su PID y lo detiene en `cleanup`.
-- `.env.example`: documentar `FIEL_ENCRYPTION_KEY` (con el comando para generarla) y `SAT_SYNC_INTERVALO_SEG`, `SAT_SYNC_HORA_LOCAL`, `SAT_SYNC_TRASLAPE_DIAS`, `SAT_SYNC_MESES_CANCELACION`, `SAT_SYNC_MAX_EN_VUELO`. **Nota**: a la fecha de este plan la herramienta de edición no tiene acceso de lectura a `.env.example` en el entorno de la sesión; si sigue bloqueado, esa línea se entrega como instrucción en el PR en vez de editarse.
+- `.env.example`: documentar `FIEL_ENCRYPTION_KEY` y las variables `SAT_SYNC_*`. **Nota**: la herramienta de edición no tiene acceso a `.env.example` en el entorno de la sesión (permiso denegado), así que este cambio no se hace desde aquí: se entrega como texto en el PR para que lo agregue quien tenga acceso:
 
-- [ ] **Step 1: Pruebas que fallan**
+  ```
+  # Clave Fernet para cifrar las e.firmas guardadas. Obligatoria para el worker de descarga automática.
+  # Generar: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+  FIEL_ENCRYPTION_KEY=
+
+  # Descarga automática del SAT (valores por defecto entre paréntesis)
+  # SAT_SYNC_INTERVALO_SEG=60        # cada cuántos segundos revisa el worker
+  # SAT_SYNC_HORA_LOCAL=03:00        # hora (Ciudad de México) de la corrida diaria
+  # SAT_SYNC_TRASLAPE_DIAS=7         # días que se repiten de la corrida anterior
+  # SAT_SYNC_MESES_CANCELACION=3     # meses recientes que se revisan por cancelaciones (F2.4)
+  # SAT_SYNC_MAX_EN_VUELO=4          # solicitudes simultáneas al SAT por empresa
+  ```
+
+- [x] **Step 1: Pruebas que fallan**
   - `ciclo` procesa solo las empresas elegibles y devuelve su resultado; una empresa que lanza excepción no impide procesar la siguiente.
   - Arranque sin `FIEL_ENCRYPTION_KEY` sale con código 1 y mensaje claro (prueba del `main()` con la variable ausente).
   - **Seguridad**: se fuerza un error al descargar con una e.firma simulada de contraseña `SECRETO-FIEL` y bytes `BYTES-LLAVE`; ningún mensaje de log (`caplog`), `error_msg` ni `metadata` de `auditoria` contiene esos textos.
   - `Procfile` contiene la línea `worker:`; `dev.sh` pasa `bash -n`.
-- [ ] **Step 2: Verificar que fallan**.
-- [ ] **Step 3: Implementar** `worker.py` y los cambios de despliegue.
-- [ ] **Step 4: Verificar** — `python -m pytest` completo en verde; arrancar el worker 10 s contra Postgres local y comprobar en el log que cicla y se detiene con Ctrl+C.
-- [ ] **Step 5: Commit** — `feat: worker de descarga automática del SAT`.
+- [x] **Step 2: Verificar que fallan**.
+- [x] **Step 3: Implementar** `worker.py` y los cambios de despliegue.
+- [x] **Step 4: Verificar** — `python -m pytest` completo en verde; arrancar el worker 10 s contra Postgres local y comprobar en el log que cicla y se detiene con Ctrl+C.
+- [x] **Step 5: Commit** — `feat: worker de descarga automática del SAT`.
 
 ---
 
 ### Task 7: Verificación y cierre
 
-- [ ] **Step 1:** `python -m pytest` completo (con Postgres local) y `python -m pytest -m "not db"`; anotar conteos.
-- [ ] **Step 2:** `migration-validator` sobre la 031 final (columna `corrida_inicio`).
-- [ ] **Step 3:** Revisión del agente `dominio-fiscal` solo sobre lo que toque importación/pipeline si se modificó algo más que el parámetro `correr_pipeline`.
-- [ ] **Step 4:** Actualizar la tabla "Estado" del plan maestro: F2.2 hecha; anotar la decisión sobre descargas manuales (pregunta abierta de arriba).
-- [ ] **Step 5:** Actualizar el PR #17 (o abrir uno nuevo si #17 ya se integró) con el resumen de F2.2.
+- [x] **Step 1:** `python -m pytest` completo (con Postgres local) y `python -m pytest -m "not db"`; anotar conteos.
+- [x] **Step 2:** `migration-validator` sobre la 031 final (columna `corrida_inicio`).
+- [x] **Step 3:** Revisión del agente `dominio-fiscal` solo sobre lo que toque importación/pipeline si se modificó algo más que el parámetro `correr_pipeline`.
+- [x] **Step 4:** Actualizar la tabla "Estado" del plan maestro: F2.2 hecha; anotar la decisión sobre descargas manuales (pregunta abierta de arriba).
+- [x] **Step 5:** Actualizar el PR #17 (o abrir uno nuevo si #17 ya se integró) con el resumen de F2.2.
 
 ## Fuera de esta entrega
 

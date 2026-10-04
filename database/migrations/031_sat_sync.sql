@@ -11,7 +11,16 @@
 -- ============================================================
 
 -- 1. sat_solicitudes ------------------------------------------------------
-ALTER TABLE sat_solicitudes ALTER COLUMN usuario_id DROP NOT NULL;
+-- Los ALTER COLUMN piden ACCESS EXCLUSIVE aunque no cambien nada; init_db corre en cada
+-- arranque (API y worker), así que solo se ejecutan si hacen falta.
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.columns
+               WHERE table_schema = current_schema() AND table_name = 'sat_solicitudes'
+                 AND column_name = 'usuario_id' AND is_nullable = 'NO') THEN
+        ALTER TABLE sat_solicitudes ALTER COLUMN usuario_id DROP NOT NULL;
+    END IF;
+END $$;
 
 ALTER TABLE sat_solicitudes ADD COLUMN IF NOT EXISTS origen VARCHAR(12) NOT NULL DEFAULT 'manual'
     CHECK (origen IN ('manual', 'inicial', 'diaria', 'cancelados'));
@@ -77,7 +86,14 @@ CREATE TABLE IF NOT EXISTS sat_sync_config (
 
 -- 'sincronizando' mide 13 caracteres: una versión previa de esta migración creó la
 -- columna como VARCHAR(12) y no cabía. Ampliar es idempotente.
-ALTER TABLE sat_sync_config ALTER COLUMN estado TYPE VARCHAR(15);
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.columns
+               WHERE table_schema = current_schema() AND table_name = 'sat_sync_config'
+                 AND column_name = 'estado' AND character_maximum_length < 15) THEN
+        ALTER TABLE sat_sync_config ALTER COLUMN estado TYPE VARCHAR(15);
+    END IF;
+END $$;
 
 -- Inicio de la corrida en curso (NULL = ninguna). Lo fija el worker (F2.2).
 ALTER TABLE sat_sync_config ADD COLUMN IF NOT EXISTS corrida_inicio TIMESTAMPTZ;
