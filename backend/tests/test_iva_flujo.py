@@ -795,29 +795,57 @@ def test_sin_filas_de_retencion_pero_con_retencion_en_el_encabezado_usa_el_encab
     assert e["retencion"] == D("106.67") and "retencion_sin_desglose" in e["marcas"]
 
 
-@pytest.mark.parametrize("moneda,tc,eq,pago_moneda,sospechosa", [
+@pytest.mark.parametrize("moneda,tc,eq,pago_moneda,distante", [
     ("USD", "20", "0.05", "MXN", False),          # 1 MXN = 0.05 USD: correcta
-    ("USD", "20", "20", "MXN", True),             # invertida: daría 1 peso por dólar
+    ("USD", "20", "20", "MXN", True),             # invertida: se aleja del tipo de cambio del CFDI
     ("MXN", "1", "20", "USD", False),             # documento en MXN pagado en USD: 1 USD = 20 MXN
     ("MXN", "1", "0.05", "USD", True),            # invertida
 ])
-def test_equivalencia_invertida_se_detecta_contra_el_tipo_de_cambio_del_documento(moneda, tc, eq, pago_moneda, sospechosa):
+def test_cociente_contra_el_tc_del_cfdi_solo_advierte_no_excluye(moneda, tc, eq, pago_moneda, distante):
     d = doc("U1", metodo_pago="PPD", moneda=moneda, tipo_cambio=D(tc) if moneda != "MXN" else D("1"), total=D("1160"))
     p = pago("U1", moneda_dr=moneda, equivalencia_dr=D(eq), pago_moneda=pago_moneda,
              pago_tipo_cambio=D("20") if pago_moneda != "MXN" else D("1"))
 
     e = f.evento_de_pago(p, d, RFC)
 
-    assert ("equivalencia_sospechosa" in e["marcas"]) is sospechosa
+    assert ("tc_distante" in e["marcas"]) is distante
+    assert f.motivo_exclusion(e) is None
 
 
-def test_equivalencia_sospechosa_no_suma_y_se_advierte():
-    d = doc("U1", metodo_pago="PPD", moneda="USD", tipo_cambio=D("20"), total=D("1160"))
-    p = pago("U1", moneda_dr="USD", equivalencia_dr=D("20"), pago_moneda="MXN")
+def test_cfdi_en_usd_con_tipo_de_cambio_mal_capturado_y_rep_correcto_si_suma():
+    d = doc("U1", metodo_pago="PPD", moneda="USD", tipo_cambio=D("1"), total=D("1160"))      # TC 1 por error de captura
+    p = pago("U1", importe="580", moneda_dr="USD", equivalencia_dr=D("0.05"), pago_moneda="MXN",
+             pago_monto=D("11600"), suma_equivalente="11600", impuestos_dr=[tras("0.16", 500, 80)])
+
     e = f.evento_de_pago(p, d, RFC)
 
-    assert e["iva_total"] == 0 and f.motivo_exclusion(e) == "sin_equivalencia"
+    assert e["iva_total"] == D("1600") and f.motivo_exclusion(e) is None
+
+
+def test_equivalencia_invertida_contra_el_monto_del_rep_se_excluye():
+    d = doc("U1", metodo_pago="PPD", moneda="USD", tipo_cambio=D("20"), total=D("1160"))
+    p = pago("U1", importe="580", moneda_dr="USD", equivalencia_dr=D("20"), pago_moneda="MXN",
+             pago_monto=D("11600"), suma_equivalente="29")                    # 580/20 = 29, no 11,600
+
+    e = f.evento_de_pago(p, d, RFC)
+
+    assert e["iva_total"] == 0 and f.motivo_exclusion(e) == "equivalencia_sospechosa"
     assert "equivalencia_sospechosa" in {a["codigo"] for a in f.resumen([e], "2026-09", {})["advertencias"]}
+
+
+def test_equivalencia_con_dos_documentos_cuadra_con_la_suma_de_ambos():
+    d = doc("U1", metodo_pago="PPD", moneda="USD", tipo_cambio=D("20"), total=D("1160"))
+    p = pago("U1", importe="580", moneda_dr="USD", equivalencia_dr=D("0.05"), pago_moneda="MXN",
+             pago_monto=D("17400"), suma_equivalente="17400", n_relaciones=2, impuestos_dr=[tras("0.16", 500, 80)])
+
+    assert f.motivo_exclusion(f.evento_de_pago(p, d, RFC)) is None
+
+
+def test_sin_monto_del_pago_no_hay_con_que_comparar_y_se_da_por_buena():
+    d = doc("U1", metodo_pago="PPD", moneda="USD", tipo_cambio=D("20"), total=D("1160"))
+    p = pago("U1", moneda_dr="USD", equivalencia_dr=D("20"), pago_moneda="MXN")
+
+    assert f.motivo_exclusion(f.evento_de_pago(p, d, RFC)) is None
 
 
 # ── CFDI sin desglose: la base sale del encabezado ───────────────────────────
@@ -846,9 +874,10 @@ def _ppd(**kw):
 
 @pytest.mark.parametrize("objeto", ["01", "04"])
 def test_objeto_imp_dr_sin_iva_es_base_no_objeto(objeto):
-    e = f.evento_de_pago(pago("U1", importe="580", objeto_imp_dr=objeto), _ppd(), RFC)
+    sin_iva = _ppd(iva_trasladado=D("0"), impuestos=[], total=D("1000"))
+    e = f.evento_de_pago(pago("U1", importe="500", objeto_imp_dr=objeto), sin_iva, RFC)
 
-    assert e["iva_total"] == 0 and e["bases"]["no_objeto"] == D("580") and not e["marcas"]
+    assert e["iva_total"] == 0 and e["bases"]["no_objeto"] == D("500") and not e["marcas"]
 
 
 def test_objeto_imp_dr_02_usa_el_desglose_del_documento():
@@ -896,3 +925,49 @@ def test_el_anticipo_se_avisa():
     avisos = {a["codigo"] for a in f.resumen(f.eventos_de_documento(d, RFC), "2026-09", {})["advertencias"]}
 
     assert "anticipo" in avisos
+
+
+def test_objeto_imp_dr_01_por_error_sobre_un_cfdi_con_iva_se_marca_y_usa_la_proporcion():
+    e = f.evento_de_pago(pago("U1", importe="580", objeto_imp_dr="01"), _ppd(), RFC)       # el CFDI trae 160 de IVA
+
+    assert "objeto_imp_inconsistente" in e["marcas"] and "aproximado" in e["marcas"]
+    assert e["iva_total"] == D("80") and e["bases"]["no_objeto"] == 0
+
+
+def test_objeto_imp_dr_03_sin_desglose_es_base_en_otras_con_su_marca():
+    e = f.evento_de_pago(pago("U1", importe="1000", objeto_imp_dr="03", impuestos_dr=[]), _ppd(total=D("1160")), RFC)
+
+    assert e["iva_total"] == 0 and e["bases"]["otras"] == D("1000")
+    assert "objeto_sin_desglose" in e["marcas"] and "aproximado" not in e["marcas"]
+
+
+def test_objeto_imp_dr_03_con_impuestos_dr_usa_el_desglose():
+    e = f.evento_de_pago(pago("U1", objeto_imp_dr="03"), _ppd(), RFC)
+
+    assert e["iva_total"] == D("80") and "objeto_sin_desglose" not in e["marcas"]
+
+
+def test_objeto_imp_dr_nulo_o_05_se_comporta_como_sin_dato():
+    for objeto in (None, "05"):
+        e = f.evento_de_pago(pago("U1", objeto_imp_dr=objeto), _ppd(), RFC)
+        assert e["iva_total"] == D("80") and "objeto_imp_inconsistente" not in e["marcas"]
+
+
+def test_tolerancia_del_cuadre_escala_con_el_tipo_de_cambio_del_pago():
+    p = pago("U1", pago_moneda="USD", pago_tipo_cambio=D("20.50"), impuestos_p=[tras("0.16", 100, "16.004")])
+
+    assert f.cuadre_rep(p, D("328.00")) is True             # 16.004 USD × 20.50 = 328.082: 0.082 de diferencia, 1 centavo de USD
+    assert f.cuadre_rep(p, D("320.00")) is False
+
+
+def test_cuadre_con_otras_tasas_compara_solo_16_y_8():
+    p = pago("U1", impuestos_p=[tras("0.16", 500, 80), tras("0.04", 100, 4)])
+
+    assert f.cuadre_rep(p, D("80")) is True
+
+
+def test_aplicacion_de_anticipo_tiene_su_aviso():
+    d = doc("U1", tipo_comprobante="E", forma_pago="30")
+    avisos = {a["codigo"] for a in f.resumen(f.eventos_de_documento(d, RFC), "2026-09", {})["advertencias"]}
+
+    assert "aplicacion_anticipo" in avisos

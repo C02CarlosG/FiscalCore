@@ -80,7 +80,15 @@ Los CFDI no considerados no suman, pero **se listan** con su motivo.
 
 Un REP trae un nodo de pago por fecha; cada documento relacionado trae su propio desglose (`pagos_relaciones_impuestos`). Cada documento relacionado es un evento independiente con la fecha de **su pago**. Desde F5.4 el motor también controla el cuadre contra lo que el propio REP declara (`cuadre_rep`): para cada pago compara el IVA calculado de **todos** sus documentos con `ImpuestosP` (convertido con el tipo de cambio del pago) y, si el REP trae un solo pago, con `pago20:Totales` (pesos). Si difiere más de un centavo por documento, marca `descuadre_rep` y advierte; el cálculo sigue usando el desglose del documento. Solo se compara cuando se cargaron todos los documentos del pago.
 
-`ObjetoImpDR` decide cómo se obtiene el IVA de un cobro: `01` (no objeto) y `04` (sí objeto y no causa impuesto) son base sin IVA (`no_objeto`); con `ImpuestosDR` manda el desglose del documento; sin ellos (`03`, Pagos 1.0) se aproxima por proporción.
+`ObjetoImpDR` decide cómo se obtiene el IVA de un cobro:
+
+- `01` (no objeto) y `04` (sí objeto y no causa impuesto): base sin IVA en `no_objeto` (el 04 se mezcla con lo no objeto: ninguno causa IVA). Si el CFDI pagado **sí** trae IVA el REP se contradice con él: marca `objeto_imp_inconsistente` y se calcula por la proporción del CFDI.
+- `03` (sí objeto y no obligado a desglose) sin `ImpuestosDR`: no hay IVA que sumar; lo pagado va como base en `otras` con la marca `objeto_sin_desglose` (nada se aproxima).
+- Con `ImpuestosDR`: manda el desglose del documento. Sin ellos (Pagos 1.0, o 2.0 sin desglose, `02`/`05`/vacío): se aproxima por proporción.
+
+**Validación de la equivalencia con el propio REP.** La suma de `importe pagado / equivalencia` de los documentos de un pago debe ser el `Monto` del pago (1 % de tolerancia). Si no cuadra la equivalencia viene invertida: el cobro **se excluye** con motivo `equivalencia_sospechosa` (el contador puede reasignarlo o corregirlo). El cociente contra el tipo de cambio del CFDI ya **no excluye**: solo advierte con `tc_distante`, porque hay casos legítimos (un CFDI en USD con TipoCambio=1 mal capturado y un REP correcto; monedas que se deprecian más de 2x).
+
+**Cuadre.** Solo compara IVA a 16 % y 8 % (lo que declara `Totales`; `ImpuestosP` se filtra igual), con una tolerancia que escala con el número de documentos y con el tipo de cambio del pago, y solo cuando todos los documentos del pago se cargaron y ninguno quedó fuera por una regla automática.
 
 ### Interruptor "no considerar IVA" y periodo reasignado
 

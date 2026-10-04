@@ -101,14 +101,18 @@ def _cargar(empresa_id: str, rfc: str, desde: str, hasta: str, reasignados: list
 
     pagos = db.query_all(
         f"""
-        SELECT pc.id AS pago_id, pc.uuid_cfdi_pago AS uuid_pago, pc.fecha_pago, pc.version_pago,
+        SELECT pc.id AS pago_id, pc.uuid_cfdi_pago AS uuid_pago, pc.fecha_pago, pc.version_pago, pc.monto AS pago_monto,
+               (SELECT SUM(x.importe_pagado / COALESCE(NULLIF(x.equivalencia_dr, 0), 1))::text
+                FROM pagos_relaciones x WHERE x.pago_id = pc.id) AS suma_equivalente,
                pc.moneda AS pago_moneda, pc.tipo_cambio AS pago_tipo_cambio, rep.estado AS pago_estado,
                pr.cfdi_uuid, pr.parcialidad, pr.importe_pagado, pr.moneda_dr, pr.equivalencia_dr, pr.objeto_imp_dr,
                COALESCE(ri.impuestos, '[]'::json) AS impuestos_dr,
                COALESCE(ip.impuestos, '[]'::json) AS impuestos_p,
                (SELECT COUNT(*) FROM pagos_relaciones x WHERE x.pago_id = pc.id) AS n_relaciones,
                (SELECT COUNT(*) FROM pagos_cfdi y WHERE y.cfdi_id = pc.cfdi_id) AS n_pagos_rep,
-               to_jsonb(tot) - 'cfdi_id' AS totales
+               CASE WHEN tot.cfdi_id IS NULL THEN NULL ELSE jsonb_build_object(
+                   'total_traslados_iva16', tot.total_traslados_iva16::text,
+                   'total_traslados_iva8', tot.total_traslados_iva8::text) END AS totales
         FROM pagos_relaciones pr
         JOIN pagos_cfdi pc ON pc.id = pr.pago_id
         JOIN cfdi rep ON rep.id = pc.cfdi_id
@@ -142,15 +146,20 @@ def _cargar(empresa_id: str, rfc: str, desde: str, hasta: str, reasignados: list
 
 
 def _marcar_descuadres_de_rep(por_pago: dict) -> None:
-    """Compara, por pago, el IVA de todos sus documentos con lo que el REP declara. Solo cuando se
-    cargaron todos los documentos del pago (con uno reasignado a otro periodo la suma sería parcial)."""
+    """Compara, por pago, el IVA a 16 % y 8 % de todos sus documentos con lo que el REP declara. Solo cuando se
+    cargaron todos los documentos del pago (con uno reasignado a otro periodo la suma sería parcial) y ninguno quedó
+    fuera por una regla automática (su IVA sí está en lo declarado y la comparación saldría falsa); se marcan solo
+    los eventos que sí se suman."""
     for grupo in por_pago.values():
         pago = grupo["pago"]
         if grupo["filas"] != int(pago.get("n_relaciones") or 0):
             continue
         for direccion in iva_flujo.DIRECCIONES:
             evs = [e for e in grupo["eventos"] if e["direccion"] == direccion]
-            if evs and not iva_flujo.cuadre_rep(pago, sum((e["iva_total"] for e in evs), iva_flujo.CERO)):
+            if not evs or any(iva_flujo.motivo_exclusion(e) for e in evs):
+                continue
+            calculado = sum((e["iva"]["16"] + e["iva"]["8"] for e in evs), iva_flujo.CERO)
+            if not iva_flujo.cuadre_rep(pago, calculado):
                 for e in evs:
                     e["marcas"].add("descuadre_rep")
 

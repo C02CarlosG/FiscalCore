@@ -57,11 +57,12 @@ describe("etiquetas", () => {
   it("cada marca y motivo conocido tiene texto en español", () => {
     for (const marca of ["aproximado", "pago_v1", "descuadre", "sin_desglose", "sin_equivalencia", "sin_tipo_cambio",
       "sin_proporcion", "anticipo", "aplicacion_anticipo", "aplicado_en_rep", "original_no_acreditable", "descuadre_retencion",
-      "retencion_sin_desglose", "descuadre_rep", "equivalencia_sospechosa", "forma_pago_rep"]) {
+      "retencion_sin_desglose", "descuadre_rep", "equivalencia_sospechosa", "forma_pago_rep", "tc_distante",
+      "objeto_imp_inconsistente", "objeto_sin_desglose"]) {
       expect(ETIQUETA_MARCA[marca]).toBeTruthy();
     }
     for (const motivo of ["efectivo", "uso_no_deducible", "manual", "reasignado", "aplicado_en_rep", "original_no_acreditable",
-      "sin_equivalencia", "sin_tipo_cambio", "sin_proporcion", "pago_v1"]) {
+      "sin_equivalencia", "sin_tipo_cambio", "sin_proporcion", "pago_v1", "equivalencia_sospechosa"]) {
       expect(ETIQUETA_MOTIVO[motivo]).toBeTruthy();
     }
   });

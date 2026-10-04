@@ -21,6 +21,7 @@ IVA = "002"
 
 UMBRAL_EFECTIVO = Decimal("2000")                       # LIVA 5-III / LISR 27-III: efectivo mayor a $2,000
 USOS_NO_ACREDITABLES = frozenset({"S01", "CP01", "CN01"})   # D-F5-3
+TOLERANCIA_RELATIVA_MONTO = Decimal("0.01")              # 1 % del Monto del pago al validar equivalencias
 OBJETOS_SIN_IVA = frozenset({"01", "04"})                # ObjetoImpDR: no objeto / sí objeto y no causa impuesto
 PAGOS_V1_MODO = "aproximar"                             # D-F5-1: "aproximar" | "excluir"
 TOLERANCIA_DESCUADRE = Decimal("0.01")
@@ -301,16 +302,39 @@ def _factor_del_pago(pago: dict, doc: dict) -> Optional[Decimal]:
                           pago.get("pago_moneda"), pago.get("pago_tipo_cambio"))
 
 
+def _equivalencia_invertida(pago: dict) -> bool:
+    """``True`` si la equivalencia del documento no cuadra con lo que el propio REP declara: la suma de
+    ``importe pagado / equivalencia`` de todos los documentos del pago debe ser el ``Monto`` del pago, en la moneda
+    del pago. Una equivalencia invertida (p. ej. 20 en lugar de 0.05) rompe esa igualdad por órdenes de magnitud;
+    un redondeo no. Sin ``Monto`` o sin la suma no hay con qué comparar y se da por buena."""
+    monto, suma = _dec(pago.get("pago_monto")), pago.get("suma_equivalente")
+    if monto <= 0 or suma is None:
+        return False
+    suma = _dec(suma)
+    return abs(suma - monto) > max(TOLERANCIA_DESCUADRE * max(1, int(pago.get("n_relaciones") or 1)), monto * TOLERANCIA_RELATIVA_MONTO)
+
+
+def _doc_tiene_iva(doc: dict) -> bool:
+    return _dec(doc.get("iva_trasladado")) != 0 or any(
+        i.get("impuesto") == IVA and i.get("ambito") == "traslado" and i.get("tipo_factor") != "Exento"
+        and _dec(i.get("importe")) != 0 for i in doc.get("impuestos") or [])
+
+
 def iva_de_pago(pago: dict, doc: dict) -> tuple[dict, Decimal, set]:
     """Desglose, IVA total y marcas de **un** cobro/pago de un documento PPD, en pesos.
 
-    Es la única función que decide cómo se obtiene el IVA de un pago. Según ``ObjetoImpDR`` del
-    documento pagado (``objeto_imp_dr``):
+    Es la única función que decide cómo se obtiene el IVA de un pago. Primero valida la equivalencia contra el
+    ``Monto`` del propio REP (``_equivalencia_invertida``: si no cuadra el cobro se excluye con
+    ``equivalencia_sospechosa``; el cociente contra el tipo de cambio del CFDI solo advierte con ``tc_distante``).
+    Después, según ``ObjetoImpDR`` del documento pagado (``objeto_imp_dr``):
 
-    - ``01`` (no objeto) y ``04`` (sí objeto y no causa impuesto): lo pagado es base sin IVA.
-    - lo demás, con REP 2.0 y ``ImpuestosDR``: el desglose del documento relacionado.
-    - sin ``ImpuestosDR`` (Pagos 1.0, o 2.0 sin desglose, ``03``): se aproxima por la proporción
-      ``importe pagado / total`` del CFDI.
+    - ``01`` (no objeto) y ``04`` (sí objeto y no causa impuesto): lo pagado es base sin IVA, en ``no_objeto``
+      (el 04 se mezcla con lo no objeto, que tampoco causa IVA). Si el documento sí trae IVA el REP se contradice
+      con el CFDI que paga: se marca ``objeto_imp_inconsistente`` y se calcula por proporción del documento.
+    - ``03`` (sí objeto y no obligado a desglose) sin ``ImpuestosDR``: no hay IVA que sumar; lo pagado va como base
+      en ``otras`` con la marca ``objeto_sin_desglose``. Nada se aproxima.
+    - con REP 2.0 y ``ImpuestosDR``: el desglose del documento relacionado.
+    - sin ``ImpuestosDR`` (Pagos 1.0, o 2.0 sin desglose): se aproxima por la proporción ``importe pagado / total``.
 
     El control de cuadre contra ``ImpuestosP`` y ``pago20:Totales`` va aparte (``cuadre_rep``): compara
     todos los documentos de un mismo pago, no uno solo.
@@ -319,14 +343,23 @@ def iva_de_pago(pago: dict, doc: dict) -> tuple[dict, Decimal, set]:
     f = _factor_del_pago(pago, doc)
     if f is None:
         return _desglose_vacio(), CERO, {"sin_equivalencia"}
+    if _equivalencia_invertida(pago):
+        return _desglose_vacio(), CERO, {"equivalencia_sospechosa"}
     tc_doc = _tc_documento(doc)
     if tc_doc is not None and not (Decimal("0.5") <= f / tc_doc <= Decimal("2")):
-        return _desglose_vacio(), CERO, {"sin_equivalencia", "equivalencia_sospechosa"}   # la equivalencia parece invertida
-    if pago.get("objeto_imp_dr") in OBJETOS_SIN_IVA:
+        marcas.add("tc_distante")                  # solo advierte: el REP es la fuente y cuadró consigo mismo
+    objeto = pago.get("objeto_imp_dr")
+    if objeto in OBJETOS_SIN_IVA:
+        if not _doc_tiene_iva(doc):
+            d = _desglose_vacio()
+            d["bases"]["no_objeto"] = _dec(pago.get("importe_pagado")) * f
+            return d, CERO, marcas
+        marcas.add("objeto_imp_inconsistente")
+    elif objeto == "03" and not pago.get("impuestos_dr"):
         d = _desglose_vacio()
-        d["bases"]["no_objeto"] = _dec(pago.get("importe_pagado")) * f
-        return d, CERO, marcas
-    if pago.get("impuestos_dr"):
+        d["bases"]["otras"] = _dec(pago.get("importe_pagado")) * f
+        return d, CERO, marcas | {"objeto_sin_desglose"}
+    if pago.get("impuestos_dr") and "objeto_imp_inconsistente" not in marcas:
         d = escalar(desglose(pago["impuestos_dr"]), f)
         return d, d["iva"]["total"], marcas
     total = _dec(doc.get("total"))
@@ -349,24 +382,31 @@ def forma_pago_del_cobro(pago: dict) -> Optional[str]:
 def cuadre_rep(pago: dict, iva_calculado: Decimal) -> bool:
     """``True`` si el IVA calculado de **todos** los documentos de un pago cuadra con lo que el REP declara.
 
-    Control: ``ImpuestosP`` del pago (en su moneda, a pesos con su tipo de cambio) y, si el REP trae un
-    solo pago, ``pago20:Totales`` (cifra oficial en pesos). Sin ninguno de los dos no hay con qué
-    comparar y se da por bueno. La tolerancia crece con el número de documentos (redondeos del PAC)."""
-    tolerancia = TOLERANCIA_DESCUADRE * max(1, int(pago.get("n_relaciones") or 1))
+    ``iva_calculado`` es el IVA en pesos a tasa 16 % y 8 % (lo único que declara ``pago20:Totales``; ``ImpuestosP``
+    se filtra igual para que las dos ramas comparen lo mismo). Control: ``Totales`` (cifra oficial en pesos) si el REP
+    trae un solo pago y, si no, ``ImpuestosP`` (en la moneda del pago, a pesos con su tipo de cambio). Sin ninguno no
+    hay con qué comparar y se da por bueno. La tolerancia crece con el número de documentos (redondeos del PAC) y,
+    en moneda extranjera, con el tipo de cambio: un centavo de diferencia en dólares son ``tc`` centavos en pesos."""
+    moneda = pago.get("pago_moneda") or "MXN"
+    tc = UNO if moneda == "MXN" else max(UNO, _dec(pago.get("pago_tipo_cambio")))
+    tolerancia = TOLERANCIA_DESCUADRE * max(1, int(pago.get("n_relaciones") or 1)) * tc
     totales = pago.get("totales")
     if totales and int(pago.get("n_pagos_rep") or 1) == 1:
         declarado = sum((_dec(totales.get(k)) for k in ("total_traslados_iva16", "total_traslados_iva8")), CERO)
         return abs(declarado - iva_calculado) <= tolerancia
     if pago.get("impuestos_p"):
-        moneda = pago.get("pago_moneda") or "MXN"
-        tc = UNO if moneda == "MXN" else _dec(pago.get("pago_tipo_cambio"))
-        if tc <= 0:
+        if moneda != "MXN" and _dec(pago.get("pago_tipo_cambio")) <= 0:
             return True
         declarado = sum((_dec(i.get("importe")) for i in pago["impuestos_p"]
                          if i.get("impuesto") == IVA and i.get("ambito") == "traslado"
-                         and i.get("tipo_factor") != "Exento"), CERO) * tc
+                         and clave_tasa(i.get("tipo_factor"), i.get("tasa_o_cuota")) in ("16", "8")), CERO) * tc_real(pago)
         return abs(declarado - iva_calculado) <= tolerancia
     return True
+
+
+def tc_real(pago: dict) -> Decimal:
+    """Tipo de cambio del pago a pesos (1 en MXN)."""
+    return UNO if (pago.get("pago_moneda") or "MXN") == "MXN" else _dec(pago.get("pago_tipo_cambio"))
 
 
 def eventos_de_pago(pago: dict, doc: dict, rfc: str) -> list[dict]:
@@ -410,7 +450,8 @@ MOTIVOS_QUE_CONSERVAN_RETENCION = frozenset({"efectivo", "uso_no_deducible"})
 
 def motivo_exclusion(ev: dict) -> Optional[str]:
     """Por qué un evento no se considera (regla automática), o ``None`` si se considera."""
-    for marca in ("sin_equivalencia", "sin_tipo_cambio", "sin_proporcion", "aplicado_en_rep", "original_no_acreditable"):
+    for marca in ("sin_equivalencia", "equivalencia_sospechosa", "sin_tipo_cambio", "sin_proporcion", "aplicado_en_rep",
+                  "original_no_acreditable"):
         if marca in ev["marcas"]:
             return marca
     if "pago_v1" in ev["marcas"] and PAGOS_V1_MODO == "excluir":
@@ -466,10 +507,14 @@ MENSAJES = {
     "sin_proporcion": "Hay pagos de documentos con total en cero: no se puede calcular su IVA.",
     "descuadre_retencion": "La retención de IVA del desglose no coincide con la del encabezado.",
     "retencion_sin_desglose": "Hay CFDI con retención de IVA solo en el encabezado (sin desglose): se usó la del encabezado.",
-    "equivalencia_sospechosa": "Hay pagos cuya equivalencia del documento parece invertida respecto al tipo de cambio del CFDI: revisa esos renglones.",
+    "equivalencia_sospechosa": "Hay pagos cuya equivalencia del documento no cuadra con el Monto del propio complemento (parece invertida): no se suman, revisa esos renglones.",
+    "tc_distante": "Hay pagos cuya equivalencia se aleja del tipo de cambio del CFDI (más del doble): se sumaron, pero revisa esos renglones.",
+    "objeto_imp_inconsistente": "Hay pagos con ObjetoImpDR sin IVA sobre un CFDI que sí trae IVA: se calculó por la proporción del CFDI.",
+    "objeto_sin_desglose": "Hay pagos de documentos con ObjetoImpDR 03 (sin desglose de IVA): no suman IVA; su importe se muestra como base en «otras».",
     "descuadre_rep": "El IVA de los documentos de un complemento de pago no cuadra con lo que el propio complemento declara (ImpuestosP o Totales): revisa esos renglones.",
     "forma_pago_rep": "La forma de pago del REP no se guarda: un pago en efectivo de una factura a crédito no se detecta como no acreditable.",
-    "anticipo": "Hay anticipos del SAT: su IVA se causa al cobrarse y la aplicación (forma de pago 30) lo resta de la factura final.",
+    "anticipo": "Hay anticipos del SAT: su IVA se causa al cobrarse.",
+    "aplicacion_anticipo": "Hay aplicaciones de anticipo (forma de pago 30): restan el IVA del anticipo de la factura final; si la factura final es a crédito, el REP ya trae el remanente y no se resta (aplicado en el REP).",
 }
 _ORDEN_ADVERTENCIAS = tuple(MENSAJES)
 

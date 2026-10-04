@@ -144,13 +144,23 @@ def _sembrar(db, e):
 def _sembrar_rep_completo(db, e):
     """Diciembre: tres PPD cobrados con REP 2.0 completo. El 81 cuadra con ImpuestosP y Totales; el 83 declara
     un IVA de 90 contra 80 calculado; el 85 es de un documento ObjetoImpDR 01 (no objeto: base sin IVA)."""
-    for n in (80, 82, 84):
+    for n in (80, 82):
         _cfdi(db, e, n, [_t("0.16", 1000, 160)], metodo_pago="PPD", forma_pago="99", fecha_emision="2026-11-20 09:00:00")
+    _cfdi(db, e, 84, [], metodo_pago="PPD", forma_pago="99", fecha_emision="2026-11-20 09:00:00",
+          iva_trasladado="0", subtotal="1000", total="1000")                                    # documento sin IVA
     _rep(db, e, 81, [(_uuid(80), 580, [("0.16", 500, 80)], "MXN", 1)], fecha="2026-12-10 12:00:00",
          impuestos_p=[("0.16", 500, 80)], totales={"total_traslados_base_iva16": 500, "total_traslados_iva16": 80})
     _rep(db, e, 83, [(_uuid(82), 580, [("0.16", 500, 80)], "MXN", 1)], fecha="2026-12-11 12:00:00",
          impuestos_p=[("0.16", 500, 90)], totales={"total_traslados_base_iva16": 500, "total_traslados_iva16": 90})
     _rep(db, e, 85, [(_uuid(84), 500, [], "MXN", 1)], fecha="2026-12-12 12:00:00", objeto_imp_dr="01")
+
+
+def _sembrar_equivalencia_invertida(db, e):
+    """Enero 2027: un PPD en USD (TC 20) cobrado con un REP en MXN cuya equivalencia viene invertida (20 en lugar de
+    0.05): importe/equivalencia = 0.58 contra un Monto de 11.6, así que el cobro no se suma y se advierte."""
+    _cfdi(db, e, 90, [_t("0.16", 10, "1.6")], metodo_pago="PPD", forma_pago="99", moneda="USD", tipo_cambio="20",
+          fecha_emision="2026-12-20 09:00:00", iva_trasladado="1.6", subtotal="10", total="11.6")
+    _rep(db, e, 91, [(_uuid(90), "11.6", [("0.16", 10, "1.6")], "USD", 20)], fecha="2027-01-10 12:00:00")
 
 
 def _sembrar_anticipo_con_factura_ppd(db, e):
@@ -193,6 +203,7 @@ def entorno():
         _sembrar(db, empresa_id)
         _sembrar_anticipo_con_factura_ppd(db, empresa_id)
         _sembrar_rep_completo(db, empresa_id)
+        _sembrar_equivalencia_invertida(db, empresa_id)
         _sembrar_nota_de_credito_de_una_compra_en_efectivo(db, empresa_id)
         yield db, client, headers, empresa_id
     finally:
@@ -488,3 +499,12 @@ def test_rep_completo_cuadre_con_impuestos_p_y_objeto_imp_dr(entorno):
     avisos = {a["codigo"]: a["cfdi"] for a in r["advertencias"]}
     assert avisos["descuadre_rep"] == 1
     assert "aproximado" not in avisos            # los tres traen datos propios del REP, nada se aproxima
+
+
+def test_equivalencia_invertida_contra_el_monto_del_rep_se_excluye_y_se_advierte(entorno):
+    r = _resumen(entorno, "2027-01")
+    cred = r["trasladado"]["origenes"]["credito"]
+
+    assert cred["iva"]["total"] == 0.0 and cred["pagos"] == 0
+    assert r["trasladado"]["no_considerados"]["por_motivo"]["equivalencia_sospechosa"]["cfdi"] == 1
+    assert "equivalencia_sospechosa" in {a["codigo"] for a in r["advertencias"]}
