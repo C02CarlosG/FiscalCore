@@ -24,8 +24,8 @@ from zoneinfo import ZoneInfo
 from . import cfdi_store, db, fiel_store
 from .auditoria import registrar_evento
 from .sat_fiel import (
-    FIELError, SolicitudesAgotadasError, SolicitudRechazada, descargar_paquete, solicitar_descarga,
-    verificar_solicitud,
+    FIELError, MetadataCFDI, SolicitudesAgotadasError, SolicitudRechazada, descargar_paquete,
+    parsear_metadata, solicitar_descarga, verificar_solicitud,
 )
 
 _log = logging.getLogger(__name__)
@@ -1187,3 +1187,56 @@ def desactivar_por_fiel_eliminada(empresa_id: str, usuario_id: str | None = None
     if apagada:
         _auditar(empresa_id, "sync_desactivada", usuario_id=usuario_id, motivo="e.firma eliminada")
     return bool(apagada)
+
+
+# ---------------------------------------------------------------------------
+# Cancelaciones (metadatos del SAT)
+# ---------------------------------------------------------------------------
+
+
+def _iso_fecha(valor) -> str | None:
+    if valor is None:
+        return None
+    return (valor.date() if isinstance(valor, datetime) else valor).isoformat()
+
+
+def marcar_cancelados(empresa_id: str, registros: list[MetadataCFDI]) -> int:
+    """Marca como ``cancelado`` los CFDI de la empresa que el SAT reporta cancelados.
+
+    Solo ``vigente -> cancelado`` de CFDI que ya existen (por UUID): nunca crea un CFDI
+    desde metadatos, no "des-cancela" y no toca los ``sustituido``. Es idempotente.
+
+    **No recalcula nada**: no corre el pipeline y no modifica ``monto_cobrado`` de las
+    facturas que un REP cancelado había cobrado. Cada cambio deja un evento
+    ``cfdi_cancelado_posterior`` en ``auditoria`` (la alerta es de M3). Los cálculos de IVA
+    e ISR deben filtrar por ``estado``. Devuelve cuántos CFDI pasaron a cancelado.
+    """
+    canceladas = {r.uuid.upper(): r for r in registros if r.estatus == "cancelado"}
+    if not canceladas:
+        return 0
+    empresa_id = str(empresa_id)
+    cambiados = db.query_all(
+        """UPDATE cfdi SET estado='cancelado'
+           WHERE empresa_id=%s AND uuid = ANY(%s) AND estado='vigente'
+           RETURNING uuid, tipo_comprobante, fecha_emision, rfc_emisor""",
+        (empresa_id, list(canceladas)),
+    )
+    if not cambiados:
+        return 0
+    rfc_empresa = (db.query_one("SELECT rfc FROM empresas WHERE id=%s", (empresa_id,)) or {}).get("rfc")
+    for fila in cambiados:
+        emision = fila["fecha_emision"]
+        registrar_evento(
+            None, "cfdi_cancelado_posterior", empresa_id=empresa_id, entidad="cfdi", entidad_id=fila["uuid"],
+            metadata={
+                "origen": "automatico",
+                "uuid": fila["uuid"],
+                "tipo_comprobante": fila["tipo_comprobante"],
+                "periodo": f"{emision.year}-{emision.month:02d}" if emision else None,
+                "fecha_emision": _iso_fecha(emision),
+                "fecha_cancelacion": (canceladas[fila["uuid"].upper()].fecha_cancelacion.isoformat()
+                                      if canceladas[fila["uuid"].upper()].fecha_cancelacion else None),
+                "direccion": "emitido" if fila["rfc_emisor"] == rfc_empresa else "recibido",
+            },
+        )
+    return len(cambiados)
