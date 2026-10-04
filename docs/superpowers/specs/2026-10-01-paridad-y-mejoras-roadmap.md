@@ -440,7 +440,7 @@ pausa.
 | F8 | D | Integrada (PR #31); falta probar con PDF reales | `docs/superpowers/specs/2026-10-04-f8-informacion-fiscal-design.md` | `docs/superpowers/plans/2026-10-04-f8-informacion-fiscal.md` |
 | M1, M4, M6 | A | Pendiente | — | — |
 | M3 | B | Pendiente |
-| V1 | D | En revisión (PR D·V1) | `docs/superpowers/specs/2026-10-04-v1-validaciones-cfdi-design.md` | `docs/superpowers/plans/2026-10-04-v1-validaciones-cfdi.md` |
+| V1 | D | Integrada (PR #34) | `docs/superpowers/specs/2026-10-04-v1-validaciones-cfdi-design.md` | `docs/superpowers/plans/2026-10-04-v1-validaciones-cfdi.md` |
 | U1, M7 | D | Pendiente |
 | M7.1 | D | En revisión (PR D·M7.1): planes, límite de RFC y asignación manual, sin cobro en línea (decisiones de Carlos del 2026-10-04 en la spec); M7.2 cobro en línea pendiente | `docs/superpowers/specs/2026-10-04-m7-1-suscripcion-design.md` | `docs/superpowers/plans/2026-10-04-m7-1-suscripcion.md` |
 | F3.6 | A | Pendiente (después de F3.5b) | — | — |
