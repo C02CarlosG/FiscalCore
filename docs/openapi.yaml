@@ -2911,7 +2911,7 @@ paths:
               type: object
               required: [rfc]
               properties:
-                rfc: { type: string }
+                rfc: { type: string, maxLength: 30, description: "Se normaliza a mayusculas. XAXX010101000 se rechaza (422)" }
                 nombre: { type: string, maxLength: 300 }
                 tipo_tercero: { type: string, enum: ['04', '05', '15'], nullable: true }
                 tipo_operacion: { type: string, enum: ['02', '03', '06', '07', '08', '85', '87'], nullable: true, description: "Por defecto 85" }

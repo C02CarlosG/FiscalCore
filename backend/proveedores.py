@@ -28,8 +28,8 @@ def _publico(fila: Optional[dict]) -> Optional[dict]:
 
 def sincronizar(empresa_id: str, rfc_empresa: str, usuario_id: Optional[str] = None) -> dict:
     """Agrega al catálogo los emisores de los CFDI recibidos vigentes que aún no están y actualiza el nombre de los que el
-    contador no editó. Idempotente. Un RFC genérico (extranjero o público en general) entra una vez por nombre; un RFC con
-    formato inválido no entra (se cuenta en ``omitidos``). Escribe: si agrega algo, deja el evento
+    contador no editó. Idempotente. Un extranjero (``XEXX010101000``) entra una vez por nombre, no juntos; el público en
+    general (``XAXX010101000``) y un RFC con formato inválido no entran (se cuentan en ``omitidos``). Escribe: si agrega algo, deja el evento
     ``proveedores_sincronizados`` en la auditoría. Devuelve ``{agregados, omitidos}``."""
     rfc_empresa = rfc_normalizado(rfc_empresa)
     with db.get_conn() as conn:
@@ -50,14 +50,14 @@ def sincronizar(empresa_id: str, rfc_empresa: str, usuario_id: Optional[str] = N
             agregados = omitidos = 0
             for e in emisores:
                 rfc, nombre = e["rfc"], e["nombre"]
-                if not diot_catalogos.es_rfc_valido(rfc):
+                if not diot_catalogos.es_rfc_valido(rfc) or rfc == diot_catalogos.RFC_PUBLICO_GENERAL:
                     omitidos += 1
                     continue
-                if rfc in diot_catalogos.RFC_GENERICOS:
+                if rfc == diot_catalogos.RFC_EXTRANJERO:
                     cur.execute(
                         """INSERT INTO proveedores (empresa_id, rfc, nombre, tipo_tercero, tipo_operacion, origen)
                            VALUES (%s, %s, %s, %s, %s, 'cfdi')
-                           ON CONFLICT (empresa_id, rfc, nombre) WHERE rfc IN ('XEXX010101000', 'XAXX010101000') AND origen = 'cfdi'
+                           ON CONFLICT (empresa_id, rfc, nombre) WHERE rfc = 'XEXX010101000' AND origen = 'cfdi'
                            DO NOTHING RETURNING 1""",
                         (empresa_id, rfc, nombre, diot_catalogos.tipo_tercero_por_defecto(rfc), diot_catalogos.OPERACION_POR_DEFECTO),
                     )
@@ -65,7 +65,7 @@ def sincronizar(empresa_id: str, rfc_empresa: str, usuario_id: Optional[str] = N
                     cur.execute(
                         """INSERT INTO proveedores (empresa_id, rfc, nombre, tipo_tercero, tipo_operacion, origen)
                            VALUES (%s, %s, %s, %s, %s, 'cfdi')
-                           ON CONFLICT (empresa_id, rfc) WHERE rfc NOT IN ('XEXX010101000', 'XAXX010101000') DO UPDATE
+                           ON CONFLICT (empresa_id, rfc) WHERE rfc <> 'XEXX010101000' DO UPDATE
                               SET nombre = EXCLUDED.nombre, updated_at = NOW()
                               WHERE proveedores.nombre_editado = FALSE AND proveedores.origen = 'cfdi'
                                 AND proveedores.nombre IS DISTINCT FROM EXCLUDED.nombre

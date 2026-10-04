@@ -23,11 +23,12 @@ def es_rfc_valido(rfc: str) -> bool:
 
 
 def tipo_tercero_por_defecto(rfc: str) -> Optional[str]:
-    """Nacional con RFC válido → 04; XEXX → 05 (pendiente de ID fiscal y país); XAXX → 15."""
+    """Nacional con RFC válido → 04; XEXX → 05 (pendiente de ID fiscal y país). El público en general (XAXX) no es un
+    proveedor: no tiene tipo de tercero."""
     if rfc == RFC_EXTRANJERO:
         return "05"
     if rfc == RFC_PUBLICO_GENERAL:
-        return "15"
+        return None
     return "04" if es_rfc_valido(rfc) else None
 
 

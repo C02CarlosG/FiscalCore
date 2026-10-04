@@ -4,7 +4,7 @@ import pytest
 from backend import diot_catalogos as c
 
 
-@pytest.mark.parametrize("rfc,esperado", [("PRO010101AAA", "04"), ("XEXX010101000", "05"), ("XAXX010101000", "15"), ("basura", None)])
+@pytest.mark.parametrize("rfc,esperado", [("PRO010101AAA", "04"), ("XEXX010101000", "05"), ("XAXX010101000", None), ("basura", None)])
 def test_tipo_de_tercero_por_defecto(rfc, esperado):
     assert c.tipo_tercero_por_defecto(rfc) == esperado
 
@@ -16,7 +16,7 @@ def test_tipo_de_tercero_por_defecto(rfc, esperado):
     ({"rfc": "XEXX010101000", "tipo_tercero": "04"}, False),                                   # nacional con RFC genérico
     ({"rfc": "XEXX010101000", "tipo_tercero": "05"}, False),                                   # falta ID fiscal y país
     ({"rfc": "XEXX010101000", "tipo_tercero": "05", "id_fiscal": "1", "pais": "USA"}, True),
-    ({"rfc": "XAXX010101000", "tipo_tercero": "15", "tipo_operacion": "87"}, True),
+    ({"rfc": "PRO010101AAA", "tipo_tercero": "15", "tipo_operacion": "87"}, True),
     ({"rfc": "PRO010101AAA", "tipo_tercero": "04", "tipo_operacion": "87"}, False),            # 87 solo con 15
     ({"rfc": "PRO010101AAA"}, True),                                                           # sin clasificar es válido
 ])

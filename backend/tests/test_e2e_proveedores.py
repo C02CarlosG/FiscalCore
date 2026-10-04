@@ -65,22 +65,20 @@ def test_lista_se_alimenta_de_los_cfdi_recibidos_vigentes(entorno):
 
     assert r.status_code == 200, r.text
     items = {(i["rfc"], i["nombre"]): i for i in r.json()["items"]}
-    assert set(items) == {(PROV, "NOMBRE NUEVO"), ("XEXX010101000", "ACME INC"), ("XEXX010101000", "GLOBEX LLC"),
-                          ("XAXX010101000", "PUBLICO")}
+    assert set(items) == {(PROV, "NOMBRE NUEVO"), ("XEXX010101000", "ACME INC"), ("XEXX010101000", "GLOBEX LLC")}
     nacional = items[(PROV, "NOMBRE NUEVO")]
     assert (nacional["tipo_tercero"], nacional["tipo_operacion"], nacional["origen"]) == ("04", "85", "cfdi")
     extranjero = items[("XEXX010101000", "ACME INC")]
     assert (extranjero["tipo_tercero"], extranjero["pendiente"]) == ("05", True)           # falta ID fiscal y país
-    assert items[("XAXX010101000", "PUBLICO")]["tipo_tercero"] == "15"
-    assert (r.json()["agregados"], r.json()["omitidos"]) == (4, 1)
+    assert (r.json()["agregados"], r.json()["omitidos"]) == (3, 2)                          # XAXX y el RFC inválido no entran
     again = entorno[1].get(_url(entorno), headers=entorno[2]).json()
-    assert (again["agregados"], again["omitidos"]) == (0, 1)                                # idempotente
+    assert (again["agregados"], again["omitidos"]) == (0, 2)                                # idempotente
 
 
 def test_sincronizar_deja_el_evento_en_la_auditoria(entorno):
     aud = entorno[0].query_all("SELECT metadata FROM auditoria WHERE empresa_id = %s AND accion = 'proveedores_sincronizados'", (entorno[3],))
 
-    assert len(aud) == 1 and aud[0]["metadata"] == {"agregados": 4, "omitidos": 1}
+    assert len(aud) == 1 and aud[0]["metadata"] == {"agregados": 3, "omitidos": 2}
 
 
 def _por_rfc(entorno, rfc, nombre=None):
@@ -135,6 +133,12 @@ def test_alta_manual_de_otro_extranjero_y_duplicados(entorno):
                                                               "tipo_tercero": "05"}).status_code == 409
     assert client.post(_url(entorno), headers=headers, json={"rfc": PROV}).status_code == 409
     assert [i["nombre"] for i in client.get(_url(entorno), headers=headers, params={"q": "GB-1"}).json()["items"]] == ["INITECH"]
+
+
+def test_el_publico_en_general_no_es_proveedor_ni_por_alta_manual(entorno):
+    r = entorno[1].post(_url(entorno), headers=entorno[2], json={"rfc": "XAXX010101000", "nombre": "PUBLICO"})
+
+    assert r.status_code == 422
 
 
 def test_la_base_rechaza_codigos_fuera_del_catalogo(entorno):

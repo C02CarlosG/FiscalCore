@@ -7,9 +7,9 @@
 -- los valores por defecto para la DIOT. Las claves permitidas (04/05/15 y 02/03/06/07/08/85/87)
 -- DEBEN CONFIRMARSE contra el instructivo oficial del SAT (el entorno no lo puede consultar).
 --
--- Los extranjeros comparten RFC genérico (XEXX010101000) y los de operaciones con público en general
--- XAXX010101000: por eso el RFC solo es único para los demás; un extranjero se identifica por su
--- ID fiscal y se edita por id.
+-- Los extranjeros comparten el RFC genérico XEXX010101000: por eso el RFC solo es único para los demás
+-- (el público en general, XAXX010101000, no es un proveedor y no entra); un extranjero se identifica
+-- por su ID fiscal y se edita por id.
 -- ============================================================
 CREATE TABLE IF NOT EXISTS proveedores (
     id                    UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -28,15 +28,15 @@ CREATE TABLE IF NOT EXISTS proveedores (
     updated_at            TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- RFC único por empresa salvo los genéricos (varios extranjeros comparten XEXX010101000)
+-- RFC único por empresa salvo el de extranjeros (varios comparten XEXX010101000)
 CREATE UNIQUE INDEX IF NOT EXISTS uq_proveedores_rfc
-    ON proveedores (empresa_id, rfc) WHERE rfc NOT IN ('XEXX010101000', 'XAXX010101000');
+    ON proveedores (empresa_id, rfc) WHERE rfc <> 'XEXX010101000';
 -- Un extranjero se identifica por su ID fiscal
 CREATE UNIQUE INDEX IF NOT EXISTS uq_proveedores_id_fiscal
     ON proveedores (empresa_id, id_fiscal) WHERE tipo_tercero = '05' AND id_fiscal IS NOT NULL;
--- La alimentación desde CFDI de un RFC genérico es idempotente por nombre
-CREATE UNIQUE INDEX IF NOT EXISTS uq_proveedores_generico_cfdi
-    ON proveedores (empresa_id, rfc, nombre) WHERE rfc IN ('XEXX010101000', 'XAXX010101000') AND origen = 'cfdi';
+-- La alimentación desde CFDI de un extranjero es idempotente por nombre (no se juntan en un solo renglón)
+CREATE UNIQUE INDEX IF NOT EXISTS uq_proveedores_extranjero_cfdi
+    ON proveedores (empresa_id, rfc, nombre) WHERE rfc = 'XEXX010101000' AND origen = 'cfdi';
 CREATE INDEX IF NOT EXISTS idx_proveedores_nombre ON proveedores (empresa_id, nombre);
 
 DO $$ BEGIN

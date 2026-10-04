@@ -29,9 +29,9 @@ que hoy devuelve `GET /diot/{periodo}` es provisional y se retira cuando exista 
 
 | Columna | Notas |
 |---|---|
-| `empresa_id`, `rfc` | RFC en mayúsculas (CHECK). **Único por empresa salvo los genéricos**: varios extranjeros comparten `XEXX010101000` y varias ventas al público `XAXX010101000` |
+| `empresa_id`, `rfc` | RFC en mayúsculas (CHECK). **Único por empresa salvo el de extranjeros**: varios comparten `XEXX010101000`; `XAXX010101000` no se admite |
 | `nombre`, `nombre_editado` | razón social; la alimentación solo la actualiza si `nombre_editado = false` (`PATCH nombre_editado=false` devuelve el proveedor a la alimentación automática) |
-| `tipo_tercero` | `04` nacional, `05` extranjero, `15` global. CHECK en la base |
+| `tipo_tercero` | `04` nacional, `05` extranjero, `15` global (solo por captura manual con un RFC propio). CHECK en la base |
 | `tipo_operacion` | `02`, `03`, `06`, `07`, `08`, `85`, `87` (la `87` solo con tercero `15`). Por defecto `85`. CHECK en la base |
 | `pais` (CHAR(3), ISO 3166-1 alfa-3), `jurisdiccion_detalle`, `id_fiscal`, `efectos_fiscales` | extranjeros. `id_fiscal` es único por empresa entre extranjeros (`05`) |
 | `origen` | `cfdi` (alimentado) o `manual` |
@@ -53,7 +53,7 @@ Todo cambio del catálogo o del periodo queda en `auditoria` en la misma transac
 
 - RFC nacional válido → alta como `04`, operación `85`; si ya existe y el contador no editó el nombre, `DO UPDATE` del nombre con el del CFDI más reciente.
 - `XEXX010101000` → alta como `05`, marcada **pendiente** (falta ID fiscal y país); una por nombre de emisor, porque son terceros distintos.
-- `XAXX010101000` → alta como `15`.
+- `XAXX010101000` (público en general) → **no es un proveedor**: no entra a la alimentación (cuenta en `omitidos`) y el alta manual se rechaza con 422.
 - RFC con formato inválido → no entra y se cuenta en `omitidos`.
 - Si agrega algo deja el evento `proveedores_sincronizados` en la auditoría.
 

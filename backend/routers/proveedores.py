@@ -75,6 +75,8 @@ def _rfc_o_422(rfc: str) -> str:
     rfc = proveedores.rfc_normalizado(rfc)
     if not diot_catalogos.es_rfc_valido(rfc):
         raise HTTPException(status_code=422, detail="RFC inválido")
+    if rfc == diot_catalogos.RFC_PUBLICO_GENERAL:
+        raise HTTPException(status_code=422, detail="El público en general (XAXX010101000) no es un proveedor")
     return rfc
 
 
