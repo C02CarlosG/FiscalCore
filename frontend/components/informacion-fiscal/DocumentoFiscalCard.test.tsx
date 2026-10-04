@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { DocumentoFiscalCard } from "./DocumentoFiscalCard";
+import { DocumentoFiscalCard, textoAntiguedad } from "./DocumentoFiscalCard";
 import type { DocumentoFiscal, TipoDocumentoFiscal } from "./tipos";
 
 vi.mock("@/lib/api-client", async () => {
@@ -44,6 +44,15 @@ function renderCard(tipo: TipoDocumentoFiscal, doc: DocumentoFiscal | null) {
 
 const pdf = (nombre = "csf.pdf", bytes = 10) =>
   new File([new Uint8Array(bytes)], nombre, { type: "application/pdf" });
+
+describe("textoAntiguedad", () => {
+  it("usa singular, plural y hoy", () => {
+    expect(textoAntiguedad(0)).toBe(" · hoy");
+    expect(textoAntiguedad(1)).toBe(" · hace 1 día");
+    expect(textoAntiguedad(45)).toBe(" · hace 45 días");
+    expect(textoAntiguedad(null)).toBe("");
+  });
+});
 
 describe("DocumentoFiscalCard", () => {
   beforeEach(() => {

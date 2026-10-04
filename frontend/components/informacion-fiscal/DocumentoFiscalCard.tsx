@@ -84,10 +84,15 @@ function EstadoOpinion({ documento }: { documento: DocumentoFiscal }) {
   );
 }
 
+export function textoAntiguedad(dias: number | null): string {
+  if (typeof dias !== "number" || dias < 0) return "";
+  if (dias === 0) return " · hoy";
+  return ` · hace ${dias} ${dias === 1 ? "día" : "días"}`;
+}
+
 function DetalleDocumento({ documento }: { documento: DocumentoFiscal }) {
   const { datos } = documento;
-  const antiguedad =
-    typeof documento.antiguedad_dias === "number" ? ` · hace ${documento.antiguedad_dias} días` : "";
+  const antiguedad = textoAntiguedad(documento.antiguedad_dias);
   return (
     <div className="space-y-4">
       {documento.tipo === "opinion" && <EstadoOpinion documento={documento} />}
