@@ -190,11 +190,25 @@ async def listar_usuarios(empresa_id: uuid.UUID, current_user: dict = Depends(ge
     roles = ue.roles_efectivos(miembros)
     yo = current_user["user_id"]
     puede = ue.puede_administrar(yo, roles, _rol_plataforma(current_user))
-    invitaciones = []
+    invitaciones, por_aprobar = [], []
     if puede:
         invitaciones = db.query_all(
             "SELECT id, email, rol, estado, created_at FROM invitaciones_empresa "
             "WHERE empresa_id = %s AND estado = 'pendiente' AND expires_at > NOW() ORDER BY created_at",
+            (eid,),
+        )
+        # Aceptaciones que esperan la aprobación de un administrador: se muestran el
+        # nombre y el correo de la cuenta que aceptó y cuándo se creó esa cuenta, para
+        # reconocer a quien se registró con un correo ajeno.
+        por_aprobar = db.query_all(
+            """
+            SELECT i.id, i.email, i.rol, i.respondida_at, u.nombre, u.email AS email_cuenta,
+                   u.created_at AS cuenta_creada
+            FROM invitaciones_empresa i
+            JOIN usuarios u ON u.id = i.respondida_por
+            WHERE i.empresa_id = %s AND i.estado = 'aceptada_pendiente' AND i.expires_at > NOW()
+            ORDER BY i.respondida_at
+            """,
             (eid,),
         )
     return {
@@ -202,6 +216,14 @@ async def listar_usuarios(empresa_id: uuid.UUID, current_user: dict = Depends(ge
         "puede_administrar": puede,
         "usuarios": [_usuario(m, roles, yo) for m in miembros],
         "invitaciones": [_invitacion(f) for f in invitaciones],
+        "por_aprobar": [
+            {
+                "id": str(f["id"]), "email": f["email_cuenta"], "nombre": f.get("nombre"), "rol": f["rol"],
+                "cuenta_creada": f["cuenta_creada"].isoformat() if f.get("cuenta_creada") else None,
+                "aceptada": f["respondida_at"].isoformat() if f.get("respondida_at") else None,
+            }
+            for f in por_aprobar
+        ],
     }
 
 
@@ -304,7 +326,7 @@ async def invitar(
             """
             INSERT INTO invitaciones_empresa (empresa_id, email, rol, invitada_por)
             VALUES (%s, %s, %s, %s)
-            ON CONFLICT (empresa_id, email) WHERE estado = 'pendiente'
+            ON CONFLICT (empresa_id, email) WHERE estado IN ('pendiente', 'aceptada_pendiente')
             DO UPDATE SET rol = EXCLUDED.rol, invitada_por = EXCLUDED.invitada_por,
                           created_at = NOW(), expires_at = NOW() + INTERVAL '7 days'
             RETURNING id, email, rol, estado, created_at
@@ -330,7 +352,7 @@ async def cancelar_invitacion(
     with _miembros_bloqueados(eid) as (cur, _miembros, roles):
         _exigir_administrador(current_user, roles, rol_plataforma)
         cur.execute(
-            "UPDATE invitaciones_empresa SET estado = 'cancelada', respondida_at = NOW(), respondida_por = %s "
+            "UPDATE invitaciones_empresa SET estado = 'cancelada', resuelta_at = NOW(), resuelta_por = %s "
             "WHERE id = %s AND empresa_id = %s AND estado = 'pendiente' RETURNING id",
             (current_user["user_id"], str(invitacion_id), eid),
         )
@@ -339,6 +361,65 @@ async def cancelar_invitacion(
         raise HTTPException(status_code=404, detail="Invitación no encontrada")
     registrar_evento(current_user["user_id"], "cuenta.cancelar_invitacion", empresa_id=eid, entidad="invitacion",
                      entidad_id=str(invitacion_id), metadata=_metadata(via_admin))
+    return Response(status_code=204)
+
+
+def _resolver(empresa_id: uuid.UUID, invitacion_id: uuid.UUID, current_user: dict, aprobar: bool) -> None:
+    """Un administrador aprueba o rechaza una aceptación. Todo ocurre en la transacción
+    que bloquea los vínculos de la empresa: permiso, invitación y alta del vínculo."""
+    eid, via_admin = _empresa_visible(empresa_id, current_user)
+    rol_plataforma = _rol_plataforma(current_user)
+    with _miembros_bloqueados(eid) as (cur, miembros, roles):
+        _exigir_administrador(current_user, roles, rol_plataforma)
+        cur.execute(
+            "SELECT i.id, i.rol, i.respondida_por FROM invitaciones_empresa i "
+            "JOIN usuarios u ON u.id = i.respondida_por AND u.activo IS NOT FALSE "
+            "WHERE i.id = %s AND i.empresa_id = %s AND i.estado = 'aceptada_pendiente' AND i.expires_at > NOW() "
+            "FOR UPDATE OF i",
+            (str(invitacion_id), eid),
+        )
+        inv = cur.fetchone()
+        if not inv:
+            raise HTTPException(status_code=404, detail="Invitación no encontrada")
+        promovidos = []
+        if aprobar:
+            promovidos = _fijar_administradores(cur, eid, miembros, roles)
+            cur.execute(
+                "INSERT INTO usuario_empresas (usuario_id, empresa_id, rol) VALUES (%s, %s, %s) "
+                "ON CONFLICT (usuario_id, empresa_id) DO NOTHING",
+                (inv["respondida_por"], eid, inv["rol"]),
+            )
+        cur.execute(
+            "UPDATE invitaciones_empresa SET estado = %s, resuelta_por = %s, resuelta_at = NOW() WHERE id = %s",
+            ("aprobada" if aprobar else "rechazada_admin", current_user["user_id"], inv["id"]),
+        )
+        nuevo = str(inv["respondida_por"])
+    registrar_evento(
+        current_user["user_id"], "cuenta.aprobar_invitacion" if aprobar else "cuenta.rechazar_aceptacion",
+        empresa_id=eid, entidad="invitacion", entidad_id=str(invitacion_id),
+        metadata=_metadata(via_admin, {"usuario": nuevo, "administradores_fijados": promovidos}),
+    )
+
+
+@router.post("/empresas/{empresa_id}/invitaciones/{invitacion_id}/aprobar", status_code=204)
+async def aprobar_invitacion(
+    empresa_id: uuid.UUID,
+    invitacion_id: uuid.UUID,
+    current_user: dict = Depends(get_current_user),
+):
+    """Da acceso a quien aceptó la invitación, con el rol invitado."""
+    _resolver(empresa_id, invitacion_id, current_user, aprobar=True)
+    return Response(status_code=204)
+
+
+@router.post("/empresas/{empresa_id}/invitaciones/{invitacion_id}/rechazar", status_code=204)
+async def rechazar_aceptacion(
+    empresa_id: uuid.UUID,
+    invitacion_id: uuid.UUID,
+    current_user: dict = Depends(get_current_user),
+):
+    """No da acceso a quien aceptó (por ejemplo, alguien que se registró con un correo ajeno)."""
+    _resolver(empresa_id, invitacion_id, current_user, aprobar=False)
     return Response(status_code=204)
 
 
@@ -372,29 +453,33 @@ async def mis_invitaciones(current_user: dict = Depends(get_current_user)):
         return []
     filas = db.query_all(
         """
-        SELECT i.id, i.rol, i.created_at, e.rfc, e.razon_social, u.nombre AS invitada_por
+        SELECT i.id, i.rol, i.estado, i.created_at, e.rfc, e.razon_social, u.nombre AS invitada_por
         FROM invitaciones_empresa i
         JOIN empresas e ON e.id = i.empresa_id AND e.activo IS NOT FALSE
         LEFT JOIN usuarios u ON u.id = i.invitada_por
-        WHERE i.email = %s AND i.estado = 'pendiente' AND i.expires_at > NOW()
+        WHERE i.email = %s AND i.expires_at > NOW()
+          AND (i.estado = 'pendiente' OR (i.estado = 'aceptada_pendiente' AND i.respondida_por = %s))
         ORDER BY i.created_at
         """,
-        (email,),
+        (email, current_user["user_id"]),
     )
     return [
-        {"id": str(f["id"]), "rol": f["rol"], "creada": f["created_at"].isoformat(), "rfc": f["rfc"],
+        {"id": str(f["id"]), "rol": f["rol"], "estado": f["estado"], "creada": f["created_at"].isoformat(), "rfc": f["rfc"],
          "razon_social": f["razon_social"], "invitada_por": f["invitada_por"]}
         for f in filas
     ]
 
 
 def _responder(invitacion_id: uuid.UUID, current_user: dict, aceptar: bool) -> str:
+    """La persona invitada acepta o rechaza. Aceptar NO da acceso: deja la invitación
+    por aprobar (doble confirmación, decisión de Carlos del 2026-10-04) y abre un plazo
+    de 7 días para que un administrador la apruebe."""
     email = _mi_correo(current_user)
     if email is None:
         raise HTTPException(status_code=404, detail="Invitación no encontrada")
     with db.get_conn() as conn, conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
         cur.execute(
-            "SELECT i.id, i.empresa_id, i.rol FROM invitaciones_empresa i "
+            "SELECT i.id, i.empresa_id FROM invitaciones_empresa i "
             "JOIN empresas e ON e.id = i.empresa_id AND e.activo IS NOT FALSE "
             "WHERE i.id = %s AND i.email = %s AND i.estado = 'pendiente' AND i.expires_at > NOW() "
             "FOR UPDATE OF i",
@@ -405,23 +490,17 @@ def _responder(invitacion_id: uuid.UUID, current_user: dict, aceptar: bool) -> s
             # Igual si no existe, es de otro correo o ya se respondió: no se revela cuál.
             raise HTTPException(status_code=404, detail="Invitación no encontrada")
         if aceptar:
-            # Entrar como administrador no debe quitarle el rol al administrador implícito.
             cur.execute(
-                "SELECT usuario_id, rol, created_at FROM usuario_empresas WHERE empresa_id = %s "
-                "ORDER BY created_at NULLS LAST, usuario_id FOR UPDATE",
-                (inv["empresa_id"],),
+                "UPDATE invitaciones_empresa SET estado = 'aceptada_pendiente', respondida_por = %s, "
+                "respondida_at = NOW(), expires_at = NOW() + INTERVAL '7 days' WHERE id = %s",
+                (current_user["user_id"], inv["id"]),
             )
-            miembros = [dict(f) for f in cur.fetchall()]
-            _fijar_administradores(cur, str(inv["empresa_id"]), miembros, ue.roles_efectivos(miembros))
+        else:
             cur.execute(
-                "INSERT INTO usuario_empresas (usuario_id, empresa_id, rol) VALUES (%s, %s, %s) "
-                "ON CONFLICT (usuario_id, empresa_id) DO NOTHING",
-                (current_user["user_id"], inv["empresa_id"], inv["rol"]),
+                "UPDATE invitaciones_empresa SET estado = 'rechazada', respondida_por = %s, respondida_at = NOW() "
+                "WHERE id = %s",
+                (current_user["user_id"], inv["id"]),
             )
-        cur.execute(
-            "UPDATE invitaciones_empresa SET estado = %s, respondida_at = NOW(), respondida_por = %s WHERE id = %s",
-            ("aceptada" if aceptar else "rechazada", current_user["user_id"], inv["id"]),
-        )
         empresa_id = str(inv["empresa_id"])
     registrar_evento(
         current_user["user_id"], "cuenta.aceptar_invitacion" if aceptar else "cuenta.rechazar_invitacion",
@@ -432,7 +511,9 @@ def _responder(invitacion_id: uuid.UUID, current_user: dict, aceptar: bool) -> s
 
 @router.post("/invitaciones/{invitacion_id}/aceptar")
 async def aceptar_invitacion(invitacion_id: uuid.UUID, current_user: dict = Depends(get_current_user)):
-    return {"empresa_id": _responder(invitacion_id, current_user, aceptar=True)}
+    """Queda por aprobar: el acceso llega cuando un administrador de la empresa la aprueba."""
+    _responder(invitacion_id, current_user, aceptar=True)
+    return {"estado": "aceptada_pendiente"}
 
 
 @router.post("/invitaciones/{invitacion_id}/rechazar", status_code=204)

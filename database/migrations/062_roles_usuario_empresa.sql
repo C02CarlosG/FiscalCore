@@ -51,23 +51,34 @@ BEGIN
     END IF;
 END $$;
 
--- 5. Invitaciones por correo (en minúsculas). Una sola pendiente por empresa y correo.
+-- 5. Invitaciones por correo (en minúsculas) con doble confirmación:
+--      pendiente ──(la persona acepta)──▶ aceptada_pendiente ──(un administrador aprueba)──▶ aprobada
+--         │                                    └──(un administrador rechaza)──▶ rechazada_admin
+--         ├──(la persona rechaza)──▶ rechazada
+--         └──(un administrador cancela)──▶ cancelada
+--    Solo al aprobar se crea el vínculo en usuario_empresas. expires_at vence la
+--    etapa en curso: 7 días para aceptar y, ya aceptada, 7 días para aprobar.
+--    Una sola invitación abierta (pendiente o aceptada_pendiente) por empresa y correo.
 CREATE TABLE IF NOT EXISTS invitaciones_empresa (
     id             UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     empresa_id     UUID NOT NULL REFERENCES empresas(id) ON DELETE CASCADE,
     email          VARCHAR(255) NOT NULL CHECK (email = lower(btrim(email))),
     rol            VARCHAR(20) NOT NULL CHECK (rol IN ('administrador', 'contador')),
     estado         VARCHAR(20) NOT NULL DEFAULT 'pendiente'
-                   CHECK (estado IN ('pendiente', 'aceptada', 'rechazada', 'cancelada')),
+                   CHECK (estado IN ('pendiente', 'aceptada_pendiente', 'aprobada',
+                                     'rechazada', 'rechazada_admin', 'cancelada')),
     invitada_por   UUID REFERENCES usuarios(id) ON DELETE SET NULL,
-    respondida_por UUID REFERENCES usuarios(id) ON DELETE SET NULL,
     created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    -- Una invitación vence a los 7 días; re-invitar la renueva.
     expires_at     TIMESTAMPTZ NOT NULL DEFAULT NOW() + INTERVAL '7 days',
-    respondida_at  TIMESTAMPTZ
+    -- La persona invitada: quién aceptó o rechazó y cuándo.
+    respondida_por UUID REFERENCES usuarios(id) ON DELETE SET NULL,
+    respondida_at  TIMESTAMPTZ,
+    -- El administrador: quién aprobó, rechazó o canceló y cuándo.
+    resuelta_por   UUID REFERENCES usuarios(id) ON DELETE SET NULL,
+    resuelta_at    TIMESTAMPTZ
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS uq_invitaciones_pendiente
-    ON invitaciones_empresa (empresa_id, email) WHERE estado = 'pendiente';
-CREATE INDEX IF NOT EXISTS idx_invitaciones_email_pendiente
-    ON invitaciones_empresa (email) WHERE estado = 'pendiente';
+CREATE UNIQUE INDEX IF NOT EXISTS uq_invitaciones_abierta
+    ON invitaciones_empresa (empresa_id, email) WHERE estado IN ('pendiente', 'aceptada_pendiente');
+CREATE INDEX IF NOT EXISTS idx_invitaciones_email_abierta
+    ON invitaciones_empresa (email) WHERE estado IN ('pendiente', 'aceptada_pendiente');
