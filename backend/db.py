@@ -225,6 +225,9 @@ def init_db() -> None:
         # 030 es idempotente — índices del listado de CFDI y preferencias de tabla por usuario
         _run_sql_file("030_listado_cfdi.sql")
 
+        # 031 es idempotente — descarga automática del SAT: sat_solicitudes ampliada, índice de ventana activa y sat_sync_config
+        _run_sql_file("031_sat_sync.sql")
+
         # 040 es idempotente — extracción v2 del XML: Totales e ImpuestosP del REP, ObjetoImpDR,
         # ACuentaTerceros y nómina completa (percepciones por tipo, otros pagos, separación, jubilación)
         _run_sql_file("040_extraccion_v2.sql")

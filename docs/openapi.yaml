@@ -1879,13 +1879,17 @@ paths:
 
         **Tipo**: emitidos | recibidos | ambos. Cada tipo se pide por separado:
         si el SAT rechaza uno, el otro se sigue pidiendo y el rechazo llega en
-        `errores` (responde 502 solo si no se aceptó ninguno).
+        `errores` (responde 502 solo si no se aceptó ninguno; 409 si todos los
+        tipos pedidos ya tienen una descarga en curso para ese periodo).
 
         **Solicitudes agotadas (CodEstatus 5002)**: el SAT limita de por vida
         las solicitudes con las mismas fechas y RFC. Si rechaza el mes
         completo, se vuelve a pedir partido en dos rangos contiguos (corte el
         dia 15, distinto en cada intento), que cubren el mes segundo a segundo;
         el mes queda en dos solicitudes de ese tipo.
+
+        **Tope maximo (CodEstatus 5003, mas de 200,000 CFDI)**: la solicitud se
+        parte en dos mitades por fecha, recursivamente hasta un dia.
       parameters:
         - $ref: '#/components/parameters/EmpresaId'
       requestBody:
@@ -1938,6 +1942,8 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
               example:
                 detail: "No hay FIEL guardada para esta empresa. Guardala primero."
+        '409':
+          $ref: '#/components/responses/ConflictError'
         '502':
           $ref: '#/components/responses/GatewayError'
 
