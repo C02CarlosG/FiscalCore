@@ -5,6 +5,7 @@ import { apiFetch } from "@/lib/api-client";
 import { consultaApi, type CfdiEstadoUrl, type Tipo } from "@/lib/cfdi-url";
 import type {
   CfdiColumnasResponse,
+  CfdiDetalle,
   CfdiListadoResponse,
   CfdiResumenResponse,
 } from "@/types/api";
@@ -45,5 +46,15 @@ export function useCfdiResumen(empresaId: string, direccion: Direccion, estado: 
     queryFn: () => apiFetch<CfdiResumenResponse>(`${base(empresaId)}/resumen?${texto}`),
     enabled: Boolean(empresaId) && Boolean(estado.periodo),
     placeholderData: keepPreviousData,
+  });
+}
+
+/** Detalle de un CFDI (conceptos desplegados y visor). Sin uuid no consulta; un CFDI guardado no cambia, así que se reutiliza. */
+export function useCfdiDetalle(empresaId: string, uuid: string | null) {
+  return useQuery({
+    queryKey: ["cfdi-detalle", empresaId, uuid],
+    queryFn: () => apiFetch<CfdiDetalle>(`${base(empresaId)}/${encodeURIComponent(uuid!)}`),
+    enabled: Boolean(empresaId) && Boolean(uuid),
+    staleTime: 5 * 60_000,
   });
 }

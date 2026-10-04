@@ -104,3 +104,24 @@
     @apply bg-primary/15 text-foreground;
   }
 }
+
+/* Impresión del visor de CFDI: solo la ventana del comprobante, sin el resto de la app. */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  .cfdi-visor,
+  .cfdi-visor * {
+    visibility: visible;
+  }
+  .cfdi-visor {
+    position: absolute;
+    inset: 0;
+    transform: none;
+    max-width: none;
+    max-height: none;
+    overflow: visible;
+    border: 0;
+    box-shadow: none;
+  }
+}
