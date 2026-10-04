@@ -80,8 +80,9 @@ class DoctoRelacionado:
     equivalencia_dr: Optional[Decimal] = Decimal("1")
     # ImpuestosDR del REP 2.0 (vacío en Pagos 1.0).
     impuestos: list[ImpuestoResumen] = field(default_factory=list)
-    # ObjetoImpDR (REP 2.0): 01 no objeto, 02 sí objeto, 03 sí objeto y no obligado
-    # a desglose. None = el XML no lo trae (Pagos 1.0).
+    # ObjetoImpDR (REP 2.0, c_ObjetoImp): 01 no objeto, 02 sí objeto, 03 sí objeto y no
+    # obligado a desglose, 04 sí objeto y no causa impuesto; el catálogo puede crecer.
+    # None = el XML no lo trae (Pagos 1.0).
     objeto_imp_dr: Optional[str] = None
 
 
@@ -138,7 +139,8 @@ class ConceptoCFDI:
     objeto_imp: Optional[str]
     cuenta_predial: Optional[str]
     impuestos: list[ImpuestoResumen] = field(default_factory=list)
-    # cfdi:ACuentaTerceros: lo cobrado por cuenta de terceros no es ingreso ni IVA propios.
+    # cfdi:ACuentaTerceros (solo CFDI 4.0): lo cobrado por cuenta de terceros no es ingreso
+    # ni IVA propios. En CFDI 3.3 el equivalente es el complemento Terceros 1.1, que no se lee.
     rfc_a_cuenta_terceros: Optional[str] = None
     nombre_a_cuenta_terceros: Optional[str] = None
     regimen_a_cuenta_terceros: Optional[str] = None
@@ -158,6 +160,10 @@ class NominaConcepto:
     importe_exento: Optional[Decimal] = None    # solo percepciones
     importe: Optional[Decimal] = None           # deducciones y otros pagos
     subsidio_causado: Optional[Decimal] = None  # OtroPago con SubsidioAlEmpleo
+    # OtroPago con CompensacionSaldosAFavor (ajuste anual de ISR).
+    saldo_a_favor: Optional[Decimal] = None
+    anio_saldo_a_favor: Optional[int] = None
+    remanente_saldo_a_favor: Optional[Decimal] = None
 
 
 @dataclass
@@ -671,10 +677,15 @@ class CFDIParser:
             if otros is not None:
                 for linea, otro in enumerate(otros.findall(f"{NS_NOMINA12}OtroPago"), start=1):
                     subsidio = otro.find(f"{NS_NOMINA12}SubsidioAlEmpleo")
+                    compensacion = otro.find(f"{NS_NOMINA12}CompensacionSaldosAFavor")
+                    anio = compensacion.get("Año") if compensacion is not None else None
                     d.conceptos.append(NominaConcepto(
                         categoria="otro_pago", linea=linea, tipo=otro.get("TipoOtroPago"),
                         clave=otro.get("Clave"), concepto=otro.get("Concepto"), importe=opt(otro, "Importe"),
                         subsidio_causado=opt(subsidio, "SubsidioCausado"),
+                        saldo_a_favor=opt(compensacion, "SaldoAFavor"),
+                        anio_saldo_a_favor=int(anio) if anio and anio.isdigit() else None,
+                        remanente_saldo_a_favor=opt(compensacion, "RemanenteSalFav"),
                     ))
             detalles.append(d)
         return detalles

@@ -33,6 +33,9 @@ NOMINA_COMPLETA = '''<nomina12:Nomina xmlns:nomina12="http://www.sat.gob.mx/nomi
       <nomina12:SubsidioAlEmpleo SubsidioCausado="200.00"/>
     </nomina12:OtroPago>
     <nomina12:OtroPago TipoOtroPago="004" Clave="O02" Concepto="Reembolso" Importe="0.00"/>
+    <nomina12:OtroPago TipoOtroPago="004" Clave="O03" Concepto="Compensación" Importe="150.00">
+      <nomina12:CompensacionSaldosAFavor SaldoAFavor="400.00" Año="2025" RemanenteSalFav="250.00"/>
+    </nomina12:OtroPago>
   </nomina12:OtrosPagos>
 </nomina12:Nomina>'''
 
@@ -83,7 +86,12 @@ def test_deducciones_y_otros_pagos_por_tipo_con_subsidio_causado():
     assert [(c.linea, c.tipo, c.importe, c.subsidio_causado) for c in otros] == [
         (1, "002", D("200.00"), D("200.00")),
         (2, "004", D("0.00"), None),     # sin SubsidioAlEmpleo: no se inventa un causado
+        (3, "004", D("150.00"), None),
     ]
+    compensacion = otros[2]
+    assert (compensacion.saldo_a_favor, compensacion.anio_saldo_a_favor, compensacion.remanente_saldo_a_favor) == (
+        D("400.00"), 2025, D("250.00"))
+    assert (otros[1].saldo_a_favor, otros[1].anio_saldo_a_favor) == (None, None)
 
 
 def test_separacion_y_jubilacion():
@@ -234,10 +242,12 @@ def test_a_cuenta_de_terceros_por_concepto():
     assert ajeno.impuestos[0].importe == D("160.00")
 
 
-@pytest.mark.parametrize("version", ["3.3", "4.0"])
-def test_a_cuenta_de_terceros_tambien_en_33(version):
+def test_cfdi_33_no_trae_a_cuenta_de_terceros():
+    """En CFDI 3.3 el equivalente es el complemento Terceros 1.1, que no se lee: queda sin
+    marca de terceros (limitación documentada, ver migración 040)."""
     p = CFDIParser().parse_xml(_cfdi('''<cfdi:Conceptos>
       <cfdi:Concepto ClaveProdServ="80101500" Cantidad="1" ClaveUnidad="E48" Descripcion="X" ValorUnitario="100.00" Importe="100.00">
-        <cfdi:ACuentaTerceros RfcACuentaTerceros="TTE010101ABC" NombreACuentaTerceros="T"/>
-      </cfdi:Concepto></cfdi:Conceptos>''', version=version, subtotal="100.00", total="100.00"))
-    assert p.conceptos[0].rfc_a_cuenta_terceros == "TTE010101ABC"
+        <cfdi:ComplementoConcepto><terceros:PorCuentadeTerceros xmlns:terceros="http://www.sat.gob.mx/terceros"
+            version="1.1" rfc="TTE010101ABC" nombre="T"/></cfdi:ComplementoConcepto>
+      </cfdi:Concepto></cfdi:Conceptos>''', version="3.3", subtotal="100.00", total="100.00"))
+    assert p.conceptos[0].rfc_a_cuenta_terceros is None

@@ -39,7 +39,7 @@ def test_040_crea_tablas_y_columnas_y_se_puede_repetir():
     } <= _columnas(db, "cfdi_nominas")
     assert {
         "nomina_id", "categoria", "linea", "tipo", "clave", "concepto", "importe_gravado", "importe_exento",
-        "importe", "subsidio_causado",
+        "importe", "subsidio_causado", "saldo_a_favor", "anio_saldo_a_favor", "remanente_saldo_a_favor",
     } <= _columnas(db, "cfdi_nomina_conceptos")
 
 

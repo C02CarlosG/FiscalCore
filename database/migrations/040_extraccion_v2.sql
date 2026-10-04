@@ -6,8 +6,10 @@
 -- exenta deducible) necesitan del XML y que la extracción v1 no leía:
 --   * REP 2.0: Totales del complemento (cifra oficial en pesos) e ImpuestosP
 --     por pago, y ObjetoImpDR por documento pagado.
---   * ACuentaTerceros por concepto (lo cobrado por cuenta de terceros no es
---     ingreso ni IVA propios).
+--   * ACuentaTerceros por concepto, solo CFDI 4.0 (lo cobrado por cuenta de
+--     terceros no es ingreso ni IVA propios). En CFDI 3.3 el equivalente es el
+--     complemento Terceros 1.1 (terceros:PorCuentadeTerceros), que NO se lee:
+--     un 3.3 por cuenta de terceros se guarda como propio.
 --   * Nómina 1.2 completa: encabezado (TipoNomina, FechaPago, TipoRegimen),
 --     percepciones por TipoPercepcion con gravado y exento, deducciones y
 --     otros pagos por tipo (el subsidio causado vive en OtroPago 002),
@@ -19,20 +21,24 @@
 -- un valor fuera de catálogo no debe impedir guardar el comprobante.
 -- ============================================================
 
--- 1. A cuenta de terceros por concepto.
+-- 1. A cuenta de terceros por concepto (CFDI 4.0). Ojo para F5: cfdi_impuestos
+--    y el resumen del comprobante mezclan lo propio con lo de terceros; el
+--    cálculo debe separarlo con cfdi_conceptos.impuestos y estas columnas.
 ALTER TABLE cfdi_conceptos
   ADD COLUMN IF NOT EXISTS rfc_a_cuenta_terceros     VARCHAR(20),
   ADD COLUMN IF NOT EXISTS nombre_a_cuenta_terceros  TEXT,
   ADD COLUMN IF NOT EXISTS regimen_a_cuenta_terceros VARCHAR(20);
 
--- 2. ObjetoImpDR del documento pagado: 01 no objeto, 02 sí objeto,
---    03 sí objeto y no obligado a desglose. NULL = el XML no lo trae.
+-- 2. ObjetoImpDR del documento pagado (c_ObjetoImp): 01 no objeto, 02 sí objeto,
+--    03 sí objeto y no obligado a desglose, 04 sí objeto y no causa impuesto;
+--    el catálogo puede crecer, por eso se guarda crudo. NULL = el XML no lo trae.
 ALTER TABLE pagos_relaciones
   ADD COLUMN IF NOT EXISTS objeto_imp_dr VARCHAR(20);
 
 -- 3. ImpuestosP de cada pago (REP 2.0): lo que el pago declara en conjunto,
 --    en la moneda del pago y a seis decimales. Una retención no trae base ni
---    factor (queda base 0 y factor "Tasa" por omisión, igual que en v1).
+--    factor (queda base 0 y factor "Tasa" por omisión, igual que en v1): en
+--    ambito = 'retencion' la base 0 significa "no aplica", no "base cero".
 CREATE TABLE IF NOT EXISTS pagos_impuestos (
     id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     pago_id       UUID NOT NULL REFERENCES pagos_cfdi(id) ON DELETE CASCADE,
@@ -116,7 +122,11 @@ CREATE TABLE IF NOT EXISTS cfdi_nomina_conceptos (
     importe_gravado NUMERIC(18,2),                               -- solo percepciones
     importe_exento  NUMERIC(18,2),                               -- solo percepciones
     importe         NUMERIC(18,2),                               -- deducciones y otros pagos
-    subsidio_causado NUMERIC(18,2)                               -- OtroPago con SubsidioAlEmpleo
+    subsidio_causado NUMERIC(18,2),                              -- OtroPago con SubsidioAlEmpleo
+    -- OtroPago con CompensacionSaldosAFavor (ajuste anual de ISR, OtroPago 004)
+    saldo_a_favor           NUMERIC(18,2),
+    anio_saldo_a_favor      SMALLINT,
+    remanente_saldo_a_favor NUMERIC(18,2)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS uq_cfdi_nomina_conceptos
     ON cfdi_nomina_conceptos (nomina_id, categoria, linea);

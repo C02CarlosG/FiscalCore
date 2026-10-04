@@ -109,6 +109,9 @@ def _xml_nomina() -> bytes:
         <nomina12:OtroPago TipoOtroPago="002" Clave="O01" Concepto="Subsidio para el empleo" Importe="200.00">
           <nomina12:SubsidioAlEmpleo SubsidioCausado="200.00"/>
         </nomina12:OtroPago>
+        <nomina12:OtroPago TipoOtroPago="004" Clave="O02" Concepto="Compensación" Importe="0.00">
+          <nomina12:CompensacionSaldosAFavor SaldoAFavor="400.00" Año="2025" RemanenteSalFav="250.00"/>
+        </nomina12:OtroPago>
       </nomina12:OtrosPagos>
     </nomina12:Nomina>
     <tfd:TimbreFiscalDigital UUID="{UUID_NOMINA}" FechaTimbrado="2026-12-21T10:01:00"/>
@@ -164,7 +167,7 @@ def _conteos(db):
     }
 
 
-ESPERADO = {"terceros": 1, "totales": 1, "impuestos_p": 1, "nominas": 1, "nomina_conceptos": 5}
+ESPERADO = {"terceros": 1, "totales": 1, "impuestos_p": 1, "nominas": 1, "nomina_conceptos": 6}
 
 
 def test_subir_guarda_la_extraccion_v2(entorno):
@@ -216,9 +219,14 @@ def test_nomina_encabezado_y_conceptos_por_tipo(entorno):
         ("deduccion", "001", None, None, D("300.00"), None),
         ("deduccion", "002", None, None, D("2200.00"), None),
         ("otro_pago", "002", None, None, D("200.00"), D("200.00")),
+        ("otro_pago", "004", None, None, D("0.00"), None),
         ("percepcion", "001", D("10000.00"), D("0.00"), None, None),
         ("percepcion", "003", D("4000.00"), D("7000.00"), None, None),
     ]
+    comp = _uno(db, "SELECT k.saldo_a_favor, k.anio_saldo_a_favor, k.remanente_saldo_a_favor FROM cfdi_nomina_conceptos k "
+                    "JOIN cfdi_nominas n ON n.id = k.nomina_id JOIN cfdi c ON c.id = n.cfdi_id "
+                    "WHERE c.uuid = %s AND k.tipo = '004'", UUID_NOMINA)
+    assert comp == {"saldo_a_favor": D("400.00"), "anio_saldo_a_favor": 2025, "remanente_saldo_a_favor": D("250.00")}
     # Los totales de v1 en cfdi siguen ahí.
     cfdi = _uno(db, "SELECT nomina_gravado, nomina_exento, nomina_isr_retenido FROM cfdi WHERE uuid = %s", UUID_NOMINA)
     assert cfdi == {"nomina_gravado": D("14000.00"), "nomina_exento": D("7000.00"), "nomina_isr_retenido": D("2200.00")}

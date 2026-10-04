@@ -152,12 +152,14 @@ def _sentencias_nominas(cfdi_id: str, nominas) -> list[tuple[str, tuple]]:
                 params += [
                     nomina_id, c.categoria, c.linea, c.tipo, c.clave, c.concepto,
                     _txt(c.importe_gravado), _txt(c.importe_exento), _txt(c.importe), _txt(c.subsidio_causado),
+                    _txt(c.saldo_a_favor), c.anio_saldo_a_favor, _txt(c.remanente_saldo_a_favor),
                 ]
             sentencias.append((
                 """INSERT INTO cfdi_nomina_conceptos (
                        nomina_id, categoria, linea, tipo, clave, concepto,
-                       importe_gravado, importe_exento, importe, subsidio_causado
-                   ) VALUES """ + ",".join(["(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"] * len(n.conceptos)),
+                       importe_gravado, importe_exento, importe, subsidio_causado,
+                       saldo_a_favor, anio_saldo_a_favor, remanente_saldo_a_favor
+                   ) VALUES """ + ",".join(["(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"] * len(n.conceptos)),
                 tuple(params),
             ))
     return sentencias

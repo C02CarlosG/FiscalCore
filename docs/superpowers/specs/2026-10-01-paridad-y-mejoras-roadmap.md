@@ -233,13 +233,28 @@ relee `xml_raw` de los CFDI con versión menor; no descarga nada del SAT):
 | `pago20:Totales` del REP | `cfdi_pagos_totales` (una fila por REP; NULL = el atributo no viene) | Cifra oficial en pesos del IVA cobrado por tasa y control de cuadre | F5 |
 | `ImpuestosP` de cada pago | `pagos_impuestos` (en la moneda del pago, 6 decimales) | Cuando un REP trae pagos de meses distintos | F5 |
 | `ObjetoImpDR` por documento pagado | `pagos_relaciones.objeto_imp_dr` | Distinguir "no objeto" de "objeto sin desglose" y de un REP sin impuestos | F5 |
-| RFC, nombre y régimen de `ACuentaTerceros` por concepto | `cfdi_conceptos.rfc_a_cuenta_terceros` y afines | Excluir del ingreso y del IVA propios lo cobrado por cuenta de terceros | F5, F7 |
+| RFC, nombre y régimen de `ACuentaTerceros` por concepto (**solo CFDI 4.0**) | `cfdi_conceptos.rfc_a_cuenta_terceros` y afines | Excluir del ingreso y del IVA propios lo cobrado por cuenta de terceros | F5, F7 |
 | Nómina: `TipoNomina`, `FechaPago`, fechas inicial y final, días pagados, `TipoRegimen`, número de empleado y los totales de percepciones, deducciones y otros pagos | `cfdi_nominas` (un renglón por nodo `Nomina`) | Mes de la deducción y régimen del receptor | F7 |
 | Nómina: cada percepción (`TipoPercepcion`, gravado, exento), deducción (`TipoDeduccion`) y otro pago (`TipoOtroPago`, `SubsidioCausado`) | `cfdi_nomina_conceptos`, con el tipo tal cual viene en el XML | Base de la nómina exenta deducible (la PTU y los viáticos no entran) y subsidio causado; qué tipo cuenta como qué lo decide el cálculo | F7 |
 | Nómina: separación/indemnización y jubilación/pensión/retiro | columnas `sep_*` y `jub_*` de `cfdi_nominas` | Ingreso acumulable y no acumulable | F7 |
+| Nómina: `CompensacionSaldosAFavor` de un otro pago (saldo a favor, año y remanente) | columnas de `cfdi_nomina_conceptos` | Ajuste anual de ISR | F7 |
 
-Lo que **no** se extrae, a propósito: la CURP y el NSS del trabajador (dato personal que
-ningún cálculo usa).
+Lo que **no** se extrae, a propósito: la CURP, el NSS, el banco y la cuenta del trabajador
+(dato personal que ningún cálculo usa; ojo: `xml_raw` sigue guardando el XML completo, así
+que se trata con el mismo cuidado). Pendiente hasta que un cálculo lo pida: horas extra,
+incapacidades (días y tipo), subcontratación y acciones o títulos de nómina.
+
+Avisos para los cálculos que consumen esto:
+
+- `ACuentaTerceros` solo existe en CFDI 4.0. En 3.3 el equivalente es el complemento Terceros
+  1.1 (`terceros:PorCuentadeTerceros`), que no se lee: un 3.3 por cuenta de terceros queda
+  como propio. Importa solo si se audita 2022 o antes.
+- `cfdi_impuestos` y el resumen del comprobante mezclan lo propio con lo de terceros: F5 debe
+  separarlos con `cfdi_conceptos.impuestos` y las columnas de terceros.
+- En `pagos_impuestos` y `pagos_relaciones_impuestos`, la `base` de una retención no es un
+  dato (el XML no la trae; queda 0).
+- `ObjetoImpDR` se guarda crudo: el catálogo c_ObjetoImp puede traer códigos nuevos además
+  de 01 a 04.
 
 Criterios que los cálculos deben respetar con lo ya guardado:
 
