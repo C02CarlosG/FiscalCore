@@ -232,6 +232,9 @@ def init_db() -> None:
         # ACuentaTerceros y nómina completa (percepciones por tipo, otros pagos, separación, jubilación)
         _run_sql_file("040_extraccion_v2.sql")
 
+        # 050 es idempotente — ajustes manuales del IVA por flujo (no considerar / reasignar periodo)
+        _run_sql_file("050_iva_ajustes.sql")
+
         # Seed inicial: usuario admin si la base aún no tiene usuarios
         _seed_admin()
 
