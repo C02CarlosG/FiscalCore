@@ -5,6 +5,7 @@ from decimal import Decimal
 
 import pytest
 
+from backend import cfdi_store
 from backend.tests.conftest import db_disponible, headers_usuario_e2e
 
 D = Decimal
@@ -151,7 +152,8 @@ def test_subir_factura_guarda_impuestos_conceptos_y_encabezados(entorno):
         (UUID_FACTURA,),
     )
     assert cfdi == {"regimen_emisor": "601", "condiciones_pago": "30 días",
-                    "no_certificado": "00001000000504465028", "detalle_version": 1}
+                    "no_certificado": "00001000000504465028",
+                    "detalle_version": cfdi_store.DETALLE_VERSION}
     assert _impuestos_cfdi(db) == IMPUESTOS_FACTURA
     conceptos = db.query_all(
         """SELECT k.linea, k.descripcion, k.importe, k.impuestos
@@ -305,7 +307,7 @@ def test_fallo_en_el_complemento_de_pago_deja_el_rep_pendiente(entorno, monkeypa
 
     assert (resultado["procesados"], resultado["errores"], resultado["pendientes"]) == (1, [], 0)
     assert _cobrado(db) == D("6150.00")
-    assert _version(db, UUID_REP) == 1
+    assert _version(db, UUID_REP) == cfdi_store.DETALLE_VERSION
 
 
 def test_fallo_a_medias_no_borra_el_detalle_ya_guardado(entorno):
@@ -322,7 +324,7 @@ def test_fallo_a_medias_no_borra_el_detalle_ya_guardado(entorno):
 
     assert _num_conceptos(db) == 3
     assert _impuestos_cfdi(db) == IMPUESTOS_FACTURA
-    assert _version(db, UUID_FACTURA) == 1
+    assert _version(db, UUID_FACTURA) == cfdi_store.DETALLE_VERSION
 
 
 def test_resubir_el_mismo_uuid_con_otro_contenido_no_cambia_el_detalle(entorno):
@@ -374,7 +376,7 @@ def test_reproceso_sigue_con_el_lote_despues_de_un_xml_ilegible(entorno):
 
     assert resultado["procesados"] == 1
     assert [e["uuid"] for e in resultado["errores"]] == [UUID_FACTURA]
-    assert (_version(db, UUID_FACTURA), _version(db, UUID_REP)) == (-1, 1)
+    assert (_version(db, UUID_FACTURA), _version(db, UUID_REP)) == (-1, cfdi_store.DETALLE_VERSION)
 
 
 def test_subir_factura_con_serie_de_25_caracteres(entorno):
