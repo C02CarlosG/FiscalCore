@@ -8,7 +8,7 @@ para poder probarse en aislamiento. Ver ``docs/modulo-iva-spec.md``.
 from __future__ import annotations
 
 from datetime import date, datetime
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
 CENTAVOS = Decimal("0.01")
@@ -108,7 +108,7 @@ def iva_trasladado(
                     ppd_iva += iva_cfdi * (importe / total)
 
     total = pue_iva + ppd_iva - nc_iva
-    q = lambda d: d.quantize(CENTAVOS)
+    q = lambda d: d.quantize(CENTAVOS, rounding=ROUND_HALF_UP)
     return {
         "pue": {"base": q(pue_base), "iva": q(pue_iva)},
         "ppd": {"cobrado": q(ppd_cobrado), "iva": q(ppd_iva)},
@@ -183,7 +183,7 @@ def iva_acreditable(
                     ppd_iva += iva_parcial
 
     bruto = pue_iva + ppd_iva - nc_iva
-    q = lambda d: d.quantize(CENTAVOS)
+    q = lambda d: d.quantize(CENTAVOS, rounding=ROUND_HALF_UP)
     return {
         "pue": {"base": q(pue_base), "iva": q(pue_iva)},
         "ppd": {"pagado": q(ppd_pagado), "iva": q(ppd_iva)},
@@ -209,4 +209,4 @@ def factor_prorrateo(gravados: Any, exentos: Any) -> Decimal:
 
 def aplicar_prorrateo(bruto: Any, factor: Any) -> Decimal:
     """Aplica el factor de prorrateo al IVA acreditable bruto."""
-    return (_dec(bruto) * _dec(factor)).quantize(CENTAVOS)
+    return (_dec(bruto) * _dec(factor)).quantize(CENTAVOS, rounding=ROUND_HALF_UP)

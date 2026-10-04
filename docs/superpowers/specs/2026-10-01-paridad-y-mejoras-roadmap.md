@@ -223,18 +223,42 @@ reinicia, la descarga se pierde). F2 la vuelve desatendida.
 - Aplicabilidad por régimen (decisión D2): se determina en la spec de F7 con el
   catálogo de regímenes; el módulo por coeficiente de utilidad sigue disponible.
 
-### Pendientes de extracción detectados en la revisión fiscal de F1
+### Extracción v2 (F3.5a, migración 040, `DETALLE_VERSION` 2)
 
-F1 guarda lo necesario para listar y desglosar; estos datos los necesitan los cálculos
-y se extraen en la spec de la fase indicada subiendo `cfdi_store.DETALLE_VERSION` (el
-reproceso vuelve a leer el `xml_raw`, sin descargar nada):
+Lo que la revisión fiscal de F1 dejó pendiente de extraer **ya se guarda** (el reproceso
+relee `xml_raw` de los CFDI con versión menor; no descarga nada del SAT):
 
-| Dato | Para qué | Fase |
-|---|---|---|
-| `pago20:Totales` e `ImpuestosP` del REP | Cifra oficial en pesos del IVA cobrado por tasa y control de cuadre; `ImpuestosP` cuando un REP trae pagos de meses distintos | F5 |
-| `ObjetoImpDR` por documento pagado | Distinguir "no objeto" de "objeto sin desglose" y de un REP sin impuestos | F5 |
-| RFC de `ACuentaTerceros` por concepto | Excluir del ingreso y del IVA propios lo cobrado por cuenta de terceros | F5, F7 |
-| Nómina por percepción (`TipoPercepcion`, gravado/exento), `FechaPago`, `TipoNomina`, régimen del receptor, otros pagos por tipo (subsidio), separación y jubilación | Base correcta de la nómina exenta deducible (la PTU y los viáticos no entran) y mes de la deducción | F7 |
+| Dato | Dónde queda | Para qué | Fase que lo usa |
+|---|---|---|---|
+| `pago20:Totales` del REP | `cfdi_pagos_totales` (una fila por REP; NULL = el atributo no viene) | Cifra oficial en pesos del IVA cobrado por tasa y control de cuadre | F5 |
+| `ImpuestosP` de cada pago | `pagos_impuestos` (en la moneda del pago, 6 decimales) | Cuando un REP trae pagos de meses distintos | F5 |
+| `ObjetoImpDR` por documento pagado | `pagos_relaciones.objeto_imp_dr` | Distinguir "no objeto" de "objeto sin desglose" y de un REP sin impuestos | F5 |
+| RFC, nombre y régimen de `ACuentaTerceros` por concepto (**solo CFDI 4.0**) | `cfdi_conceptos.rfc_a_cuenta_terceros` y afines | Excluir del ingreso y del IVA propios lo cobrado por cuenta de terceros | F5, F7 |
+| Nómina: `TipoNomina`, `FechaPago`, fechas inicial y final, días pagados, `TipoRegimen`, número de empleado y los totales de percepciones, deducciones y otros pagos | `cfdi_nominas` (un renglón por nodo `Nomina`) | Mes de la deducción y régimen del receptor | F7 |
+| Nómina: cada percepción (`TipoPercepcion`, gravado, exento), deducción (`TipoDeduccion`) y otro pago (`TipoOtroPago`, `SubsidioCausado`) | `cfdi_nomina_conceptos`, con el tipo tal cual viene en el XML | Base de la nómina exenta deducible (la PTU y los viáticos no entran) y subsidio causado; qué tipo cuenta como qué lo decide el cálculo | F7 |
+| Nómina: separación/indemnización y jubilación/pensión/retiro | columnas `sep_*` y `jub_*` de `cfdi_nominas` | Ingreso acumulable y no acumulable | F7 |
+| Nómina: `CompensacionSaldosAFavor` de un otro pago (saldo a favor, año y remanente) | columnas de `cfdi_nomina_conceptos` | Ajuste anual de ISR | F7 |
+
+Lo que **no** se extrae, a propósito: la CURP, el NSS, el banco y la cuenta del trabajador
+(dato personal que ningún cálculo usa; ojo: `xml_raw` sigue guardando el XML completo, así
+que se trata con el mismo cuidado). Pendiente hasta que un cálculo lo pida: horas extra,
+incapacidades (días y tipo), subcontratación y acciones o títulos de nómina.
+
+Avisos para los cálculos que consumen esto:
+
+- `ACuentaTerceros` solo existe en CFDI 4.0. En 3.3 el equivalente es el complemento Terceros
+  1.1 (`terceros:PorCuentadeTerceros`), que no se lee: un 3.3 por cuenta de terceros queda
+  como propio. Importa solo si se audita 2022 o antes.
+- `cfdi_impuestos` y el resumen del comprobante mezclan lo propio con lo de terceros: F5 debe
+  separarlos con `cfdi_conceptos.impuestos` y las columnas de terceros.
+- En `pagos_impuestos` y `pagos_relaciones_impuestos`, la `base` de una retención no es un
+  dato (el XML no la trae; queda 0).
+- Dos pagos del mismo REP con la misma fecha y monto comparten fila en `pagos_cfdi`
+  (`UNIQUE cfdi_id, fecha_pago, monto`): sus `ImpuestosP` se acumulan, pero sus documentos
+  relacionados idénticos colapsan. La solución de fondo (agregar el orden del nodo a la
+  llave) queda para F3.5b.
+- `ObjetoImpDR` se guarda crudo: el catálogo c_ObjetoImp puede traer códigos nuevos además
+  de 01 a 04.
 
 Criterios que los cálculos deben respetar con lo ya guardado:
 
@@ -384,7 +408,7 @@ pausa.
 
 | Fecha | De → para | Qué se necesita | Estado |
 |---|---|---|---|
-| — | — | — | — |
+| 2026-10-04 | D → B | Agregar `"informacion-fiscal": "Información fiscal"` al mapa del breadcrumb de `layout/Header.tsx` (hoy muestra "Empresas" en `/empresas/{id}/informacion-fiscal`) y `"informacion-fiscal"` a `SUB_RUTAS` de `layout/EmpresaSwitcher.tsx` (para conservar la pantalla al cambiar de empresa) | Pendiente |
 
 ## Riesgos
 
@@ -408,10 +432,10 @@ pausa.
 | F1 | B (cierre) | Integrada. Falta el cierre con datos reales: reprocesar los CFDI de COPLASUR y cuadrar el IVA por tasa contra el encabezado | este documento, sección "Fases" y "Reglas comunes" | `docs/superpowers/plans/2026-10-01-fase1-detalle-fiscal-cfdi.md` |
 | F2 | B | F2.1 (base: migración 031, `sat_sync.py`, reintentos, partición por volumen y por 5002) y F2.2 (worker: `backend/worker.py`, `procesar_empresa`, candado por empresa, carga inicial y corrida diaria) integradas (PR #17); F2.3 (endpoints `sync/estado`, `sync/config`, `sync/ahora`, consentimiento y auditoría; borrar la e.firma desactiva la automatización) implementada, en revisión; F2.4 y F2.5 pendientes. Pendiente de quien tenga acceso: documentar `FIEL_ENCRYPTION_KEY` y `SAT_SYNC_*` en `.env.example` (texto en el plan de F2.2) | `docs/superpowers/specs/2026-10-03-f2-descarga-automatica-design.md` (en PR #17) | un plan por entrega |
 | F3 | A | F3.1, F3.2, F3.3 (PR #21) y F3.4 (PR #24) integradas; F3.5a extracción v2 en curso; luego F3.5b | `docs/superpowers/specs/2026-10-02-f3-listado-cfdi-design.md` | `2026-10-02-f3-1-api-listado-cfdi.md`, `2026-10-03-f3-2-pantalla-cfdi.md`; un plan por entrega restante |
-| F4 | C | En curso | — | — |
-| F5 | C | En curso (sin la parte de REP hasta que se integre F3.5a) |
+| F4 | C | En revisión (PR #25); falta cuadrar con los CFDI reales de COPLASUR | `docs/superpowers/specs/2026-10-04-f4-inicio-design.md` | `docs/superpowers/plans/2026-10-04-f4-inicio.md` |
+| F5 | C | En curso (sin la parte de REP hasta que se integre F3.5a) | `docs/superpowers/specs/2026-10-04-f5-iva-base-flujo-design.md` (rama F5) | `docs/superpowers/plans/2026-10-04-f5-1-motor-iva-flujo.md` (rama F5) |
 | F6, F7 | C | Pendiente | — | — |
-| F8 | D | En curso | — | — |
+| F8 | D | En revisión (PR D·F8) | `docs/superpowers/specs/2026-10-04-f8-informacion-fiscal-design.md` | `docs/superpowers/plans/2026-10-04-f8-informacion-fiscal.md` |
 | M1, M4, M6 | A | Pendiente | — | — |
 | M3 | B | Pendiente |
 | V1, U1, M7 | D | Pendiente (después de F8) |

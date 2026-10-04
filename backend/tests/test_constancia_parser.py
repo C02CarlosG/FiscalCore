@@ -3,51 +3,13 @@ de la Constancia de Situación Fiscal del SAT.
 
 Las funciones internas de regex/texto se prueban directamente sobre strings.
 Para `parsear_constancia` (que sí abre un PDF con pdfplumber) se genera un PDF
-mínimo válido en memoria, sin depender de un PDF real del SAT ni de librerías
+mínimo válido en memoria (`pdf_sintetico.py`), sin depender de un PDF real del SAT ni de librerías
 extra de generación de PDFs.
 """
 import pytest
 
 from backend import constancia_parser as cp
-
-
-def _pdf_con_texto(lineas: list[str]) -> bytes:
-    """Construye un PDF de una página, válido y mínimo, con las líneas dadas."""
-    content_lines = []
-    y = 750
-    for linea in lineas:
-        esc = linea.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
-        content_lines.append(f"BT /F1 10 Tf 50 {y} Td ({esc}) Tj ET")
-        y -= 14
-    content_bytes = "\n".join(content_lines).encode("latin-1")
-
-    objetos = [
-        "<< /Type /Catalog /Pages 2 0 R >>",
-        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
-        "/Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
-        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",
-    ]
-
-    body = bytearray(b"%PDF-1.4\n")
-    offsets = [0]
-    for i, obj in enumerate(objetos, start=1):
-        offsets.append(len(body))
-        body += f"{i} 0 obj\n{obj}\nendobj\n".encode("latin-1")
-
-    offsets.append(len(body))
-    body += f"5 0 obj\n<< /Length {len(content_bytes)} >>\nstream\n".encode("latin-1")
-    body += content_bytes
-    body += b"\nendstream\nendobj\n"
-
-    xref_offset = len(body)
-    n = len(offsets)
-    xref = f"xref\n0 {n}\n0000000000 65535 f \n"
-    for off in offsets[1:]:
-        xref += f"{off:010d} 00000 n \n"
-    trailer = f"trailer\n<< /Size {n} /Root 1 0 R >>\nstartxref\n{xref_offset}\n%%EOF"
-    body += xref.encode("latin-1") + trailer.encode("latin-1")
-    return bytes(body)
+from backend.tests.pdf_sintetico import constancia_sintetica, pdf_con_texto as _pdf_con_texto
 
 
 # ─── _buscar_rfc ──────────────────────────────────────────────────────────────
@@ -175,3 +137,63 @@ def test_parsear_constancia_sin_pdfplumber_lanza_runtime_error(monkeypatch):
     monkeypatch.setattr(cp, "PDFPLUMBER_OK", False)
     with pytest.raises(RuntimeError, match="pdfplumber"):
         cp.parsear_constancia(b"lo que sea")
+
+
+# ─── Datos agregados en F8: fecha de emisión, idCIF y estatus ────────────────
+
+def test_parsear_constancia_lee_fecha_idcif_y_estatus():
+    resultado = cp.parsear_constancia(constancia_sintetica())
+
+    assert resultado["rfc"] == "ACM010101AA1"
+    assert resultado["fecha_emision"] == "2026-10-03"
+    assert resultado["id_cif"] == "12345678901"
+    assert resultado["estatus_padron"] == "ACTIVO"
+    assert resultado["cp_fiscal"] == "68000"
+
+
+@pytest.mark.parametrize("texto,esperada", [
+    ("OAXACA A 03 DE OCTUBRE DE 2026", "2026-10-03"),
+    ("emitida el 1 de septiembre de 2026", "2026-09-01"),
+    ("Fecha: 15/01/2026", "2026-01-15"),
+    ("A 31 DE FEBRERO DE 2026", None),
+    ("A 03 DE BRUMARIO DE 2026", None),
+    ("sin fecha", None),
+])
+def test_fecha_en_texto(texto, esperada):
+    assert cp.fecha_en_texto(texto) == esperada
+
+
+def test_fecha_de_emision_prefiere_la_etiqueta_sobre_otras_fechas():
+    texto = (
+        "Fecha inicio de operaciones: 01 DE ENERO DE 2001\n"
+        "Lugar y Fecha de Emisión\nOAXACA A 03 DE OCTUBRE DE 2026"
+    )
+    assert cp._buscar_fecha_emision(texto) == "2026-10-03"
+
+
+def test_campos_nuevos_ausentes_son_none():
+    resultado = cp.parsear_constancia(_pdf_con_texto(["CONSTANCIA DE SITUACION FISCAL", "RFC: ACM010101AA1"]))
+    assert resultado["fecha_emision"] is None
+    assert resultado["id_cif"] is None
+    assert resultado["estatus_padron"] is None
+
+
+def test_rfc_patron_deriva_del_canonico_de_cfdi_parser():
+    import re
+    from backend import cfdi_parser
+    assert re.fullmatch(cp.RFC_PATRON, "ACM010101AA1")
+    assert re.fullmatch(cp.RFC_PATRON, "GAHC800101AB3")
+    assert cp.RFC_PATRON == re.sub(r"\((?!\?)", "(?:", cfdi_parser.RFC_REGEX.pattern.strip("^$"))
+
+
+def test_nombre_de_persona_fisica_se_arma_con_nombre_y_apellidos():
+    texto = (
+        "CONSTANCIA DE SITUACIÓN FISCAL\nRFC: GAHC800101AB3\n"
+        "Nombre (s): CARLOS\nPrimer Apellido: GARCIA\nSegundo Apellido: HERNANDEZ\n"
+    )
+    assert cp.parsear_texto_constancia(texto)["razon_social"] == "CARLOS GARCIA HERNANDEZ"
+
+
+def test_persona_fisica_sin_segundo_apellido():
+    texto = "Nombre (s): ANA\nPrimer Apellido: LOPEZ\nSegundo Apellido:\nFecha inicio"
+    assert cp.parsear_texto_constancia(texto)["razon_social"] == "ANA LOPEZ"

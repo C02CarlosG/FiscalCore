@@ -21,6 +21,8 @@ servers:
     description: Desarrollo local
 
 tags:
+  - name: Información fiscal
+    description: Constancia de situación fiscal y opinión de cumplimiento por empresa (F8)
   - name: Preferencias
     description: Orden y visibilidad de columnas de las tablas, por usuario
   - name: Sistema
@@ -1430,6 +1432,231 @@ paths:
         '404':
           description: No pertenece a la empresa o no hay XML guardado
 
+  /api/v1/empresas/{empresa_id}/inicio/resumen:
+    get:
+      operationId: resumenInicio
+      tags: [Inicio]
+      summary: Ingresos y gastos netos del periodo y del ejercicio, y los ultimos 12 meses
+      description: |
+        Lo facturado (devengado por fecha de emision), sin IVA: CFDI vigentes de tipo
+        Ingreso menos notas de credito (Egreso), sin anticipos SAT, convertidos a pesos
+        con el tipo de cambio del comprobante. Ingresos son los emitidos por la empresa
+        y gastos los recibidos; la nomina emitida va aparte (`gastos.nomina`) y no se
+        suma a `gastos.neto`. El acumulado va de enero del ejercicio al periodo.
+        `meses` trae siempre 12 elementos terminando en el periodo.
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - { name: periodo, in: query, required: true, schema: { type: string, pattern: '^20[0-9]{2}-(0[1-9]|1[0-2])$' } }
+      responses:
+        '200':
+          description: Resumen del Inicio
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  empresa_id: { type: string }
+                  periodo: { type: string }
+                  ejercicio: { type: integer }
+                  ingresos: { type: object, additionalProperties: true }
+                  gastos: { type: object, additionalProperties: true }
+                  meses: { type: array, items: { type: object, additionalProperties: true } }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '422':
+          description: periodo mal formado
+
+  /api/v1/empresas/{empresa_id}/inicio/iva-anual:
+    get:
+      operationId: ivaAnualInicio
+      tags: [Inicio]
+      summary: IVA del ejercicio mes por mes (flujo de efectivo)
+      description: |
+        Trasladado cobrado, acreditable pagado y resultado de cada mes, calculados con
+        las mismas funciones que la cedula de IVA (`/cedula-iva/{periodo}`), por lo que
+        coinciden con ella. Hasta que se incorporen las retenciones el IVA retenido es 0
+        y el factor de prorrateo es 1 (`iva_retenido_incluido: false`). Con `periodo`,
+        los meses posteriores salen en cero. `totales` trae `total_a_cargo` y `total_a_favor`
+        por separado: no se compensa un mes a favor contra otro a cargo (LIVA 6).
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - { name: ejercicio, in: query, required: true, schema: { type: integer, minimum: 2000, maximum: 2099 } }
+        - { name: periodo, in: query, schema: { type: string, pattern: '^20[0-9]{2}-(0[1-9]|1[0-2])$' } }
+      responses:
+        '200':
+          description: IVA anual
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  empresa_id: { type: string }
+                  ejercicio: { type: integer }
+                  factor_prorrateo: { type: number }
+                  iva_retenido_incluido: { type: boolean }
+                  meses: { type: array, items: { type: object, additionalProperties: true } }
+                  totales: { type: object, additionalProperties: true }
+                  advertencias:
+                    type: array
+                    description: Limitaciones del calculo que aplican a los datos del ejercicio (`cfdi` es null en las que no dependen de ellos)
+                    items: { type: object, additionalProperties: true }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '422':
+          description: ejercicio o periodo invalido
+
+  /api/v1/empresas/{empresa_id}/iva-flujo/ajustes:
+    get:
+      operationId: listarAjustesIva
+      tags: [IVA por flujo]
+      summary: Ajustes manuales del IVA (no considerar y periodo reasignado)
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+      responses:
+        '200':
+          description: Ajustes vigentes, del mas reciente al mas antiguo
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: { type: array, items: { type: object, additionalProperties: true } }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+    put:
+      operationId: guardarAjusteIva
+      tags: [IVA por flujo]
+      summary: Crea o reemplaza el ajuste de un CFDI en una direccion
+      description: |
+        `excluir` saca el CFDI de las sumas del IVA; `reasignar` mueve su efecto a
+        `periodo_destino` (YYYY-MM). Es unico por (empresa, CFDI, direccion) y queda en
+        `auditoria` (`iva_ajuste`) con usuario y motivo.
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [uuid, direccion, accion]
+              properties:
+                uuid: { type: string, maxLength: 36 }
+                direccion: { type: string, enum: [trasladado, acreditable] }
+                accion: { type: string, enum: [excluir, reasignar] }
+                periodo_destino: { type: string, nullable: true, pattern: '^20[0-9]{2}-(0[1-9]|1[0-2])$' }
+                motivo: { type: string, maxLength: 500 }
+      responses:
+        '200':
+          description: Ajuste guardado
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          description: El CFDI no es de la empresa, no es Ingreso/Egreso o no corresponde a esa direccion
+        '422':
+          description: Combinacion invalida (reasignar sin destino, excluir con destino, destino igual al mes de emision de un PUE)
+
+  /api/v1/empresas/{empresa_id}/iva-flujo/ajustes/{direccion}/{uuid}:
+    delete:
+      operationId: quitarAjusteIva
+      tags: [IVA por flujo]
+      summary: Retira un ajuste del IVA
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - { name: direccion, in: path, required: true, schema: { type: string, enum: [trasladado, acreditable] } }
+        - { name: uuid, in: path, required: true, schema: { type: string, maxLength: 36 } }
+      responses:
+        '204':
+          description: Ajuste retirado (queda en auditoria como `iva_ajuste_retirado`)
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          description: No hay un ajuste para ese CFDI y direccion
+
+  /api/v1/empresas/{empresa_id}/iva-flujo/{periodo}:
+    get:
+      operationId: resumenIvaFlujo
+      tags: [IVA por flujo]
+      summary: IVA del mes por flujo de efectivo, por tasa y origen
+      description: |
+        Trasladado cobrado y acreditable pagado con bases e IVA al 16 %, 8 %, 0 %, exento y
+        otras tasas, por origen (contado, cobro o pago de credito, notas de credito), mas lo
+        no considerado, lo reasignado, las retenciones, el resultado del mes y las
+        advertencias (pagos version 1.0 aproximados, descuadres, sin equivalencia).
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - { name: periodo, in: path, required: true, schema: { type: string, pattern: '^20[0-9]{2}-(0[1-9]|1[0-2])$' } }
+        - { name: factor, in: query, schema: { type: number, minimum: 0, maximum: 1, default: 1 } }
+      responses:
+        '200':
+          description: Resumen del IVA del periodo
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  empresa_id: { type: string }
+                  periodo: { type: string }
+                  factor_prorrateo: { type: number }
+                  trasladado: { type: object, additionalProperties: true }
+                  acreditable: { type: object, additionalProperties: true }
+                  retenciones_a_enterar: { type: number }
+                  resultado: { type: object, additionalProperties: true }
+                  advertencias: { type: array, items: { type: object, additionalProperties: true } }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '422':
+          description: periodo o factor invalido
+
+  /api/v1/empresas/{empresa_id}/iva-flujo/{periodo}/detalle:
+    get:
+      operationId: detalleIvaFlujo
+      tags: [IVA por flujo]
+      summary: CFDI que componen una cifra del IVA por flujo
+      description: |
+        Renglones paginados por fecha de efecto con UUID, fecha de emision y de pago, UUID del
+        REP, contraparte, bases e IVA por tasa, retencion, marcas, motivo y ajuste vigente.
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - { name: periodo, in: path, required: true, schema: { type: string, pattern: '^20[0-9]{2}-(0[1-9]|1[0-2])$' } }
+        - { name: direccion, in: query, required: true, schema: { type: string, enum: [trasladado, acreditable] } }
+        - { name: origen, in: query, required: true, schema: { type: string, enum: [contado, credito, notas_credito, no_considerados, reasignados] } }
+        - { name: pagina, in: query, schema: { type: integer, minimum: 1, default: 1 } }
+        - { name: por_pagina, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 50 } }
+      responses:
+        '200':
+          description: Pagina de renglones
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: { type: array, items: { type: object, additionalProperties: true } }
+                  total: { type: integer }
+                  pagina: { type: integer }
+                  por_pagina: { type: integer }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '422':
+          description: periodo, direccion, origen o paginacion invalidos
+
   # ============================================================
   # DASHBOARD
   # ============================================================
@@ -2701,6 +2928,138 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /api/v1/informacion-fiscal/empresas/{empresa_id}:
+    get:
+      operationId: resumenInformacionFiscal
+      tags: [Información fiscal]
+      summary: Constancia y opinión de cumplimiento vigentes de la empresa
+      description: |
+        De cada tipo, el documento con fecha de emisión más reciente (a igual fecha, el
+        último subido). Cada clave es null si nunca se ha subido ese documento. F8, carril D.
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+      responses:
+        '200':
+          description: Último documento de cada tipo
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  constancia: { allOf: [{ $ref: '#/components/schemas/DocumentoFiscal' }], nullable: true }
+                  opinion: { allOf: [{ $ref: '#/components/schemas/DocumentoFiscal' }], nullable: true }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/v1/informacion-fiscal/empresas/{empresa_id}/documentos:
+    get:
+      operationId: historialDocumentosFiscales
+      tags: [Información fiscal]
+      summary: Historial de documentos fiscales subidos (sin el PDF)
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - { name: tipo, in: query, required: false, schema: { type: string, enum: [constancia, opinion] } }
+      responses:
+        '200':
+          description: Documentos, del más reciente al más antiguo
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/DocumentoFiscal' }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '422':
+          description: tipo inválido
+
+  /api/v1/informacion-fiscal/empresas/{empresa_id}/documentos/{tipo}:
+    post:
+      operationId: subirDocumentoFiscal
+      tags: [Información fiscal]
+      summary: Subir constancia de situación fiscal u opinión de cumplimiento (PDF)
+      description: |
+        Valida extensión `.pdf`, tipo de contenido, tamaño (5 MB), firma `%PDF-`,
+        hasta 10 páginas, que el documento sea del tipo indicado y que su RFC sea
+        el de la empresa. El mismo PDF dos veces responde 409.
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - { name: tipo, in: path, required: true, schema: { type: string, enum: [constancia, opinion] } }
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [archivo]
+              properties:
+                archivo: { type: string, format: binary }
+      responses:
+        '201':
+          description: Documento guardado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DocumentoFiscal' }
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '409':
+          $ref: '#/components/responses/ConflictError'
+        '413':
+          description: El archivo excede 5 MB
+        '422':
+          $ref: '#/components/responses/UnprocessableError'
+        '429':
+          description: Más de 20 cargas por minuto
+
+  /api/v1/informacion-fiscal/empresas/{empresa_id}/documentos/{documento_id}/pdf:
+    get:
+      operationId: pdfDocumentoFiscal
+      tags: [Información fiscal]
+      summary: PDF original del documento (visor o descarga)
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - { name: documento_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: descargar, in: query, required: false, schema: { type: boolean, default: false }, description: 'true responde con Content-Disposition attachment; si no, inline' }
+      responses:
+        '200':
+          description: El PDF tal como se subió
+          content:
+            application/pdf:
+              schema: { type: string, format: binary }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/v1/informacion-fiscal/empresas/{empresa_id}/documentos/{documento_id}:
+    delete:
+      operationId: eliminarDocumentoFiscal
+      tags: [Información fiscal]
+      summary: Eliminar un documento fiscal
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - { name: documento_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '204':
+          description: Eliminado
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
 # ============================================================
 # COMPONENTS
 # ============================================================
@@ -3958,3 +4317,37 @@ components:
           description: Tipos que el SAT rechazó cuando otro sí se aceptó ("emitidos - motivo").
           items:
             type: string
+
+    DocumentoFiscal:
+      type: object
+      description: Constancia de situación fiscal u opinión del cumplimiento subida en PDF (F8).
+      properties:
+        id: { type: string, format: uuid }
+        tipo: { type: string, enum: [constancia, opinion] }
+        nombre_archivo: { type: string }
+        tamano_bytes: { type: integer }
+        rfc: { type: string }
+        fecha_emision: { type: string, format: date, nullable: true }
+        created_at: { type: string, format: date-time }
+        datos:
+          type: object
+          description: |
+            Lo leído del PDF. Constancia: razon_social (en persona física, nombre y apellidos),
+            regimenes, cp_fiscal, id_cif, estatus_padron. Opinión: razon_social, sentido (positivo, negativo,
+            suspension_actividades, inscrito_sin_obligaciones, no_inscrito o null), folio.
+            Todo se lee del PDF subido; no se verifica contra el SAT.
+        antiguedad_dias: { type: integer, nullable: true }
+        vigente_hasta:
+          type: string
+          format: date
+          nullable: true
+          description: Solo la opinión positiva (regla 2.1.36 RMF 2026); 30 días naturales contando el de emisión.
+        vigente:
+          type: boolean
+          nullable: true
+          description: null en la constancia; false en toda opinión que no sea positiva y vigente.
+        motivo:
+          type: string
+          nullable: true
+          enum: [sentido_no_positivo, sentido_no_identificado, sin_fecha, vencida, null]
+          description: Por qué la opinión no está vigente.

@@ -4,12 +4,15 @@ Soporta CFDI 3.3 y 4.0
 """
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Optional
 from defusedxml import ElementTree as ET
+
+_log = logging.getLogger(__name__)
 
 # Namespaces oficiales SAT
 NS = {
@@ -80,6 +83,10 @@ class DoctoRelacionado:
     equivalencia_dr: Optional[Decimal] = Decimal("1")
     # ImpuestosDR del REP 2.0 (vacío en Pagos 1.0).
     impuestos: list[ImpuestoResumen] = field(default_factory=list)
+    # ObjetoImpDR (REP 2.0, c_ObjetoImp): 01 no objeto, 02 sí objeto, 03 sí objeto y no
+    # obligado a desglose, 04 sí objeto y no causa impuesto; el catálogo puede crecer.
+    # None = el XML no lo trae (Pagos 1.0).
+    objeto_imp_dr: Optional[str] = None
 
 
 @dataclass
@@ -90,6 +97,25 @@ class PagoCFDI:
     tipo_cambio: Decimal
     doctos_relacionados: list["DoctoRelacionado"] = field(default_factory=list)
     version: str = "2.0"   # "1.0" cuando el complemento es Pagos 1.0
+    # ImpuestosP del REP 2.0: lo que el pago declara en conjunto, en la moneda del pago.
+    impuestos_p: list[ImpuestoResumen] = field(default_factory=list)
+
+
+@dataclass
+class PagosTotales:
+    """pago20:Totales: cifras oficiales en pesos de todo el REP. None = el
+    atributo no viene (un REP sin impuestos no trae los de IVA)."""
+    monto_total_pagos: Optional[Decimal] = None
+    total_retenciones_iva: Optional[Decimal] = None
+    total_retenciones_isr: Optional[Decimal] = None
+    total_retenciones_ieps: Optional[Decimal] = None
+    total_traslados_base_iva16: Optional[Decimal] = None
+    total_traslados_iva16: Optional[Decimal] = None
+    total_traslados_base_iva8: Optional[Decimal] = None
+    total_traslados_iva8: Optional[Decimal] = None
+    total_traslados_base_iva0: Optional[Decimal] = None
+    total_traslados_iva0: Optional[Decimal] = None
+    total_traslados_base_exento: Optional[Decimal] = None
 
 
 @dataclass
@@ -116,6 +142,65 @@ class ConceptoCFDI:
     objeto_imp: Optional[str]
     cuenta_predial: Optional[str]
     impuestos: list[ImpuestoResumen] = field(default_factory=list)
+    # cfdi:ACuentaTerceros (solo CFDI 4.0): lo cobrado por cuenta de terceros no es ingreso
+    # ni IVA propios. En CFDI 3.3 el equivalente es el complemento Terceros 1.1, que no se lee.
+    rfc_a_cuenta_terceros: Optional[str] = None
+    nombre_a_cuenta_terceros: Optional[str] = None
+    regimen_a_cuenta_terceros: Optional[str] = None
+
+
+@dataclass
+class NominaConcepto:
+    """Una percepción, deducción u otro pago. El tipo va tal cual viene en el XML
+    (c_TipoPercepcion, c_TipoDeduccion, c_TipoOtroPago); qué cuenta como exento
+    deducible, PTU o ajuste de subsidio lo decide el cálculo, no la extracción."""
+    categoria: str                       # "percepcion" | "deduccion" | "otro_pago"
+    linea: int                           # orden dentro de su categoría, desde 1
+    tipo: Optional[str]
+    clave: Optional[str]
+    concepto: Optional[str]
+    importe_gravado: Optional[Decimal] = None   # solo percepciones
+    importe_exento: Optional[Decimal] = None    # solo percepciones
+    importe: Optional[Decimal] = None           # deducciones y otros pagos
+    subsidio_causado: Optional[Decimal] = None  # OtroPago con SubsidioAlEmpleo
+    # OtroPago con CompensacionSaldosAFavor (ajuste anual de ISR).
+    saldo_a_favor: Optional[Decimal] = None
+    anio_saldo_a_favor: Optional[int] = None
+    remanente_saldo_a_favor: Optional[Decimal] = None
+
+
+@dataclass
+class NominaDetalle:
+    """Un nodo nomina12:Nomina. None = el atributo o el nodo no vienen."""
+    nodo: int                            # 1, 2, ... en el orden del XML
+    tipo_nomina: Optional[str] = None    # O ordinaria, E extraordinaria
+    fecha_pago: Optional[datetime] = None
+    fecha_inicial_pago: Optional[datetime] = None
+    fecha_final_pago: Optional[datetime] = None
+    num_dias_pagados: Optional[Decimal] = None
+    tipo_regimen: Optional[str] = None   # c_TipoRegimen del receptor
+    num_empleado: Optional[str] = None
+    total_percepciones: Optional[Decimal] = None
+    total_deducciones: Optional[Decimal] = None
+    total_otros_pagos: Optional[Decimal] = None
+    total_sueldos: Optional[Decimal] = None
+    total_separacion_indemnizacion: Optional[Decimal] = None
+    total_jubilacion_pension_retiro: Optional[Decimal] = None
+    total_gravado: Optional[Decimal] = None
+    total_exento: Optional[Decimal] = None
+    total_otras_deducciones: Optional[Decimal] = None
+    total_impuestos_retenidos: Optional[Decimal] = None
+    sep_total_pagado: Optional[Decimal] = None
+    sep_anios_servicio: Optional[int] = None
+    sep_ultimo_sueldo_mens_ord: Optional[Decimal] = None
+    sep_ingreso_acumulable: Optional[Decimal] = None
+    sep_ingreso_no_acumulable: Optional[Decimal] = None
+    jub_total_una_exhibicion: Optional[Decimal] = None
+    jub_total_parcialidad: Optional[Decimal] = None
+    jub_monto_diario: Optional[Decimal] = None
+    jub_ingreso_acumulable: Optional[Decimal] = None
+    jub_ingreso_no_acumulable: Optional[Decimal] = None
+    conceptos: list[NominaConcepto] = field(default_factory=list)
 
 
 @dataclass
@@ -213,6 +298,10 @@ class CFDIParsed:
 
     # Totales del complemento de nómina (solo CFDI tipo N).
     nomina: Optional["NominaResumen"] = None
+    # Detalle por nodo de nómina (percepciones por tipo, otros pagos, etc.).
+    nominas: list["NominaDetalle"] = field(default_factory=list)
+    # pago20:Totales del REP 2.0 (None en Pagos 1.0 o si el XML no lo trae).
+    pagos_totales: Optional["PagosTotales"] = None
 
     @property
     def es_ingreso(self) -> bool:
@@ -323,6 +412,7 @@ class CFDIParser:
             anio = info_global.get("Año", "")
             parsed.anio_global = int(anio) if anio.isdigit() else None
         parsed.nomina = self._extraer_nomina(root)
+        parsed.nominas = self._extraer_nominas(root)
 
         # Validaciones
         parsed.rfc_emisor_valido = validar_rfc(rfc_emisor)
@@ -332,6 +422,7 @@ class CFDIParser:
         # Extraer Complemento de Pago si es tipo P
         if parsed.tipo_comprobante == "P":
             parsed.pagos = self._extraer_pagos(root)
+            parsed.pagos_totales = self._extraer_pagos_totales(root)
 
         # Extraer CfdiRelacionados (siempre — anticipos, notas de crédito, etc.)
         parsed.cfdi_relacionados = self._extraer_cfdi_relacionados(root, ns_cfdi)
@@ -477,6 +568,7 @@ class CFDIParser:
         nodos = root.findall(f"{ns_cfdi}Conceptos/{ns_cfdi}Concepto")
         for linea, nodo in enumerate(nodos, start=1):
             predial = nodo.find(f"{ns_cfdi}CuentaPredial")
+            terceros = nodo.find(f"{ns_cfdi}ACuentaTerceros")
             impuestos = [
                 self._leer_impuesto(n, "traslado")
                 for n in nodo.findall(f"{ns_cfdi}Impuestos/{ns_cfdi}Traslados/{ns_cfdi}Traslado")
@@ -498,6 +590,9 @@ class CFDIParser:
                 objeto_imp=nodo.get("ObjetoImp"),
                 cuenta_predial=predial.get("Numero") if predial is not None else None,
                 impuestos=impuestos,
+                rfc_a_cuenta_terceros=self._rfc_terceros(terceros),
+                nombre_a_cuenta_terceros=terceros.get("NombreACuentaTerceros") if terceros is not None else None,
+                regimen_a_cuenta_terceros=terceros.get("RegimenFiscalACuentaTerceros") if terceros is not None else None,
             ))
         return conceptos
 
@@ -517,6 +612,113 @@ class CFDIParser:
             resumen.total_exento += self._decimal(percepciones, "TotalExento")
             resumen.isr_retenido += self._decimal(deducciones, "TotalImpuestosRetenidos")
         return resumen
+
+    @staticmethod
+    def _rfc_terceros(nodo) -> Optional[str]:
+        """RFC del tercero, en mayúsculas. Si no tiene forma de RFC se conserva igual
+        (no se pierde el dato) pero se deja constancia en el log."""
+        rfc = nodo.get("RfcACuentaTerceros") if nodo is not None else None
+        if not rfc:
+            return None
+        rfc = rfc.strip().upper()
+        if not validar_rfc(rfc):
+            _log.warning("cfdi_parser: RfcACuentaTerceros con forma inválida: %r", rfc)
+        return rfc
+
+    def _extraer_nominas(self, root) -> list[NominaDetalle]:
+        """Un NominaDetalle por nodo nomina12:Nomina: encabezado, receptor, percepciones,
+        deducciones y otros pagos por tipo, separación y jubilación. Todo lo que el
+        XML no trae queda en None (no se inventan ceros)."""
+        detalles: list[NominaDetalle] = []
+        for orden, nodo in enumerate(root.findall(f".//{NS_NOMINA12}Nomina"), start=1):
+            receptor = nodo.find(f"{NS_NOMINA12}Receptor")
+            percepciones = nodo.find(f"{NS_NOMINA12}Percepciones")
+            deducciones = nodo.find(f"{NS_NOMINA12}Deducciones")
+            otros = nodo.find(f"{NS_NOMINA12}OtrosPagos")
+            separacion = percepciones.find(f"{NS_NOMINA12}SeparacionIndemnizacion") if percepciones is not None else None
+            jubilacion = percepciones.find(f"{NS_NOMINA12}JubilacionPensionRetiro") if percepciones is not None else None
+            opt = self._decimal_opt
+
+            anios = separacion.get("NumAñosServicio") if separacion is not None else None
+            d = NominaDetalle(
+                nodo=orden,
+                tipo_nomina=nodo.get("TipoNomina"),
+                fecha_pago=self._parse_fecha(nodo.get("FechaPago", "")),
+                fecha_inicial_pago=self._parse_fecha(nodo.get("FechaInicialPago", "")),
+                fecha_final_pago=self._parse_fecha(nodo.get("FechaFinalPago", "")),
+                num_dias_pagados=opt(nodo, "NumDiasPagados"),
+                tipo_regimen=receptor.get("TipoRegimen") if receptor is not None else None,
+                num_empleado=receptor.get("NumEmpleado") if receptor is not None else None,
+                total_percepciones=opt(nodo, "TotalPercepciones"),
+                total_deducciones=opt(nodo, "TotalDeducciones"),
+                total_otros_pagos=opt(nodo, "TotalOtrosPagos"),
+                total_sueldos=opt(percepciones, "TotalSueldos"),
+                total_separacion_indemnizacion=opt(percepciones, "TotalSeparacionIndemnizacion"),
+                total_jubilacion_pension_retiro=opt(percepciones, "TotalJubilacionPensionRetiro"),
+                total_gravado=opt(percepciones, "TotalGravado"),
+                total_exento=opt(percepciones, "TotalExento"),
+                total_otras_deducciones=opt(deducciones, "TotalOtrasDeducciones"),
+                total_impuestos_retenidos=opt(deducciones, "TotalImpuestosRetenidos"),
+                sep_total_pagado=opt(separacion, "TotalPagado"),
+                sep_anios_servicio=int(anios) if anios and anios.isdigit() else None,
+                sep_ultimo_sueldo_mens_ord=opt(separacion, "UltimoSueldoMensOrd"),
+                sep_ingreso_acumulable=opt(separacion, "IngresoAcumulable"),
+                sep_ingreso_no_acumulable=opt(separacion, "IngresoNoAcumulable"),
+                jub_total_una_exhibicion=opt(jubilacion, "TotalUnaExhibicion"),
+                jub_total_parcialidad=opt(jubilacion, "TotalParcialidad"),
+                jub_monto_diario=opt(jubilacion, "MontoDiario"),
+                jub_ingreso_acumulable=opt(jubilacion, "IngresoAcumulable"),
+                jub_ingreso_no_acumulable=opt(jubilacion, "IngresoNoAcumulable"),
+            )
+
+            if percepciones is not None:
+                for linea, p in enumerate(percepciones.findall(f"{NS_NOMINA12}Percepcion"), start=1):
+                    d.conceptos.append(NominaConcepto(
+                        categoria="percepcion", linea=linea, tipo=p.get("TipoPercepcion"),
+                        clave=p.get("Clave"), concepto=p.get("Concepto"),
+                        importe_gravado=opt(p, "ImporteGravado"), importe_exento=opt(p, "ImporteExento"),
+                    ))
+            if deducciones is not None:
+                for linea, ded in enumerate(deducciones.findall(f"{NS_NOMINA12}Deduccion"), start=1):
+                    d.conceptos.append(NominaConcepto(
+                        categoria="deduccion", linea=linea, tipo=ded.get("TipoDeduccion"),
+                        clave=ded.get("Clave"), concepto=ded.get("Concepto"), importe=opt(ded, "Importe"),
+                    ))
+            if otros is not None:
+                for linea, otro in enumerate(otros.findall(f"{NS_NOMINA12}OtroPago"), start=1):
+                    subsidio = otro.find(f"{NS_NOMINA12}SubsidioAlEmpleo")
+                    compensacion = otro.find(f"{NS_NOMINA12}CompensacionSaldosAFavor")
+                    anio = compensacion.get("Año") if compensacion is not None else None
+                    d.conceptos.append(NominaConcepto(
+                        categoria="otro_pago", linea=linea, tipo=otro.get("TipoOtroPago"),
+                        clave=otro.get("Clave"), concepto=otro.get("Concepto"), importe=opt(otro, "Importe"),
+                        subsidio_causado=opt(subsidio, "SubsidioCausado"),
+                        saldo_a_favor=opt(compensacion, "SaldoAFavor"),
+                        anio_saldo_a_favor=int(anio) if anio and anio.isdigit() else None,
+                        remanente_saldo_a_favor=opt(compensacion, "RemanenteSalFav"),
+                    ))
+            detalles.append(d)
+        return detalles
+
+    def _extraer_pagos_totales(self, root) -> Optional[PagosTotales]:
+        """pago20:Totales del REP 2.0 (Pagos 1.0 no lo tiene)."""
+        nodo = root.find(f".//{NS_PAGO20}Pagos/{NS_PAGO20}Totales")
+        if nodo is None:
+            return None
+        opt = self._decimal_opt
+        return PagosTotales(
+            monto_total_pagos=opt(nodo, "MontoTotalPagos"),
+            total_retenciones_iva=opt(nodo, "TotalRetencionesIVA"),
+            total_retenciones_isr=opt(nodo, "TotalRetencionesISR"),
+            total_retenciones_ieps=opt(nodo, "TotalRetencionesIEPS"),
+            total_traslados_base_iva16=opt(nodo, "TotalTrasladosBaseIVA16"),
+            total_traslados_iva16=opt(nodo, "TotalTrasladosImpuestoIVA16"),
+            total_traslados_base_iva8=opt(nodo, "TotalTrasladosBaseIVA8"),
+            total_traslados_iva8=opt(nodo, "TotalTrasladosImpuestoIVA8"),
+            total_traslados_base_iva0=opt(nodo, "TotalTrasladosBaseIVA0"),
+            total_traslados_iva0=opt(nodo, "TotalTrasladosImpuestoIVA0"),
+            total_traslados_base_exento=opt(nodo, "TotalTrasladosBaseIVAExento"),
+        )
 
     def _validar(self, p: CFDIParsed) -> list[str]:
         errores = []
@@ -644,9 +846,18 @@ class CFDIParser:
                         # Seis decimales: están en la moneda del documento y se
                         # convierten a pesos después; redondear antes acumula error.
                         impuestos=_agrupar_impuestos(impuestos_dr, SEIS_DECIMALES),
+                        objeto_imp_dr=docto.get("ObjetoImpDR"),
                     ))
                 except Exception:
                     continue
+
+            impuestos_p = [
+                self._leer_impuesto(n, "traslado", "P")
+                for n in pago_node.findall(f"{ns_pago}ImpuestosP/{ns_pago}TrasladosP/{ns_pago}TrasladoP")
+            ] + [
+                self._leer_impuesto(n, "retencion", "P")
+                for n in pago_node.findall(f"{ns_pago}ImpuestosP/{ns_pago}RetencionesP/{ns_pago}RetencionP")
+            ]
 
             pagos.append(PagoCFDI(
                 fecha_pago=self._parse_fecha(fecha_str),
@@ -655,6 +866,7 @@ class CFDIParser:
                 tipo_cambio=tipo_cambio,
                 doctos_relacionados=doctos,
                 version="2.0" if ns_pago == NS_PAGO20 else "1.0",
+                impuestos_p=_agrupar_impuestos(impuestos_p, SEIS_DECIMALES),
             ))
 
         return pagos
@@ -675,6 +887,19 @@ class CFDIParser:
         # "NaN"/"Infinity" son Decimal válidos pero no importes: el XML subido
         # es entrada externa y no debe llegar así a las sumas ni a la base.
         return valor if valor.is_finite() else Decimal(default)
+
+    @staticmethod
+    def _decimal_opt(node, attr: str) -> Optional[Decimal]:
+        """Como ``_decimal`` pero None si el nodo o el atributo no vienen o no son un
+        importe: en nómina y totales de REP un dato ausente no es un cero."""
+        valor = node.get(attr) if node is not None else None
+        if valor in (None, ""):
+            return None
+        try:
+            numero = Decimal(valor)
+        except Exception:
+            return None
+        return numero if numero.is_finite() else None
 
     @staticmethod
     def _equivalencia_dr(docto, moneda_pago: str) -> Optional[Decimal]:
