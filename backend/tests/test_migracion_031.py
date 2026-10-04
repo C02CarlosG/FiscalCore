@@ -101,6 +101,25 @@ def test_031_activa_convive_con_terminadas_y_con_otras_ventanas(empresa):
                fecha_inicio="2026-03-16", fecha_fin="2026-03-31")
 
 
+@pytest.mark.parametrize("estado", ["inactiva", "al_dia", "sincronizando", "pausada", "error"])
+def test_031_sat_sync_config_acepta_todos_los_estados_del_catalogo(empresa, estado):
+    """'sincronizando' mide 13 caracteres: la columna debe tener cabida para el valor más largo."""
+    from backend import db
+
+    db.execute("INSERT INTO sat_sync_config (empresa_id, estado) VALUES (%s, %s)", (empresa, estado))
+    assert db.query_one("SELECT estado FROM sat_sync_config WHERE empresa_id=%s", (empresa,))["estado"] == estado
+
+
+def test_031_amplia_la_columna_estado_si_una_version_previa_la_creo_corta(empresa):
+    from backend import db
+
+    db.execute("ALTER TABLE sat_sync_config ALTER COLUMN estado TYPE VARCHAR(12)")
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(_MIGRACION.read_text(encoding="utf-8"))
+    db.execute("INSERT INTO sat_sync_config (empresa_id, estado) VALUES (%s, 'sincronizando')", (empresa,))
+
+
 def test_031_sat_sync_config_valida_estado_y_cascada(empresa):
     from backend import db
 

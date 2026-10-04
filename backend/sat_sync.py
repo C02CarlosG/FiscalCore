@@ -21,7 +21,8 @@ from datetime import date, datetime, time, timedelta, timezone
 import psycopg2.errors
 from zoneinfo import ZoneInfo
 
-from . import cfdi_store, db
+from . import cfdi_store, db, fiel_store
+from .auditoria import registrar_evento
 from .sat_fiel import (
     FIELError, SolicitudesAgotadasError, SolicitudRechazada, descargar_paquete, solicitar_descarga,
     verificar_solicitud,
@@ -149,6 +150,8 @@ def registrar_solicitud_fallida(solicitud_id: str, mensaje: str) -> str:
 #   5005  ya hay una solicitud activa con esos parámetros. Rechazo definitivo.
 CODIGO_TOPE_MAXIMO = "5003"
 CODIGO_SOLICITUDES_AGOTADAS = "5002"
+# Texto con el que se cierra la fila original cuando su ventana se parte (no cuenta como falla).
+MARCA_PARTIDA = "se partió en dos mitades"
 
 MENSAJE_AGOTADAS = (
     "El SAT ya no acepta más solicitudes de este periodo (código 5002: se agotaron "
@@ -321,7 +324,7 @@ def crear_solicitud_ventana(
                 _marcar_fallo(
                     fila,
                     f"El SAT rechazó {inicio} a {fin} por volumen (código {CODIGO_TOPE_MAXIMO}); "
-                    "se partió en dos mitades.",
+                    f"{MARCA_PARTIDA}.",
                 )
                 resultado: list[dict] = []
                 for ini, fi in mitades:
@@ -441,6 +444,7 @@ def importar_paquetes(
     periodo: str,
     paquetes: list[str],
     desde: int = 0,
+    correr_pipeline: bool = True,
 ) -> str:
     """Descarga paquetes ZIP del SAT, parsea XMLs e importa a la DB.
 
@@ -516,8 +520,9 @@ def importar_paquetes(
         (estado_final, error_final, solicitud_id),
     )
 
-    # Correr pipeline conciliación/riesgos/scoring si se importaron CFDIs
-    if total_importados > 0:
+    # Correr pipeline conciliación/riesgos/scoring si se importaron CFDIs. El worker lo
+    # pospone (``correr_pipeline=False``) para correrlo una vez por periodo al cerrar la corrida.
+    if total_importados > 0 and correr_pipeline:
         empresa = db.query_one("SELECT rfc FROM empresas WHERE id=%s", (empresa_id,))
         if empresa:
             try:
@@ -582,7 +587,7 @@ ESTADOS_PENDIENTES = ESTADOS_EN_SAT + ("terminado",)
 ESTADOS_FALLO_SAT = ("error", "rechazada", "fallo", "falla", "vencida")
 
 
-def avanzar_solicitud(creds, solicitud: dict) -> str:
+def avanzar_solicitud(creds, solicitud: dict, correr_pipeline: bool = True) -> str:
     """Da un paso a una solicitud: la verifica en el SAT y, si ya está lista,
     descarga e importa sus paquetes. Devuelve el estado en que queda.
 
@@ -652,6 +657,7 @@ def avanzar_solicitud(creds, solicitud: dict) -> str:
             periodo=solicitud["periodo_inicio"],
             paquetes=id_paquetes,
             desde=tomada.get("paquetes_descargados") or 0,
+            correr_pipeline=correr_pipeline,
         )
 
     # El SAT procesó la solicitud y no encontró CFDI en el periodo: es una
@@ -784,3 +790,244 @@ def candado_empresa(empresa_id: str):
                 except Exception:
                     # Si la conexión murió, Postgres libera el candado al cerrarse la sesión.
                     _log.exception("No se pudo liberar el candado de la empresa %s", empresa_id)
+
+
+# ---------------------------------------------------------------------------
+# Procesamiento de una empresa (lo que hace el worker en cada vuelta)
+# ---------------------------------------------------------------------------
+
+ESTADOS_ACTIVOS = ("pendiente", "solicitado", "en_proceso", "terminado")
+# Cada solicitud se verifica en el SAT como mucho una vez cada tantos segundos.
+ESPERA_VERIFICACION_SEG = 20
+
+
+def _auditar(empresa_id: str, accion: str, **metadata) -> None:
+    registrar_evento(None, accion, empresa_id=empresa_id, entidad="sat_sync",
+                     metadata={"origen": "automatico", **metadata})
+
+
+def _pausar(empresa_id: str, cfg: dict, motivo: str) -> str:
+    """Pausa la automatización de la empresa. Solo escribe y audita si cambia el motivo."""
+    if cfg.get("estado") != "pausada" or cfg.get("motivo_pausa") != motivo:
+        db.execute(
+            """UPDATE sat_sync_config
+               SET estado='pausada', motivo_pausa=%s, corrida_inicio=NULL, updated_at=NOW()
+               WHERE empresa_id=%s""",
+            (motivo, empresa_id),
+        )
+        _auditar(empresa_id, "sync_pausada", motivo=motivo)
+    return "pausada"
+
+
+def enviar_pendiente(creds, empresa: dict, fila: dict) -> dict:
+    """Envía al SAT una solicitud que quedó ``pendiente`` (falló al pedirla por un error
+    transitorio). Un rechazo definitivo la deja en ``fallo``; otro error transitorio
+    cuenta un intento más."""
+    try:
+        id_sat = solicitar_descarga(
+            creds, empresa["rfc"], fila["tipo"], fila["fecha_inicio"], fila["fecha_fin"],
+            tipo_solicitud=fila.get("tipo_solicitud") or "CFDI",
+            estado_comprobante=fila.get("estado_comprobante") or "Vigente",
+        )
+    except SolicitudRechazada as exc:
+        _marcar_fallo(fila, str(exc))
+    except FIELError as exc:
+        registrar_solicitud_fallida(str(fila["id"]), str(exc))
+    else:
+        _marcar_solicitada(fila, id_sat)
+    return fila
+
+
+def _cubierta(ventana: VentanaPlan, filas: list[dict]) -> bool:
+    """True si alguna solicitud de la corrida cubre (o es parte de) la ventana planeada."""
+    return any(
+        f["tipo"] == ventana.tipo and f["fecha_inicio"] is not None
+        and f["fecha_inicio"] >= ventana.inicio and f["fecha_fin"] <= ventana.fin
+        for f in filas
+    )
+
+
+def _solicitudes_de_la_corrida(empresa_id: str) -> list[dict]:
+    return db.query_all(
+        """SELECT s.* FROM sat_solicitudes s
+           JOIN sat_sync_config c ON c.empresa_id = s.empresa_id
+           WHERE s.empresa_id=%s AND c.corrida_inicio IS NOT NULL AND s.created_at >= c.corrida_inicio""",
+        (empresa_id,),
+    )
+
+
+def _crear_ventanas_faltantes(creds, empresa: dict, cfg: dict, ahora: datetime, config: ConfigSync) -> bool:
+    """Crea las solicitudes de la corrida que aún no existen, sin pasar de ``max_en_vuelo``.
+
+    Devuelve True si quedan ventanas por crear (se completarán en vueltas siguientes)."""
+    empresa_id = str(empresa["id"])
+    descargadas = {
+        (f["tipo"], f["fecha_inicio"], f["fecha_fin"])
+        for f in db.query_all(
+            "SELECT tipo, fecha_inicio, fecha_fin FROM sat_solicitudes "
+            "WHERE empresa_id=%s AND estado='descargado' AND fecha_inicio IS NOT NULL",
+            (empresa_id,),
+        )
+    }
+    ultima = cfg.get("ultima_exitosa")
+    plan = planear_corrida(
+        hoy=ahora.astimezone(_ZONA_CORRIDA).date(),
+        carga_inicial_ok=bool(cfg.get("carga_inicial_ok")),
+        ultima_exitosa=ultima.astimezone(_ZONA_CORRIDA).date() if ultima else None,
+        traslape_dias=config.traslape_dias,
+        descargadas=descargadas,
+    )
+    de_la_corrida = _solicitudes_de_la_corrida(empresa_id)
+    en_vuelo = db.query_one(
+        "SELECT COUNT(*) AS n FROM sat_solicitudes WHERE empresa_id=%s AND estado = ANY(%s)",
+        (empresa_id, list(ESTADOS_ACTIVOS)),
+    )["n"]
+
+    quedan = False
+    for ventana in plan:
+        if _cubierta(ventana, de_la_corrida):
+            continue
+        if en_vuelo >= config.max_en_vuelo:
+            quedan = True
+            continue
+        try:
+            filas = crear_solicitud_ventana(
+                creds, empresa, ventana.tipo, ventana.inicio, ventana.fin,
+                origen=ventana.origen, tolerar_transitorios=True,
+            )
+        except SolicitudActiva:
+            continue
+        de_la_corrida += filas
+        en_vuelo += sum(1 for f in filas if f["estado"] in ESTADOS_ACTIVOS)
+    return quedan
+
+
+def _cerrar_corrida(empresa_id: str, empresa: dict, cfg: dict, ahora: datetime, config: ConfigSync) -> str:
+    """Cierra la corrida: pipeline una vez por periodo, siguiente corrida y auditoría."""
+    filas = _solicitudes_de_la_corrida(empresa_id)
+    fallidas = [f for f in filas
+                if f["estado"] == "fallo" and MARCA_PARTIDA not in (f.get("error_msg") or "")]
+    importados = sum(f.get("cfdi_importados") or 0 for f in filas if f["estado"] == "descargado")
+
+    periodos = sorted({f["periodo_inicio"] for f in filas
+                       if f["estado"] == "descargado" and (f.get("cfdi_importados") or 0) > 0})
+    for periodo in periodos:
+        try:
+            from .routers.ingesta import _correr_pipeline
+            _correr_pipeline(empresa_id, periodo, empresa["rfc"])
+        except Exception:
+            _log.exception("Error en pipeline al cerrar la corrida (empresa %s, periodo %s)", empresa_id, periodo)
+
+    siguiente = proxima_corrida(ahora, config.hora_local)
+    if fallidas:
+        estado = "error"
+        db.execute(
+            """UPDATE sat_sync_config
+               SET estado='error', corrida_inicio=NULL, proxima_corrida=%s, updated_at=NOW()
+               WHERE empresa_id=%s""",
+            (siguiente, empresa_id),
+        )
+    else:
+        estado = "al_dia"
+        db.execute(
+            """UPDATE sat_sync_config
+               SET estado='al_dia', corrida_inicio=NULL, proxima_corrida=%s, ultima_exitosa=%s,
+                   carga_inicial_ok=TRUE, motivo_pausa=NULL, updated_at=NOW()
+               WHERE empresa_id=%s""",
+            (siguiente, ahora, empresa_id),
+        )
+    _auditar(empresa_id, "sync_corrida_fin", resultado=estado, solicitudes=len(filas),
+             cfdi_importados=importados, fallidas=len(fallidas), periodos=periodos)
+    return estado
+
+
+def procesar_empresa(empresa_id: str, *, ahora: datetime | None = None) -> str:
+    """Una vuelta del worker sobre una empresa. Devuelve el estado en que queda:
+    ``'omitida'`` (candado ocupado, automatización inactiva o nada por hacer),
+    ``'sincronizando'``, ``'al_dia'``, ``'pausada'`` o ``'error'``.
+
+    Segura ante reinicios: todo el estado vive en ``sat_solicitudes`` y
+    ``sat_sync_config``, y el candado por empresa evita corridas simultáneas.
+    """
+    ahora = ahora or datetime.now(timezone.utc)
+    with candado_empresa(empresa_id) as obtenido:
+        if not obtenido:
+            return "omitida"
+        return _procesar_con_candado(str(empresa_id), ahora, config_sync())
+
+
+def _procesar_con_candado(empresa_id: str, ahora: datetime, config: ConfigSync) -> str:
+    cfg = db.query_one("SELECT * FROM sat_sync_config WHERE empresa_id=%s", (empresa_id,))
+    if not cfg or not cfg["activa"]:
+        return "omitida"
+    empresa = db.query_one("SELECT id, rfc FROM empresas WHERE id=%s", (empresa_id,))
+    if not empresa:
+        return "omitida"
+
+    # e.firma: solo se descifra para empresas con la automatización activada (D8).
+    info = fiel_store.estado_fiel(db, empresa_id)
+    if not info:
+        return _pausar(empresa_id, cfg, "Sin e.firma guardada")
+    if info.get("vencida"):
+        return _pausar(empresa_id, cfg, "e.firma vencida")
+    try:
+        creds = fiel_store.obtener_signer(db, empresa_id)
+    except ValueError as exc:
+        return _pausar(empresa_id, cfg, str(exc))
+    if cfg["estado"] == "pausada":  # se guardó una e.firma válida: se reanuda sola
+        db.execute(
+            "UPDATE sat_sync_config SET estado='al_dia', motivo_pausa=NULL, updated_at=NOW() WHERE empresa_id=%s",
+            (empresa_id,),
+        )
+        cfg = {**cfg, "estado": "al_dia", "motivo_pausa": None}
+
+    activas = db.query_all(
+        "SELECT 1 FROM sat_solicitudes WHERE empresa_id=%s AND estado = ANY(%s) LIMIT 1",
+        (empresa_id, list(ESTADOS_ACTIVOS)),
+    )
+    toca = cfg["proxima_corrida"] is None or cfg["proxima_corrida"] <= ahora
+    if cfg["corrida_inicio"] is None and not toca and not activas:
+        return "omitida"
+
+    if cfg["corrida_inicio"] is None and toca:
+        db.execute(
+            "UPDATE sat_sync_config SET corrida_inicio=NOW(), estado='sincronizando', updated_at=NOW() WHERE empresa_id=%s",
+            (empresa_id,),
+        )
+        _auditar(empresa_id, "sync_corrida_inicio", inicial=not cfg["carga_inicial_ok"])
+        cfg = db.query_one("SELECT * FROM sat_sync_config WHERE empresa_id=%s", (empresa_id,))
+
+    en_corrida = cfg["corrida_inicio"] is not None
+    quedan = False
+    if en_corrida:
+        quedan = _crear_ventanas_faltantes(creds, empresa, cfg, ahora, config)
+
+    # Reenviar las que quedaron pendientes por un error transitorio, y avanzar las demás.
+    pendientes = db.query_all(
+        """SELECT * FROM sat_solicitudes
+           WHERE empresa_id=%s AND estado='pendiente' AND id_solicitud_sat IS NULL
+             AND fecha_inicio IS NOT NULL AND (proximo_intento IS NULL OR proximo_intento <= NOW())
+           ORDER BY created_at""",
+        (empresa_id,),
+    )
+    for fila in pendientes:
+        enviar_pendiente(creds, empresa, dict(fila))
+
+    por_avanzar = db.query_all(
+        """SELECT * FROM sat_solicitudes
+           WHERE empresa_id=%s AND id_solicitud_sat IS NOT NULL
+             AND ((estado IN ('solicitado', 'en_proceso')
+                   AND updated_at < NOW() - make_interval(secs => %s))
+               OR estado = 'terminado')
+           ORDER BY created_at""",
+        (empresa_id, ESPERA_VERIFICACION_SEG),
+    )
+    for fila in por_avanzar:
+        avanzar_solicitud(creds, fila, correr_pipeline=False)
+
+    if not en_corrida:
+        return cfg["estado"]
+    activas_corrida = [f for f in _solicitudes_de_la_corrida(empresa_id) if f["estado"] in ESTADOS_ACTIVOS]
+    if quedan or activas_corrida:
+        return "sincronizando"
+    return _cerrar_corrida(empresa_id, empresa, cfg, ahora, config)

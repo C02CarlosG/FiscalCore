@@ -69,11 +69,15 @@ CREATE TABLE IF NOT EXISTS sat_sync_config (
     carga_inicial_ok    BOOLEAN NOT NULL DEFAULT FALSE,
     ultima_exitosa      TIMESTAMPTZ,
     proxima_corrida     TIMESTAMPTZ,
-    estado              VARCHAR(12) NOT NULL DEFAULT 'inactiva'
+    estado              VARCHAR(15) NOT NULL DEFAULT 'inactiva'
                         CHECK (estado IN ('inactiva', 'al_dia', 'sincronizando', 'pausada', 'error')),
     motivo_pausa        TEXT,
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- 'sincronizando' mide 13 caracteres: una versión previa de esta migración creó la
+-- columna como VARCHAR(12) y no cabía. Ampliar es idempotente.
+ALTER TABLE sat_sync_config ALTER COLUMN estado TYPE VARCHAR(15);
 
 -- Inicio de la corrida en curso (NULL = ninguna). Lo fija el worker (F2.2).
 ALTER TABLE sat_sync_config ADD COLUMN IF NOT EXISTS corrida_inicio TIMESTAMPTZ;
