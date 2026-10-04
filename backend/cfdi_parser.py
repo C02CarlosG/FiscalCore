@@ -4,12 +4,15 @@ Soporta CFDI 3.3 y 4.0
 """
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Optional
 from defusedxml import ElementTree as ET
+
+_log = logging.getLogger(__name__)
 
 # Namespaces oficiales SAT
 NS = {
@@ -612,8 +615,15 @@ class CFDIParser:
 
     @staticmethod
     def _rfc_terceros(nodo) -> Optional[str]:
+        """RFC del tercero, en mayúsculas. Si no tiene forma de RFC se conserva igual
+        (no se pierde el dato) pero se deja constancia en el log."""
         rfc = nodo.get("RfcACuentaTerceros") if nodo is not None else None
-        return rfc.strip().upper() if rfc else None
+        if not rfc:
+            return None
+        rfc = rfc.strip().upper()
+        if not validar_rfc(rfc):
+            _log.warning("cfdi_parser: RfcACuentaTerceros con forma inválida: %r", rfc)
+        return rfc
 
     def _extraer_nominas(self, root) -> list[NominaDetalle]:
         """Un NominaDetalle por nodo nomina12:Nomina: encabezado, receptor, percepciones,

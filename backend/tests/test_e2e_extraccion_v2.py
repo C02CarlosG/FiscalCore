@@ -18,6 +18,7 @@ PERIODO = "2026-12"
 UUID_FACTURA = "0E0E0E0E-1111-2222-3333-44445555EE20"
 UUID_REP = "0E0E0E0E-9999-8888-7777-66665555EE20"
 UUID_NOMINA = "0E0E0E0E-5555-6666-7777-88889999EE20"
+UUID_REP_DOBLE = "0E0E0E0E-AAAA-BBBB-CCCC-DDDDEEEEEE20"
 
 pytestmark = [pytest.mark.db, pytest.mark.skipif(not db_disponible(), reason="Postgres no disponible (docker compose up -d db)")]
 
@@ -121,7 +122,7 @@ def _xml_nomina() -> bytes:
 
 def _limpiar(db):
     db.execute("DELETE FROM empresas WHERE rfc = %s", (RFC,))
-    db.execute("DELETE FROM cfdi WHERE uuid IN (%s, %s, %s)", (UUID_FACTURA, UUID_REP, UUID_NOMINA))
+    db.execute("DELETE FROM cfdi WHERE uuid IN (%s, %s, %s, %s)", (UUID_FACTURA, UUID_REP, UUID_NOMINA, UUID_REP_DOBLE))
     db.execute("DELETE FROM usuarios WHERE email = %s", (EMAIL,))
 
 
@@ -288,3 +289,55 @@ def test_el_detalle_v2_se_va_con_la_empresa(entorno):
     db.execute("DELETE FROM cfdi WHERE uuid IN (%s, %s, %s)", (UUID_FACTURA, UUID_REP, UUID_NOMINA))
 
     assert _conteos(db) == {k: 0 for k in ESPERADO}
+
+
+def _xml_rep_con_dos_pagos_identicos() -> bytes:
+    """REP con dos pago20:Pago de la misma fecha y monto, cada uno con sus ImpuestosP.
+    Comparten fila en pagos_cfdi (UNIQUE cfdi_id, fecha_pago, monto)."""
+    pago = """<pago20:Pago FechaPago="2026-12-22T12:00:00" FormaDePagoP="03" MonedaP="USD" TipoCambioP="17.5" Monto="1160.00">
+        <pago20:ImpuestosP><pago20:TrasladosP>
+          <pago20:TrasladoP BaseP="1000.00" ImpuestoP="002" TipoFactorP="Tasa" TasaOCuotaP="0.160000" ImporteP="160.00"/>
+        </pago20:TrasladosP></pago20:ImpuestosP>
+      </pago20:Pago>"""
+    return f'''<?xml version="1.0" encoding="UTF-8"?>
+<cfdi:Comprobante xmlns:cfdi="http://www.sat.gob.mx/cfd/4" xmlns:pago20="http://www.sat.gob.mx/Pagos20"
+    xmlns:tfd="http://www.sat.gob.mx/TimbreFiscalDigital"
+    Version="4.0" Fecha="2026-12-22T10:00:00" TipoDeComprobante="P" SubTotal="0" Total="0" Moneda="XXX"
+    Exportacion="01" LugarExpedicion="01000">
+  <cfdi:Emisor Rfc="{RFC}" Nombre="Emisora E2E" RegimenFiscal="601"/>
+  <cfdi:Receptor Rfc="{CLIENTE}" Nombre="Cliente" UsoCFDI="CP01" DomicilioFiscalReceptor="01000" RegimenFiscalReceptor="616"/>
+  <cfdi:Complemento>
+    <pago20:Pagos Version="2.0">
+      <pago20:Totales TotalTrasladosBaseIVA16="35000.123456" TotalTrasladosImpuestoIVA16="5600.019753" MontoTotalPagos="40600.50"/>
+      {pago}{pago}
+    </pago20:Pagos>
+    <tfd:TimbreFiscalDigital UUID="{UUID_REP_DOBLE}" FechaTimbrado="2026-12-22T10:01:00"/>
+  </cfdi:Complemento>
+</cfdi:Comprobante>'''.encode()
+
+
+def test_dos_pagos_identicos_acumulan_sus_impuestos_p_y_no_se_pisan(entorno):
+    db, client, headers, empresa_id = entorno
+
+    for _ in range(2):    # subirlo dos veces tampoco duplica
+        client.post(f"/api/v1/empresas/{empresa_id}/cfdi/upload", headers=headers, data={"periodo": PERIODO},
+                    files=[("archivos", ("rep2.xml", _xml_rep_con_dos_pagos_identicos(), "text/xml"))])
+    from backend import reproceso
+    db.execute("UPDATE cfdi SET detalle_version = 1 WHERE uuid = %s", (UUID_REP_DOBLE,))
+    reproceso.reprocesar_detalle(empresa_id=empresa_id)             # y reprocesarlo, igual
+
+    pagos = db.query_all("SELECT p.id FROM pagos_cfdi p JOIN cfdi c ON c.id = p.cfdi_id WHERE c.uuid = %s", (UUID_REP_DOBLE,))
+    assert len(pagos) == 1                                             # comparten fila
+    filas = db.query_all("SELECT ambito, impuesto, base, importe FROM pagos_impuestos WHERE pago_id = %s", (pagos[0]["id"],))
+    assert [(f["ambito"], f["impuesto"], f["base"], f["importe"]) for f in filas] == [
+        ("traslado", "002", D("2000.000000"), D("320.000000"))]       # el IVA de los dos pagos, no solo el del segundo
+
+
+def test_totales_del_rep_conservan_seis_decimales_en_la_base(entorno):
+    db, client, headers, empresa_id = entorno
+    client.post(f"/api/v1/empresas/{empresa_id}/cfdi/upload", headers=headers, data={"periodo": PERIODO},
+                files=[("archivos", ("rep2.xml", _xml_rep_con_dos_pagos_identicos(), "text/xml"))])
+
+    t = _uno(db, "SELECT t.* FROM cfdi_pagos_totales t JOIN cfdi c ON c.id = t.cfdi_id WHERE c.uuid = %s", UUID_REP_DOBLE)
+    assert (t["total_traslados_base_iva16"], t["total_traslados_iva16"], t["monto_total_pagos"]) == (
+        D("35000.123456"), D("5600.019753"), D("40600.500000"))

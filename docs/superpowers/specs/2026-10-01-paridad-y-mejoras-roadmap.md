@@ -253,6 +253,10 @@ Avisos para los cálculos que consumen esto:
   separarlos con `cfdi_conceptos.impuestos` y las columnas de terceros.
 - En `pagos_impuestos` y `pagos_relaciones_impuestos`, la `base` de una retención no es un
   dato (el XML no la trae; queda 0).
+- Dos pagos del mismo REP con la misma fecha y monto comparten fila en `pagos_cfdi`
+  (`UNIQUE cfdi_id, fecha_pago, monto`): sus `ImpuestosP` se acumulan, pero sus documentos
+  relacionados idénticos colapsan. La solución de fondo (agregar el orden del nodo a la
+  llave) queda para F3.5b.
 - `ObjetoImpDR` se guarda crudo: el catálogo c_ObjetoImp puede traer códigos nuevos además
   de 01 a 04.
 

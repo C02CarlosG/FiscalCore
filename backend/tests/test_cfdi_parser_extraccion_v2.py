@@ -251,3 +251,24 @@ def test_cfdi_33_no_trae_a_cuenta_de_terceros():
             version="1.1" rfc="TTE010101ABC" nombre="T"/></cfdi:ComplementoConcepto>
       </cfdi:Concepto></cfdi:Conceptos>''', version="3.3", subtotal="100.00", total="100.00"))
     assert p.conceptos[0].rfc_a_cuenta_terceros is None
+
+
+def test_rep_totales_conservan_hasta_seis_decimales():
+    """En Pagos20.xsd los Totales son t_Importe (hasta 6 decimales): el parser no los redondea."""
+    t = CFDIParser().parse_xml(_rep('''<pago20:Pagos Version="2.0">
+        <pago20:Totales TotalTrasladosBaseIVA16="1234.565432" TotalTrasladosImpuestoIVA16="197.530469" MontoTotalPagos="1432.095901"/>
+        <pago20:Pago FechaPago="2026-01-20T12:00:00" MonedaP="MXN" Monto="1432.10"/></pago20:Pagos>''')).pagos_totales
+
+    assert (t.total_traslados_base_iva16, t.total_traslados_iva16, t.monto_total_pagos) == (
+        D("1234.565432"), D("197.530469"), D("1432.095901"))
+
+
+def test_rfc_de_terceros_invalido_se_conserva_y_se_registra(caplog):
+    with caplog.at_level("WARNING"):
+        p = CFDIParser().parse_xml(_cfdi('''<cfdi:Conceptos>
+          <cfdi:Concepto ClaveProdServ="80101500" Cantidad="1" ClaveUnidad="E48" Descripcion="X" ValorUnitario="100.00" Importe="100.00">
+            <cfdi:ACuentaTerceros RfcACuentaTerceros="no-es-rfc" NombreACuentaTerceros="T"/>
+          </cfdi:Concepto></cfdi:Conceptos>''', subtotal="100.00", total="100.00"))
+
+    assert p.conceptos[0].rfc_a_cuenta_terceros == "NO-ES-RFC"      # el dato no se pierde
+    assert "RfcACuentaTerceros con forma inválida" in caplog.text

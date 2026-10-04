@@ -18,6 +18,7 @@ import logging
 import uuid as _uuid
 
 from . import db
+from .cfdi_parser import SEIS_DECIMALES, _agrupar_impuestos
 
 _log = logging.getLogger(__name__)
 
@@ -249,6 +250,12 @@ def persistir_complemento_pago(empresa_id: str, resultado) -> None:
         return
     cfdi_db_id = str(cfdi_row["id"])
     uuids_afectados: list[str] = []
+    # Dos pagos del mismo REP con la misma fecha y monto comparten fila en pagos_cfdi
+    # (UNIQUE cfdi_id, fecha_pago, monto): sus ImpuestosP se acumulan en vez de pisarse,
+    # o el IVA cobrado de uno se perdería. Los documentos relacionados idénticos de
+    # esos pagos sí colapsan (limitación previa; la solución de fondo es agregar el
+    # orden del nodo a la llave, pendiente en F3.5b).
+    impuestos_p_por_pago: dict[str, list] = {}
 
     for pago in resultado.pagos:
         if not pago.fecha_pago or pago.monto <= 0:
@@ -277,9 +284,12 @@ def persistir_complemento_pago(empresa_id: str, resultado) -> None:
         if not pago_row:
             continue
         pago_db_id = str(pago_row["id"])
+        impuestos_p_por_pago.setdefault(pago_db_id, []).extend(pago.impuestos_p)
         _en_transaccion([
             ("UPDATE pagos_cfdi SET version_pago = %s WHERE id = %s", (pago.version, pago_db_id)),
-            *_sentencias_impuestos("pagos_impuestos", "pago_id", pago_db_id, pago.impuestos_p),
+            *_sentencias_impuestos(
+                "pagos_impuestos", "pago_id", pago_db_id,
+                _agrupar_impuestos(impuestos_p_por_pago[pago_db_id], SEIS_DECIMALES)),
         ])
 
         for docto in pago.doctos_relacionados:

@@ -70,3 +70,16 @@ def test_040_los_textos_crudos_del_xml_tienen_holgura():
     assert len(filas) == 9
     for f in filas:
         assert f["data_type"] == "text" or f["largo"] >= 20, f
+
+
+def test_040_totales_del_rep_admiten_seis_decimales():
+    """Pagos20.xsd define los Totales como t_Importe (hasta 6 decimales): con dos, Postgres
+    los redondearía en silencio."""
+    from backend import db
+
+    db.init_db()
+    filas = db.query_all(
+        "SELECT column_name, numeric_scale FROM information_schema.columns "
+        "WHERE table_schema = 'public' AND table_name = 'cfdi_pagos_totales' AND column_name <> 'cfdi_id'")
+    assert len(filas) == 11
+    assert {f["numeric_scale"] for f in filas} == {6}

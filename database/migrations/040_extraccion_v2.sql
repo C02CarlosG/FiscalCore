@@ -54,19 +54,21 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_pagos_impuestos
 
 -- 4. pago20:Totales: cifras oficiales en pesos de todo el REP. NULL = el
 --    atributo no viene (un REP sin impuestos no trae ninguno de los de IVA).
+--    Seis decimales: en Pagos20.xsd son t_Importe, que los admite; con dos,
+--    Postgres redondearía en silencio el IVA cobrado que F5 usa como control.
 CREATE TABLE IF NOT EXISTS cfdi_pagos_totales (
     cfdi_id                      UUID PRIMARY KEY REFERENCES cfdi(id) ON DELETE CASCADE,
-    monto_total_pagos            NUMERIC(18,2),
-    total_retenciones_iva        NUMERIC(18,2),
-    total_retenciones_isr        NUMERIC(18,2),
-    total_retenciones_ieps       NUMERIC(18,2),
-    total_traslados_base_iva16   NUMERIC(18,2),
-    total_traslados_iva16        NUMERIC(18,2),
-    total_traslados_base_iva8    NUMERIC(18,2),
-    total_traslados_iva8         NUMERIC(18,2),
-    total_traslados_base_iva0    NUMERIC(18,2),
-    total_traslados_iva0         NUMERIC(18,2),
-    total_traslados_base_exento  NUMERIC(18,2)
+    monto_total_pagos            NUMERIC(18,6),
+    total_retenciones_iva        NUMERIC(18,6),
+    total_retenciones_isr        NUMERIC(18,6),
+    total_retenciones_ieps       NUMERIC(18,6),
+    total_traslados_base_iva16   NUMERIC(18,6),
+    total_traslados_iva16        NUMERIC(18,6),
+    total_traslados_base_iva8    NUMERIC(18,6),
+    total_traslados_iva8         NUMERIC(18,6),
+    total_traslados_base_iva0    NUMERIC(18,6),
+    total_traslados_iva0         NUMERIC(18,6),
+    total_traslados_base_exento  NUMERIC(18,6)
 );
 
 -- 5. Nómina 1.2: un renglón por nodo nomina12:Nomina (casi siempre uno por CFDI).
