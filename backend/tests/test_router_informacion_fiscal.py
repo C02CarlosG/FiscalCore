@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 
 import backend.main_api as main
 from backend import db
-from backend.deps import get_current_user
+from backend.deps import get_current_user, limiter
 from backend.routers import informacion_fiscal as router_if
 from backend.tests.pdf_sintetico import RFC_PRUEBA, constancia_sintetica, opinion_sintetica
 
@@ -70,7 +70,9 @@ def sesion(monkeypatch):
     main.app.dependency_overrides[get_current_user] = lambda: {"user_id": "u1"}
     monkeypatch.setattr(router_if, "validar_acceso_empresa", lambda *a, **k: None)
     monkeypatch.setattr(router_if, "_hoy", lambda: date(2026, 10, 10))
+    limiter.reset()  # la carga permite 20 por minuto
     yield
+    limiter.reset()
     main.app.dependency_overrides.clear()
 
 
@@ -113,9 +115,18 @@ def test_resumen_trae_el_ultimo_de_cada_tipo_con_vigencia(monkeypatch):
     assert opinion["fecha_emision"] == "2026-10-03"
     assert opinion["vigente_hasta"] == "2026-11-01"
     assert opinion["vigente"] is True
+    assert opinion["motivo"] is None
     assert opinion["antiguedad_dias"] == 7
     assert opinion["datos"] == {"sentido": "positivo"}
     assert "contenido" not in opinion
+
+
+def test_opinion_negativa_no_es_vigente(monkeypatch):
+    _Db(filas=[
+        _fila("opinion", fecha=date(2026, 10, 3), datos={"sentido": "negativo"}),
+    ]).instalar(monkeypatch)
+    opinion = client.get(BASE).json()["opinion"]
+    assert (opinion["vigente"], opinion["vigente_hasta"], opinion["motivo"]) == (False, None, "sentido_no_positivo")
 
 
 def test_constancia_no_tiene_vigencia(monkeypatch):
@@ -197,6 +208,13 @@ def test_rechaza_archivo_que_no_es_pdf(monkeypatch):
     assert _subir("opinion", b"no soy un pdf").status_code == 422
 
 
+def test_carga_limitada_a_20_por_minuto(monkeypatch):
+    _Db().instalar(monkeypatch)
+    codigos = [_subir("opinion", b"no soy un pdf").status_code for _ in range(21)]
+    assert codigos[:20] == [422] * 20
+    assert codigos[20] == 429
+
+
 def test_mismo_pdf_dos_veces_responde_409(monkeypatch):
     _Db(error_insert=psycopg2.errors.UniqueViolation()).instalar(monkeypatch)
     r = _subir("constancia", constancia_sintetica())
@@ -215,6 +233,7 @@ def test_entrega_el_pdf_para_el_visor_y_para_descargar(monkeypatch):
     assert r.headers["content-type"] == "application/pdf"
     assert r.headers["content-disposition"].startswith("inline")
     assert r.headers["x-content-type-options"] == "nosniff"
+    assert r.headers["content-security-policy"] == "sandbox"
 
     r = client.get(f"{BASE}/documentos/{DOC}/pdf", params={"descargar": "true"})
     assert r.headers["content-disposition"].startswith("attachment")

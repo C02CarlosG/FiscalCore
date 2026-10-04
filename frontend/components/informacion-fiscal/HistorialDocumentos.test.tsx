@@ -18,12 +18,12 @@ const docs: DocumentoFiscal[] = [
   {
     id: "d2", tipo: "opinion", nombre_archivo: "32D octubre.pdf", tamano_bytes: 1, rfc: "ACM010101AA1",
     fecha_emision: "2026-10-03", created_at: "2026-10-04T10:00:00+00:00", datos: {},
-    antiguedad_dias: 1, vigente_hasta: "2026-11-01", vigente: true,
+    antiguedad_dias: 1, vigente_hasta: "2026-11-01", vigente: true, motivo: null,
   },
   {
     id: "d1", tipo: "constancia", nombre_archivo: "CSF.pdf", tamano_bytes: 1, rfc: "ACM010101AA1",
     fecha_emision: "2026-09-01", created_at: "2026-09-02T10:00:00+00:00", datos: {},
-    antiguedad_dias: 33, vigente_hasta: null, vigente: null,
+    antiguedad_dias: 33, vigente_hasta: null, vigente: null, motivo: null,
   },
 ];
 

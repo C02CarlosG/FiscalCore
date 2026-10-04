@@ -3,9 +3,10 @@ Router de información fiscal (F8, carril D): constancia de situación fiscal y 
 del cumplimiento de obligaciones fiscales, cargadas a mano en PDF por empresa
 (decisión D4). Las reglas viven en `backend/informacion_fiscal.py`; aquí solo se
 valida el acceso, se guarda y se entrega el PDF.
-"""
-from __future__ import annotations
 
+NOTA: sin `from __future__ import annotations`: la carga va envuelta por
+@limiter.limit (slowapi) y FastAPI no resolvería los forward-refs (ver routers/sat.py).
+"""
 import hashlib
 import os
 import uuid
@@ -15,12 +16,13 @@ from urllib.parse import quote
 
 import psycopg2
 import psycopg2.extras
-from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile
+from fastapi.concurrency import run_in_threadpool
 
 from .. import db
 from .. import informacion_fiscal as inf
 from ..auditoria import registrar_evento
-from ..deps import get_current_user, validar_acceso_empresa, validar_upload
+from ..deps import get_current_user, limiter, validar_acceso_empresa, validar_upload
 
 router = APIRouter(
     prefix="/api/v1/informacion-fiscal/empresas/{empresa_id}",
@@ -33,7 +35,7 @@ _COLUMNAS = "id, tipo, nombre_archivo, tamano_bytes, rfc, fecha_emision, datos, 
 
 
 def _hoy() -> date:
-    return date.today()
+    return inf.hoy_mexico()
 
 
 def _tipo(tipo: str) -> str:
@@ -54,9 +56,10 @@ def _documento(fila: dict) -> dict:
     """Fila de la tabla (sin el PDF) más la antigüedad y, en la opinión, su vigencia."""
     fecha = fila.get("fecha_emision")
     hoy = _hoy()
+    datos = fila.get("datos") or {}
     vigencia = (
-        inf.estado_opinion(fecha, hoy) if fila["tipo"] == "opinion"
-        else {"vigente_hasta": None, "vigente": None}
+        inf.estado_opinion(fecha, datos.get("sentido"), hoy) if fila["tipo"] == "opinion"
+        else {"vigente_hasta": None, "vigente": None, "motivo": None}
     )
     return {
         "id": str(fila["id"]),
@@ -66,7 +69,7 @@ def _documento(fila: dict) -> dict:
         "rfc": fila["rfc"],
         "fecha_emision": fecha.isoformat() if fecha else None,
         "created_at": fila["created_at"].isoformat(),
-        "datos": fila.get("datos") or {},
+        "datos": datos,
         "antiguedad_dias": inf.antiguedad_dias(fecha, hoy),
         **vigencia,
     }
@@ -119,7 +122,9 @@ async def historial(
 
 
 @router.post("/documentos/{tipo}", status_code=201)
+@limiter.limit("20/minute")  # leer el PDF cuesta CPU; una carga normal es esporádica
 async def subir(
+    request: Request,
     empresa_id: uuid.UUID,
     tipo: str,
     archivo: UploadFile = File(...),
@@ -133,7 +138,8 @@ async def subir(
     validar_upload(archivo, contenido, _EXTENSIONES, _CONTENT_TYPES, max_bytes=inf.MAX_BYTES)
 
     try:
-        leido = inf.analizar_documento(tipo, contenido, empresa["rfc"])
+        # pdfplumber es CPU intensivo: fuera del event loop para no congelar el worker.
+        leido = await run_in_threadpool(inf.analizar_documento, tipo, contenido, empresa["rfc"], _hoy())
     except inf.DocumentoInvalido as e:
         raise HTTPException(status_code=422, detail=str(e))
 
@@ -189,6 +195,8 @@ async def pdf(
             "Content-Disposition": f"{modo}; filename*=UTF-8''{nombre}",
             "X-Content-Type-Options": "nosniff",
             "Cache-Control": "private, no-store",
+            # Si alguien abre la URL directo, el PDF no puede ejecutar scripts en el origen de la API.
+            "Content-Security-Policy": "sandbox",
         },
     )
 

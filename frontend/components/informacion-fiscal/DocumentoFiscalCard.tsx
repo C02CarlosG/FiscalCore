@@ -33,13 +33,14 @@ const TONO = {
 const SENTIDO: Record<SentidoOpinion, { texto: string; tono: keyof typeof TONO }> = {
   positivo: { texto: "Positiva", tono: "ok" },
   negativo: { texto: "Negativa", tono: "error" },
+  suspension_actividades: { texto: "En suspensión de actividades", tono: "error" },
   inscrito_sin_obligaciones: { texto: "Inscrito sin obligaciones", tono: "neutro" },
   no_inscrito: { texto: "No inscrito", tono: "error" },
 };
 
 const DESCRIPCION: Record<TipoDocumentoFiscal, string> = {
   constancia: "Régimen, domicilio y obligaciones registrados en el SAT.",
-  opinion: "Opinión del cumplimiento de obligaciones fiscales (32-D). Vale 30 días naturales.",
+  opinion: "Opinión del cumplimiento de obligaciones fiscales (32-D). La positiva vale 30 días naturales.",
 };
 
 const SUSTANTIVO: Record<TipoDocumentoFiscal, string> = {
@@ -76,10 +77,16 @@ function EstadoOpinion({ documento }: { documento: DocumentoFiscal }) {
       {documento.vigente === true && (
         <Etiqueta tono="ok">Vigente hasta {formatearFecha(documento.vigente_hasta)}</Etiqueta>
       )}
-      {documento.vigente === false && (
+      {documento.motivo === "vencida" && (
         <Etiqueta tono="error">Vencida: valía hasta {formatearFecha(documento.vigente_hasta)}</Etiqueta>
       )}
-      {documento.vigente === null && <Etiqueta tono="aviso">Sin fecha de emisión</Etiqueta>}
+      {documento.motivo === "sentido_no_positivo" && (
+        <Etiqueta tono="error">No vigente: solo la opinión positiva tiene vigencia</Etiqueta>
+      )}
+      {documento.motivo === "sentido_no_identificado" && (
+        <Etiqueta tono="aviso">Sin vigencia: revisa el sentido en el PDF</Etiqueta>
+      )}
+      {documento.motivo === "sin_fecha" && <Etiqueta tono="aviso">Sin fecha de emisión</Etiqueta>}
     </div>
   );
 }
@@ -107,7 +114,15 @@ function DetalleDocumento({ documento }: { documento: DocumentoFiscal }) {
         {documento.tipo === "opinion" && datos.folio && <Dato etiqueta="Folio">{datos.folio}</Dato>}
         {documento.tipo === "constancia" && (
           <>
-            {datos.estatus_padron && <Dato etiqueta="Estatus en el padrón">{datos.estatus_padron}</Dato>}
+            {datos.estatus_padron && (
+              <Dato etiqueta="Estatus en el padrón">
+                {datos.estatus_padron === "ACTIVO" ? (
+                  datos.estatus_padron
+                ) : (
+                  <Etiqueta tono="error">{datos.estatus_padron}</Etiqueta>
+                )}
+              </Dato>
+            )}
             {datos.cp_fiscal && <Dato etiqueta="Código postal">{datos.cp_fiscal}</Dato>}
             {datos.regimenes && datos.regimenes.length > 0 && (
               <div className="sm:col-span-2">
@@ -125,6 +140,9 @@ function DetalleDocumento({ documento }: { documento: DocumentoFiscal }) {
         )}
         <Dato etiqueta="Subida el">{formatearInstante(documento.created_at)}</Dato>
       </dl>
+      <p className="text-xs text-muted-foreground">
+        Datos leídos del PDF cargado, no consultados al SAT. Verifica el folio o el código QR en el portal del SAT.
+      </p>
       {documento.tipo === "constancia" && (documento.antiguedad_dias ?? 0) > 30 && (
         <p className="flex items-start gap-2 rounded-md border border-status-pendiente/30 bg-status-pendiente-soft p-3 text-sm text-status-pendiente">
           <AlertTriangle className="mt-0.5 h-4 w-4 flex-none" />

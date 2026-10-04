@@ -10,6 +10,10 @@ from backend.tests.pdf_sintetico import RFC_PRUEBA, constancia_sintetica, opinio
 
 # ─── buscar_rfc ───────────────────────────────────────────────────────────────
 
+def test_buscar_rfc_que_empieza_con_ampersand_sin_etiqueta():
+    assert inf.buscar_rfc("contribuyente &AM010101AA1 sin etiqueta") == "&AM010101AA1"
+
+
 @pytest.mark.parametrize("texto", [
     "RFC: ACM010101AA1",
     "Clave de R.F.C.: ACM010101AA1",
@@ -70,33 +74,59 @@ def test_parsear_opinion_completa():
     ("Opinión en sentido negativa", "negativo"),
     ("Su situación es INSCRITO SIN OBLIGACIONES", "inscrito_sin_obligaciones"),
     ("Su situación es NO INSCRITO en el RFC", "no_inscrito"),
+    ("Sentido: En suspensión de actividades", "suspension_actividades"),
+    ("se emite opinión en sentido EN SUSPENSION DE ACTIVIDADES", "suspension_actividades"),
     ("texto sin sentido identificable", None),
-    ("sentido POSITIVO ... en caso de sentido NEGATIVO", None),
+    # Si el texto menciona varios, gana el desfavorable: nunca se presenta como
+    # positiva una opinión que podría no serlo (revisión dominio-fiscal, A4).
+    ("en sentido NEGATIVO. Para obtener la opinión en sentido positivo…", "negativo"),
+    ("sentido POSITIVO ... en caso de sentido NEGATIVO", "negativo"),
 ])
 def test_sentido_de_la_opinion(texto, sentido):
     assert inf.parsear_opinion(texto)["sentido"] == sentido
 
 
-def test_fecha_de_la_opinion_sin_revision_usa_la_primera_fecha():
-    assert inf.parsear_opinion("Emitida el 05/09/2026")["fecha_emision"] == "2026-09-05"
+def test_fecha_de_la_opinion_solo_con_ancla():
+    # Sin "practicada el día" ni "Fecha de emisión" no se adivina con la primera fecha del texto.
+    assert inf.parsear_opinion("Inicio de operaciones 05/09/2001")["fecha_emision"] is None
+    assert inf.parsear_opinion("Fecha de emisión: 05/09/2026")["fecha_emision"] == "2026-09-05"
 
 
 # ─── estado_opinion / antiguedad ──────────────────────────────────────────────
 
-def test_opinion_vigente_30_dias_naturales_contando_el_de_emision():
+def test_opinion_positiva_vigente_30_dias_naturales_contando_el_de_emision():
     emitida = date(2026, 10, 3)
-    assert inf.estado_opinion(emitida, date(2026, 10, 3)) == {"vigente_hasta": "2026-11-01", "vigente": True}
-    assert inf.estado_opinion(emitida, date(2026, 11, 1))["vigente"] is True
-    assert inf.estado_opinion(emitida, date(2026, 11, 2))["vigente"] is False
+    assert inf.estado_opinion(emitida, "positivo", date(2026, 10, 3)) == {
+        "vigente_hasta": "2026-11-01", "vigente": True, "motivo": None,
+    }
+    assert inf.estado_opinion(emitida, "positivo", date(2026, 11, 1))["vigente"] is True
+    vencida = inf.estado_opinion(emitida, "positivo", date(2026, 11, 2))
+    assert vencida["vigente"] is False
+    assert vencida["motivo"] == "vencida"
 
 
-def test_vigencia_no_depende_del_sentido():
-    # Una opinión negativa también tiene fecha; la pantalla combina sentido y vigencia.
-    assert inf.estado_opinion(date(2026, 10, 3), date(2026, 10, 10))["vigente"] is True
+@pytest.mark.parametrize("sentido,motivo", [
+    ("negativo", "sentido_no_positivo"),
+    ("suspension_actividades", "sentido_no_positivo"),
+    ("inscrito_sin_obligaciones", "sentido_no_positivo"),
+    ("no_inscrito", "sentido_no_positivo"),
+    (None, "sentido_no_identificado"),
+])
+def test_solo_la_opinion_positiva_tiene_vigencia(sentido, motivo):
+    # Regla 2.1.36 RMF 2026: los 30 días aplican a la opinión "en sentido positivo".
+    r = inf.estado_opinion(date(2026, 10, 3), sentido, date(2026, 10, 4))
+    assert r == {"vigente_hasta": None, "vigente": False, "motivo": motivo}
 
 
-def test_opinion_sin_fecha_no_tiene_vigencia():
-    assert inf.estado_opinion(None, date(2026, 10, 3)) == {"vigente_hasta": None, "vigente": None}
+def test_opinion_positiva_sin_fecha_no_es_vigente():
+    r = inf.estado_opinion(None, "positivo", date(2026, 10, 3))
+    assert r == {"vigente_hasta": None, "vigente": False, "motivo": "sin_fecha"}
+
+
+def test_hoy_es_la_fecha_de_la_ciudad_de_mexico():
+    from datetime import datetime, timezone
+    # 2026-10-04 01:00 UTC todavía es 3 de octubre en la Ciudad de México.
+    assert inf.hoy_mexico(datetime(2026, 10, 4, 1, 0, tzinfo=timezone.utc)) == date(2026, 10, 3)
 
 
 def test_antiguedad_dias():
@@ -158,6 +188,33 @@ def test_analizar_opinion():
 def test_analizar_compara_rfc_sin_importar_mayusculas_ni_espacios():
     r = inf.analizar_documento("constancia", constancia_sintetica(), " acm010101aa1 ")
     assert r["rfc"] == RFC_PRUEBA
+
+
+def test_analizar_normaliza_guiones_y_espacios_del_rfc_de_la_empresa():
+    r = inf.analizar_documento("constancia", constancia_sintetica(), "ACM-010101 AA1")
+    assert r["rfc"] == RFC_PRUEBA
+
+
+def test_analizar_rechaza_fecha_de_emision_futura():
+    with pytest.raises(inf.DocumentoInvalido, match="posterior a hoy"):
+        inf.analizar_documento("opinion", opinion_sintetica(), RFC_PRUEBA, hoy=date(2026, 10, 1))
+
+
+def test_analizar_acepta_emitido_hoy():
+    r = inf.analizar_documento("opinion", opinion_sintetica(), RFC_PRUEBA, hoy=date(2026, 10, 3))
+    assert r["fecha_emision"] == "2026-10-03"
+
+
+def test_leer_pdf_con_contrasena(monkeypatch):
+    class PDFPasswordIncorrect(Exception):
+        pass
+
+    def _abrir(*a, **k):
+        raise PDFPasswordIncorrect()
+
+    monkeypatch.setattr(inf.cp.pdfplumber, "open", _abrir)
+    with pytest.raises(inf.DocumentoInvalido, match="contraseña"):
+        inf.leer_pdf(b"%PDF-1.7 cifrado")
 
 
 def test_analizar_rechaza_otro_rfc():

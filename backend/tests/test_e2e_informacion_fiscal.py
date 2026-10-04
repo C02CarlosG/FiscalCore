@@ -24,8 +24,11 @@ def entorno():
     import backend.main_api as main
     from backend import db
 
+    from backend.deps import limiter
+
     db.init_db()
     _limpiar(db)
+    limiter.reset()
     client = TestClient(main.app)
     try:
         headers = headers_usuario_e2e(db, EMAIL)

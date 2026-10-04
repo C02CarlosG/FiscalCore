@@ -29,6 +29,7 @@ function documento(cambios: Partial<DocumentoFiscal> = {}): DocumentoFiscal {
     antiguedad_dias: 1,
     vigente_hasta: "2026-11-01",
     vigente: true,
+    motivo: null,
     ...cambios,
   };
 }
@@ -78,15 +79,33 @@ describe("DocumentoFiscalCard", () => {
     expect(screen.getByText("26NA1234567")).toBeInTheDocument();
   });
 
-  it("avisa cuando la opinión ya venció o es negativa", () => {
-    renderCard("opinion", documento({ vigente: false, datos: { sentido: "negativo" } }));
-    expect(screen.getByText("Negativa")).toBeInTheDocument();
+  it("avisa cuando la opinión positiva ya venció", () => {
+    renderCard("opinion", documento({ vigente: false, motivo: "vencida" }));
     expect(screen.getByText("Vencida: valía hasta 01/11/2026")).toBeInTheDocument();
   });
 
-  it("sentido no identificado no se presenta como positivo", () => {
-    renderCard("opinion", documento({ datos: { sentido: null } }));
+  it("una opinión negativa o en suspensión nunca se muestra vigente", () => {
+    renderCard(
+      "opinion",
+      documento({ vigente: false, vigente_hasta: null, motivo: "sentido_no_positivo", datos: { sentido: "suspension_actividades" } }),
+    );
+    expect(screen.getByText("En suspensión de actividades")).toBeInTheDocument();
+    expect(screen.getByText("No vigente: solo la opinión positiva tiene vigencia")).toBeInTheDocument();
+    expect(screen.queryByText(/Vigente hasta/)).not.toBeInTheDocument();
+  });
+
+  it("sentido no identificado no se presenta como positivo ni vigente", () => {
+    renderCard(
+      "opinion",
+      documento({ vigente: false, vigente_hasta: null, motivo: "sentido_no_identificado", datos: { sentido: null } }),
+    );
     expect(screen.getByText("Sentido no identificado")).toBeInTheDocument();
+    expect(screen.getByText("Sin vigencia: revisa el sentido en el PDF")).toBeInTheDocument();
+  });
+
+  it("advierte que los datos salen del PDF y no del SAT", () => {
+    renderCard("opinion", documento());
+    expect(screen.getByText(/no consultados al SAT/)).toBeInTheDocument();
   });
 
   it("muestra regímenes, CP y antigüedad de la constancia", () => {
@@ -97,12 +116,12 @@ describe("DocumentoFiscalCard", () => {
         antiguedad_dias: 45,
         vigente: null,
         vigente_hasta: null,
-        datos: { regimenes: ["Régimen General de Ley Personas Morales"], cp_fiscal: "68000", estatus_padron: "ACTIVO" },
+        datos: { regimenes: ["Régimen General de Ley Personas Morales"], cp_fiscal: "68000", estatus_padron: "SUSPENDIDO" },
       }),
     );
     expect(screen.getByText("Régimen General de Ley Personas Morales")).toBeInTheDocument();
     expect(screen.getByText("68000")).toBeInTheDocument();
-    expect(screen.getByText("ACTIVO")).toBeInTheDocument();
+    expect(screen.getByText("SUSPENDIDO")).toBeInTheDocument();
     expect(screen.getByText(/hace 45 días/)).toBeInTheDocument();
     expect(screen.getByText(/más de 30 días/)).toBeInTheDocument();
   });

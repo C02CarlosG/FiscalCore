@@ -1,6 +1,14 @@
 export type TipoDocumentoFiscal = "constancia" | "opinion";
 
-export type SentidoOpinion = "positivo" | "negativo" | "inscrito_sin_obligaciones" | "no_inscrito";
+export type SentidoOpinion =
+  | "positivo"
+  | "negativo"
+  | "suspension_actividades"
+  | "inscrito_sin_obligaciones"
+  | "no_inscrito";
+
+/** Por qué una opinión no está vigente (solo la positiva tiene vigencia, regla 2.1.36 RMF). */
+export type MotivoNoVigente = "sentido_no_positivo" | "sentido_no_identificado" | "sin_fecha" | "vencida";
 
 export interface DatosConstancia {
   razon_social?: string | null;
@@ -30,6 +38,7 @@ export interface DocumentoFiscal {
   antiguedad_dias: number | null;
   vigente_hasta: string | null;
   vigente: boolean | null;
+  motivo: MotivoNoVigente | null;
 }
 
 export interface ResumenInformacionFiscal {

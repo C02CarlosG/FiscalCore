@@ -42,8 +42,8 @@ No entra:
 
 | Regla | Fundamento | Cómo se aplica |
 |---|---|---|
-| La opinión del cumplimiento se emite en sentido **positivo**, **negativo**, **inscrito sin obligaciones** o **no inscrito** | Art. 32-D CFF; regla de la RMF vigente sobre el procedimiento para obtener la opinión (2.1.37 en las RMF recientes; se confirma con la RMF 2026 en la revisión de `dominio-fiscal`) | Se lee del texto; si no se identifica, queda "no identificado" y el documento se acepta igual |
-| La opinión tiene vigencia de **30 días naturales** a partir de su emisión | Misma regla de la RMF | El día de emisión cuenta como el primero: `vigente_hasta = fecha_emision + 29 días`; vigente si `hoy <= vigente_hasta`. Es la lectura conservadora (no muestra como vigente una opinión que un tercero ya podría rechazar). La vigencia es independiente del sentido: la pantalla muestra ambos. Se calcula al consultar, no se guarda |
+| La opinión del cumplimiento se emite en sentido **positivo**, **negativo**, **en suspensión de actividades** o **inscrito sin obligaciones**. El portal también puede mostrar **no inscrito**, aunque no es un sentido de la regla | Art. 32-D CFF; regla 2.1.36 de la RMF 2026 (2.1.37 en RMF anteriores) | Se lee del texto. Si menciona varios sentidos gana el más desfavorable (negativo > suspensión > no inscrito > inscrito sin obligaciones > positivo), para no presentar nunca como positiva una opinión que podría no serlo. Si no se identifica, queda "no identificado" y el documento se acepta igual. El sentido sale del PDF subido y no se verifica contra el SAT; la pantalla lo advierte |
+| Solo la opinión **positiva** tiene vigencia: **30 días naturales** a partir de su emisión | Regla 2.1.36 de la RMF 2026 | Que el día de emisión cuente como el primero es una **interpretación**, no texto expreso: `vigente_hasta = fecha_emision + 29 días` y vigente si `hoy <= vigente_hasta`. Es la lectura que no sobrestima la vigencia frente a un tercero que aplique la estricta. Cualquier otro sentido, o un sentido no identificado, da `vigente = false` con su `motivo`. "Hoy" es la fecha en la Ciudad de México. Se calcula al consultar, no se guarda |
 | La constancia no tiene vencimiento legal | Art. 27 CFF (inscripción y actualización en el RFC) | Solo se muestra su antigüedad en días. Muchos clientes y bancos piden una de menos de 30 días; la pantalla lo señala como aviso, no como vencimiento |
 | El RFC del documento debe ser el de la empresa | Validación de integridad de FiscalCore (D4) | Se compara el RFC etiquetado del documento, en mayúsculas y sin espacios, contra `empresas.rfc`; si difiere o no se encuentra, 422 |
 
@@ -85,19 +85,20 @@ CREATE INDEX IF NOT EXISTS idx_documentos_fiscales_empresa
 - `backend/constancia_parser.py` (existente, del carril D): se agregan `fecha_emision`,
   `id_cif` y `estatus_padron` al resultado de `parsear_constancia`, y se expone
   `extraer_texto`. Lo que ya devuelve no cambia (lo usa `/api/v1/constancia/parsear`).
-- `backend/informacion_fiscal.py` (nuevo, puro, sin base de datos):
+- `backend/informacion_fiscal.py` (nuevo, puro, sin base de datos; reutiliza `constancia_parser.RFC_PATRON`):
   - `validar_pdf(contenido)` — firma `%PDF-`, legible, no cifrado, máximo 10 páginas.
   - `detectar_tipo(texto)` — `constancia`, `opinion` o `None`.
   - `buscar_rfc(texto)` — RFC tras la etiqueta `RFC` o `R.F.C.` (la opinión usa
     "Clave de R.F.C.").
-  - `buscar_fecha(texto)` — fechas "03 DE OCTUBRE DE 2026" y "03/10/2026".
+  - Fechas "03 DE OCTUBRE DE 2026" y "03/10/2026" (`constancia_parser.fecha_en_texto`), solo tras un ancla ("Fecha de Emisión", "practicada el día"); sin ancla queda nula. Una fecha posterior a hoy se rechaza (422).
   - `parsear_opinion(texto)` — RFC, razón social, fecha de emisión, sentido, folio.
   - `analizar_documento(tipo, contenido, rfc_empresa)` — orquesta lo anterior y
     lanza `DocumentoInvalido(mensaje)` ante cualquier regla rota.
-  - `estado_opinion(fecha_emision, sentido, hoy)` y `antiguedad_dias(...)`.
+  - `estado_opinion(fecha_emision, sentido, hoy)`, `antiguedad_dias(...)` y `hoy_mexico()`.
 - `backend/routers/informacion_fiscal.py` (nuevo): rutas delgadas; acceso por
   `validar_acceso_empresa`, auditoría con `registrar_evento` (se importa de B sin
-  editarlo).
+  editarlo). La lectura del PDF corre fuera del event loop (`run_in_threadpool`) y la
+  carga está limitada a 20 por minuto. El PDF se entrega con `Content-Security-Policy: sandbox`.
 
 ## API
 
@@ -121,11 +122,14 @@ acceso a la empresa (403 si no lo tiene, 404 si la empresa no existe).
   "datos": {"razon_social": "…", "sentido": "positivo", "folio": "26NA1234567"},
   "antiguedad_dias": 1,
   "vigente_hasta": "2026-11-01",
-  "vigente": true
+  "vigente": true,
+  "motivo": null
 }
 ```
 
-`vigente_hasta` y `vigente` solo vienen en la opinión (en la constancia son `null`).
+`vigente_hasta`, `vigente` y `motivo` solo tienen valor en la opinión (en la constancia son `null`).
+`motivo` explica un `vigente = false`: `sentido_no_positivo`, `sentido_no_identificado`,
+`sin_fecha` o `vencida`.
 Un `documento_id` de otra empresa responde 404, igual que uno inexistente.
 
 Mensajes de 422 (los ve el usuario tal cual):
@@ -134,7 +138,8 @@ Mensajes de 422 (los ve el usuario tal cual):
 - "El PDF está protegido con contraseña."
 - "El archivo no parece una constancia de situación fiscal." / "…una opinión del cumplimiento de obligaciones fiscales."
 - "No se encontró el RFC en el documento."
-- "El documento es del RFC XXX, pero la empresa es YYY."
+- "El documento es del RFC XXX, pero la empresa es YYY." (ambos se comparan sin espacios ni guiones)
+- "La fecha de emisión del documento (…) es posterior a hoy; …"
 
 ## Pantalla
 
@@ -142,7 +147,7 @@ Ruta `/empresas/{id}/informacion-fiscal`, entrada "Información fiscal" en el me
 lateral, grupo Fiscal. Componentes en `frontend/components/informacion-fiscal/`:
 
 - `DocumentoFiscalCard` (una por tipo): estado del último documento (para la opinión,
-  insignia de sentido y "Vigente hasta 2 nov 2026" o "Vencida hace N días"; para la
+  insignia de sentido y "Vigente hasta 01/11/2026" o "Vencida hace N días"; para la
   constancia, regímenes, CP y antigüedad), botones **Ver** y **Descargar**, y el
   formulario para subir uno nuevo con el error del backend tal cual.
 - `VisorPdfDialog`: pide el PDF con la sesión (`apiDescargar`), lo muestra en un
@@ -162,8 +167,9 @@ Validación previa en el navegador (solo por comodidad, el backend decide): exte
 3. Una opinión subida como constancia (y al revés) responde 422.
 4. Un archivo `.pdf` que no empieza con `%PDF-`, uno de más de 5 MB y uno de más de 10
    páginas se rechazan sin guardar.
-5. Opinión emitida el 2026-10-03: `vigente_hasta = 2026-11-01`, vigente el
-   2026-11-01 y vencida el 2026-11-02.
+5. Opinión positiva emitida el 2026-10-03: `vigente_hasta = 2026-11-01`, vigente el
+   2026-11-01 y vencida el 2026-11-02. Una opinión negativa, en suspensión o sin sentido
+   identificado nunca sale vigente.
 6. El PDF descargado es idéntico byte por byte al subido.
 7. Un usuario sin acceso a la empresa recibe 403 en todas las rutas; un documento de
    otra empresa da 404.

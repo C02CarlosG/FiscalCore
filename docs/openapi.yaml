@@ -2748,6 +2748,8 @@ paths:
           description: El archivo excede 5 MB
         '422':
           $ref: '#/components/responses/UnprocessableError'
+        '429':
+          description: Más de 20 cargas por minuto
 
   /api/v1/informacion-fiscal/empresas/{empresa_id}/documentos/{documento_id}/pdf:
     get:
@@ -4023,11 +4025,20 @@ components:
           description: |
             Lo leído del PDF. Constancia: razon_social, regimenes, obligaciones, cp_fiscal,
             curp, id_cif, estatus_padron. Opinión: razon_social, sentido (positivo, negativo,
-            inscrito_sin_obligaciones, no_inscrito o null), folio.
+            suspension_actividades, inscrito_sin_obligaciones, no_inscrito o null), folio.
+            Todo se lee del PDF subido; no se verifica contra el SAT.
         antiguedad_dias: { type: integer, nullable: true }
         vigente_hasta:
           type: string
           format: date
           nullable: true
-          description: Solo la opinión; 30 días naturales contando el de emisión.
-        vigente: { type: boolean, nullable: true }
+          description: Solo la opinión positiva (regla 2.1.36 RMF 2026); 30 días naturales contando el de emisión.
+        vigente:
+          type: boolean
+          nullable: true
+          description: null en la constancia; false en toda opinión que no sea positiva y vigente.
+        motivo:
+          type: string
+          nullable: true
+          enum: [sentido_no_positivo, sentido_no_identificado, sin_fecha, vencida, null]
+          description: Por qué la opinión no está vigente.

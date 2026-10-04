@@ -20,7 +20,8 @@ except ImportError:
 # ─── Regex SAT ───────────────────────────────────────────────────────────────
 
 # RFC: persona moral 12 chars, persona física 13 chars
-_RE_RFC   = re.compile(r'\b([A-ZÑ&]{3,4}\d{6}[A-Z0-9]{3})\b')
+RFC_PATRON = r'[A-ZÑ&]{3,4}\d{6}[A-Z0-9]{3}'
+_RE_RFC   = re.compile(r'\b(' + RFC_PATRON + r')\b')
 _RE_CURP  = re.compile(r'\b([A-Z]{4}\d{6}[HM][A-Z]{5}[A-Z0-9]\d)\b')
 _RE_CP    = re.compile(r'(?:C\.?P\.?|C[óo]digo\s+Postal)\s*:?\s*(\d{5})', re.IGNORECASE)
 _RE_ID_CIF = re.compile(r'idCIF\s*:?\s*(\d{6,})', re.IGNORECASE)
@@ -74,7 +75,7 @@ _extraer_texto = extraer_texto  # nombre anterior, por compatibilidad
 
 def _buscar_rfc(texto: str) -> Optional[str]:
     # Busca primero después de etiqueta "RFC:"
-    m = re.search(r'RFC[:\s]+([A-ZÑ&]{3,4}\d{6}[A-Z0-9]{3})', texto, re.IGNORECASE)
+    m = re.search(r'RFC[:\s]+(' + RFC_PATRON + r')', texto, re.IGNORECASE)
     if m:
         return m.group(1).upper()
     # Fallback: cualquier patrón RFC en el texto
