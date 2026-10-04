@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import io
 import re
+from datetime import date
 from typing import Optional
 
 try:
@@ -21,7 +22,17 @@ except ImportError:
 # RFC: persona moral 12 chars, persona física 13 chars
 _RE_RFC   = re.compile(r'\b([A-ZÑ&]{3,4}\d{6}[A-Z0-9]{3})\b')
 _RE_CURP  = re.compile(r'\b([A-Z]{4}\d{6}[HM][A-Z]{5}[A-Z0-9]\d)\b')
-_RE_CP    = re.compile(r'C\.?P\.?\s*:?\s*(\d{5})')
+_RE_CP    = re.compile(r'(?:C\.?P\.?|C[óo]digo\s+Postal)\s*:?\s*(\d{5})', re.IGNORECASE)
+_RE_ID_CIF = re.compile(r'idCIF\s*:?\s*(\d{6,})', re.IGNORECASE)
+_RE_ESTATUS = re.compile(r'Estatus\s+en\s+el\s+padr[óo]n\s*:?\s*([A-ZÁÉÍÓÚÑ ]+?)\s*$', re.IGNORECASE | re.MULTILINE)
+
+_MESES = {
+    "ENERO": 1, "FEBRERO": 2, "MARZO": 3, "ABRIL": 4, "MAYO": 5, "JUNIO": 6,
+    "JULIO": 7, "AGOSTO": 8, "SEPTIEMBRE": 9, "SETIEMBRE": 9, "OCTUBRE": 10,
+    "NOVIEMBRE": 11, "DICIEMBRE": 12,
+}
+_RE_FECHA_LETRA = re.compile(r'\b(\d{1,2})\s+DE\s+([A-Z]+)\s+DE(?:L)?\s+(\d{4})\b', re.IGNORECASE)
+_RE_FECHA_NUM   = re.compile(r'\b(\d{1,2})/(\d{1,2})/(\d{4})\b')
 
 # Regímenes más comunes del SAT — texto que aparece en la constancia
 _REGIMENES_CONOCIDOS = [
@@ -46,7 +57,7 @@ _REGIMENES_CONOCIDOS = [
 _PERIODICIDADES = {"Mensual", "Bimestral", "Anual", "Trimestral", "Eventual", "Semestral"}
 
 
-def _extraer_texto(pdf_bytes: bytes) -> str:
+def extraer_texto(pdf_bytes: bytes) -> str:
     if not PDFPLUMBER_OK:
         raise RuntimeError("pdfplumber no está instalado. Ejecuta: pip install pdfplumber")
     with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
@@ -56,6 +67,9 @@ def _extraer_texto(pdf_bytes: bytes) -> str:
             if texto:
                 partes.append(texto)
         return "\n".join(partes)
+
+
+_extraer_texto = extraer_texto  # nombre anterior, por compatibilidad
 
 
 def _buscar_rfc(texto: str) -> Optional[str]:
@@ -135,6 +149,52 @@ def _buscar_curp(texto: str) -> Optional[str]:
     return m.group(1) if m else None
 
 
+def _fecha_iso(dia: int, mes: int, anio: int) -> Optional[str]:
+    try:
+        return date(anio, mes, dia).isoformat()
+    except ValueError:
+        return None
+
+
+def fecha_en_texto(texto: str) -> Optional[str]:
+    """Primera fecha válida del texto ("03 DE OCTUBRE DE 2026" o "03/10/2026"), en ISO.
+
+    Las fechas con día o mes imposibles se ignoran y se sigue buscando.
+    """
+    candidatas = []
+    for m in _RE_FECHA_LETRA.finditer(texto):
+        mes = _MESES.get(m.group(2).upper())
+        if mes:
+            candidatas.append((m.start(), _fecha_iso(int(m.group(1)), mes, int(m.group(3)))))
+    for m in _RE_FECHA_NUM.finditer(texto):
+        candidatas.append((m.start(), _fecha_iso(int(m.group(1)), int(m.group(2)), int(m.group(3)))))
+    for _, fecha in sorted(candidatas):
+        if fecha:
+            return fecha
+    return None
+
+
+def _buscar_fecha_emision(texto: str) -> Optional[str]:
+    """Fecha tras "Fecha de Emisión"; la constancia trae otras fechas (inicio de
+    operaciones, último cambio de estado) que no son la de emisión."""
+    m = re.search(r'Fecha\s+de\s+Emisi[óo]n', texto, re.IGNORECASE)
+    if m:
+        fecha = fecha_en_texto(texto[m.end():])
+        if fecha:
+            return fecha
+    return None
+
+
+def _buscar_id_cif(texto: str) -> Optional[str]:
+    m = _RE_ID_CIF.search(texto)
+    return m.group(1) if m else None
+
+
+def _buscar_estatus(texto: str) -> Optional[str]:
+    m = _RE_ESTATUS.search(texto)
+    return m.group(1).strip().upper() if m else None
+
+
 # ─── Función principal ───────────────────────────────────────────────────────
 
 def parsear_constancia(pdf_bytes: bytes) -> dict:
@@ -149,10 +209,13 @@ def parsear_constancia(pdf_bytes: bytes) -> dict:
             obligaciones: list[{descripcion, periodicidad}],
             cp_fiscal: str | None,
             curp: str | None,
+            fecha_emision: str | None,   # ISO, tras "Fecha de Emisión"
+            id_cif: str | None,
+            estatus_padron: str | None,  # ACTIVO, SUSPENDIDO, …
             texto_completo: str,   # para depuración / fallback manual
         }
     """
-    texto = _extraer_texto(pdf_bytes)
+    texto = extraer_texto(pdf_bytes)
 
     return {
         "rfc":           _buscar_rfc(texto),
@@ -161,5 +224,8 @@ def parsear_constancia(pdf_bytes: bytes) -> dict:
         "obligaciones":  _buscar_obligaciones(texto),
         "cp_fiscal":     _buscar_cp(texto),
         "curp":          _buscar_curp(texto),
+        "fecha_emision": _buscar_fecha_emision(texto),
+        "id_cif":        _buscar_id_cif(texto),
+        "estatus_padron": _buscar_estatus(texto),
         "texto_completo": texto[:2000],  # primeros 2000 chars para depuración
     }
