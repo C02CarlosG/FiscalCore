@@ -1209,6 +1209,14 @@ paths:
         comprobante y totales en pesos del tipo activo, del periodo y del
         acumulado del ejercicio (enero al mes del periodo). Sin CFDI las cifras
         van en null. Incluye las advertencias de anticipos sin CFDI de egreso.
+        Las cifras dependen del tipo y `cifras` las enumera (clave, etiqueta y
+        formato `entero` o `moneda`): Ingreso, Egreso y Traslado traen
+        retenciones, traslados, subtotal, descuento, neto y total; Nomina trae
+        empleados, sueldos, otras percepciones, gravado, exento, ISR retenido,
+        otras deducciones, subsidio causado y neto a pagar; Pago trae las bases
+        de IVA al 16, 8 y 0 % y exento, traslado y retencion de IVA, total y
+        documentos relacionados (de pago20:Totales; un REP de Pagos 1.0 no las
+        trae y queda en null).
       parameters:
         - $ref: '#/components/parameters/EmpresaId'
         - { name: direccion, in: query, required: true, schema: { type: string, enum: [emitidos, recibidos] } }
@@ -1228,6 +1236,14 @@ paths:
                 type: object
                 properties:
                   conteos: { type: object, additionalProperties: { type: integer } }
+                  cifras:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        clave: { type: string }
+                        etiqueta: { type: string }
+                        formato: { type: string, enum: [entero, moneda] }
                   totales:
                     type: object
                     properties:
@@ -1248,7 +1264,9 @@ paths:
       summary: Catalogo de columnas del listado de CFDI
       description: |
         Columnas de encabezado y de concepto con su etiqueta, tipo de dato,
-        visibilidad por defecto y si se pueden ordenar o filtrar.
+        visibilidad por defecto y si se pueden ordenar o filtrar. Nomina (N) y
+        Pago (P) tienen su propio juego de columnas; Ingreso, Egreso y Traslado
+        comparten el de comprobante.
       parameters:
         - $ref: '#/components/parameters/EmpresaId'
         - { name: direccion, in: query, required: true, schema: { type: string, enum: [emitidos, recibidos] } }

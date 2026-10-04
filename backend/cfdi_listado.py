@@ -12,7 +12,7 @@ from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, Optional
 
 from . import catalogos_sat, db
-from .cfdi_columnas import A_PESOS, DESCRIPCIONES, LATERALES, Columna, columnas
+from .cfdi_columnas import A_PESOS, DESCRIPCIONES, Columna, columnas, laterales
 
 DIRECCIONES = ("emitidos", "recibidos")
 TIPOS = ("I", "E", "T", "N", "P")
@@ -272,6 +272,71 @@ _ORDEN_TOTALES = (
 )
 
 
+# Cifras que muestra la tabla de totales de cada tipo: (clave, etiqueta, formato). El conteo va
+# siempre primero. La pantalla las lee de la respuesta, así que Nómina y Pago no necesitan
+# código propio en el cliente.
+_CIFRAS_COMPROBANTE = (
+    ("conteo", "CFDI", "entero"), ("retencion_iva", "Ret. IVA", "moneda"), ("retencion_ieps", "Ret. IEPS", "moneda"),
+    ("retencion_isr", "Ret. ISR", "moneda"), ("traslado_iva", "Tras. IVA", "moneda"),
+    ("traslado_ieps", "Tras. IEPS", "moneda"), ("traslado_isr", "Tras. ISR", "moneda"),
+    ("total_retenciones", "Total ret.", "moneda"), ("subtotal", "Subtotal", "moneda"),
+    ("descuento", "Descuento", "moneda"), ("neto", "Neto", "moneda"), ("total", "Total", "moneda"),
+)
+
+# Nómina y Pago: (clave, etiqueta, formato, expresión SQL, agregado). Las expresiones usan los
+# alias de ``_UNIONES_TOTALES`` (subconsultas agrupadas por CFDI, no por página).
+_CIFRAS_SIMPLES = {
+    "N": (
+        ("conteo", "CFDI", "entero", None, "conteo"),
+        ("empleados", "Empleados", "entero", "{contraparte}", "distintos"),
+        ("sueldos", "Sueldos", "moneda", "nom.sueldos", "suma"),
+        ("otras_percepciones", "Otras percepciones", "moneda", "nom.otras_percepciones", "suma"),
+        ("gravado", "Gravado", "moneda", "c.nomina_gravado", "suma"),
+        ("exento", "Exento", "moneda", "c.nomina_exento", "suma"),
+        ("isr_retenido", "ISR retenido", "moneda", "c.nomina_isr_retenido", "suma"),
+        ("otras_deducciones", "Otras deducciones", "moneda", "(c.nomina_deducciones - c.nomina_isr_retenido)", "suma"),
+        ("subsidio_causado", "Subsidio causado", "moneda", "sub.subsidio", "suma"),
+        ("neto_pagar", "Neto a pagar", "moneda", "c.total", "suma"),
+    ),
+    "P": (
+        ("conteo", "CFDI", "entero", None, "conteo"),
+        ("base_iva_16", "Base IVA 16 %", "moneda", "ptot.total_traslados_base_iva16", "suma"),
+        ("base_iva_8", "Base IVA 8 %", "moneda", "ptot.total_traslados_base_iva8", "suma"),
+        ("base_iva_0", "Base IVA 0 %", "moneda", "ptot.total_traslados_base_iva0", "suma"),
+        ("base_iva_exento", "Base IVA exento", "moneda", "ptot.total_traslados_base_exento", "suma"),
+        ("traslado_iva", "Traslado IVA", "moneda",
+         "(COALESCE(ptot.total_traslados_iva16, 0) + COALESCE(ptot.total_traslados_iva8, 0)"
+         " + COALESCE(ptot.total_traslados_iva0, 0))", "suma"),
+        ("retencion_iva", "Retención IVA", "moneda", "ptot.total_retenciones_iva", "suma"),
+        ("total", "Total", "moneda", "ptot.monto_total_pagos", "suma"),
+        ("pagos_relacionados", "Documentos relacionados", "entero", "rel.n", "suma"),
+    ),
+}
+
+# Uniones agrupadas por CFDI para los totales de Nómina y Pago (en el listado se calculan por
+# página con LATERAL; aquí son sobre todo el periodo).
+_UNIONES_TOTALES = {
+    "N": """
+        LEFT JOIN (
+            SELECT n.cfdi_id, SUM(n.total_sueldos) AS sueldos,
+                   SUM(COALESCE(n.total_percepciones, 0) - COALESCE(n.total_sueldos, 0)) AS otras_percepciones
+            FROM cfdi_nominas n GROUP BY n.cfdi_id
+        ) nom ON nom.cfdi_id = c.id
+        LEFT JOIN (
+            SELECT n.cfdi_id, SUM(k.subsidio_causado) AS subsidio
+            FROM cfdi_nominas n JOIN cfdi_nomina_conceptos k ON k.nomina_id = n.id GROUP BY n.cfdi_id
+        ) sub ON sub.cfdi_id = c.id
+    """,
+    "P": """
+        LEFT JOIN cfdi_pagos_totales ptot ON ptot.cfdi_id = c.id
+        LEFT JOIN (
+            SELECT p.cfdi_id, COUNT(pr.id) AS n
+            FROM pagos_cfdi p JOIN pagos_relaciones pr ON pr.pago_id = p.id GROUP BY p.cfdi_id
+        ) rel ON rel.cfdi_id = c.id
+    """,
+}
+
+
 def _json(valor: Any) -> Any:
     if isinstance(valor, Decimal):
         return float(valor)
@@ -315,7 +380,7 @@ def listar(empresa_id: str, rfc: str, c: Consulta) -> dict:
         SELECT {seleccion}
         FROM pagina p
         JOIN cfdi c ON c.id = p.id
-        {LATERALES}
+        {laterales(c.tipo)}
         ORDER BY p.n
         """,
         (*params, c.por_pagina, (c.pagina - 1) * c.por_pagina),
@@ -364,7 +429,7 @@ def exportar(empresa_id: str, rfc: str, c: Consulta, claves: Optional[list[str]]
         SELECT {seleccion}
         FROM pagina p
         JOIN cfdi c ON c.id = p.id
-        {LATERALES}
+        {laterales(c.tipo)}
         ORDER BY p.n
         """,
         tuple(params),
@@ -421,6 +486,58 @@ def _advertencias(empresa_id: str, rfc: str, desde: date, hasta: date) -> list[d
     ]
 
 
+def _totales_nomina_o_pago(
+    empresa_id: str, rfc: str, c: Consulta, desde: date, hasta: date, enero: date
+) -> tuple[list[dict], dict]:
+    """Totales de Nómina o Pago del periodo y del acumulado. Todo viene ya en pesos (el
+    complemento de nómina y pago20:Totales son MXN), así que no se multiplica por tipo de
+    cambio. Una cifra cuya fuente no está (CFDI sin extracción v2, REP de Pagos 1.0) no suma
+    nada: si ningún CFDI la trae, va en null y la pantalla muestra un guion."""
+    contraparte = "c.rfc_receptor" if c.direccion == "emitidos" else "c.rfc_emisor"
+    definiciones = tuple(
+        (clave, etq, fmt, expr.replace("{contraparte}", contraparte) if expr else expr, agregado)
+        for clave, etq, fmt, expr, agregado in _CIFRAS_SIMPLES[c.tipo]
+    )
+    where, params = condiciones(c, empresa_id, rfc, desde=enero, hasta=hasta)
+
+    columnas_sql = ["COUNT(*) FILTER (WHERE c.fecha_emision >= %s) AS p_conteo", "COUNT(*) AS a_conteo"]
+    for clave, _etq, _fmt, expr, agregado in definiciones:
+        if agregado == "conteo":
+            continue
+        if agregado == "distintos":
+            columnas_sql.append(f"COUNT(DISTINCT {expr}) FILTER (WHERE c.fecha_emision >= %s) AS p_{clave}")
+            columnas_sql.append(f"COUNT(DISTINCT {expr}) AS a_{clave}")
+        else:
+            columnas_sql.append(f"SUM({expr}) FILTER (WHERE c.fecha_emision >= %s) AS p_{clave}")
+            columnas_sql.append(f"SUM({expr}) AS a_{clave}")
+    desde_params = tuple(desde for _ in range(sum(col.count("%s") for col in columnas_sql)))
+
+    fila = db.query_one(
+        f"SELECT {', '.join(columnas_sql)} FROM cfdi c {_UNIONES_TOTALES[c.tipo]} WHERE {where}",
+        (*desde_params, *params),
+    )
+
+    def bloque(prefijo: str) -> dict:
+        conteo = int(fila[f"{prefijo}_conteo"] or 0)
+        if conteo == 0:
+            return {clave: (0 if clave == "conteo" else None) for clave, *_ in definiciones}
+        resultado: dict = {"conteo": conteo}
+        for clave, _etq, formato, _expr, agregado in definiciones:
+            if agregado == "conteo":
+                continue
+            valor = fila[f"{prefijo}_{clave}"]
+            if valor is None:
+                resultado[clave] = None
+            elif formato == "entero":
+                resultado[clave] = int(valor)
+            else:
+                resultado[clave] = float(Decimal(str(valor)).quantize(CENTAVOS, rounding=ROUND_HALF_UP))
+        return resultado
+
+    cifras = [{"clave": k, "etiqueta": e, "formato": f} for k, e, f, *_ in definiciones]
+    return cifras, {"periodo": bloque("p"), "acumulado": bloque("a")}
+
+
 def resumen(empresa_id: str, rfc: str, c: Consulta) -> dict:
     """Conteos por tipo (para las pestañas) y totales en pesos del tipo activo:
     del periodo y del acumulado del ejercicio (enero al mes del periodo)."""
@@ -435,6 +552,15 @@ def resumen(empresa_id: str, rfc: str, c: Consulta) -> dict:
     ):
         if fila["tipo"] in conteos:
             conteos[fila["tipo"]] = int(fila["n"])
+
+    if c.tipo in _CIFRAS_SIMPLES:
+        cifras, totales = _totales_nomina_o_pago(empresa_id, rfc, c, desde, hasta, enero)
+        return {
+            "conteos": conteos,
+            "cifras": cifras,
+            "totales": totales,
+            "advertencias": _advertencias(empresa_id, rfc, desde, hasta) if c.direccion == "emitidos" else [],
+        }
 
     where, params = condiciones(c, empresa_id, rfc, desde=enero, hasta=hasta)
     base = f"""
@@ -466,6 +592,7 @@ def resumen(empresa_id: str, rfc: str, c: Consulta) -> dict:
 
     return {
         "conteos": conteos,
+        "cifras": [{"clave": k, "etiqueta": e, "formato": f} for k, e, f in _CIFRAS_COMPROBANTE],
         "totales": {
             "periodo": _bloque("p", encabezado, impuestos),
             "acumulado": _bloque("a", encabezado, impuestos),
