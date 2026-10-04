@@ -147,26 +147,29 @@ def componer_resumen(filas: Iterable[dict], periodo: str) -> dict:
     }
 
 
-def aplanar_iva(periodo: str, trasladado: dict, acreditable: dict, ajustado: Any, retenido: Any) -> dict:
-    """Del formato de la cédula (``iva.iva_trasladado`` / ``iva.iva_acreditable``, con
-    base e IVA por renglón) al formato plano de ``componer_iva_anual``: solo el IVA."""
+def iva_mes_desde_motor(resumen: dict) -> dict:
+    """Un mes de ``iva_flujo.resumen`` en el formato plano de ``componer_iva_anual``: solo el IVA de
+    cada origen, lo excluido por efectivo y las retenciones que le hacen a la empresa. Es la misma
+    cifra de la cédula de IVA y de la pantalla de IVA base flujo."""
+    t, a = resumen["trasladado"], resumen["acreditable"]
+    efectivo = a["no_considerados"].get("por_motivo", {}).get("efectivo", {"iva": _CERO})
     return {
-        "periodo": periodo,
+        "periodo": resumen["periodo"],
         "trasladado": {
-            "pue": trasladado["pue"]["iva"],
-            "ppd": trasladado["ppd"]["iva"],
-            "notas_credito": trasladado["notas_credito"]["iva"],
-            "total": trasladado["total"],
+            "pue": t["origenes"]["contado"]["iva"]["total"],
+            "ppd": t["origenes"]["credito"]["iva"]["total"],
+            "notas_credito": t["origenes"]["notas_credito"]["iva"]["total"],
+            "total": t["total"]["total"],
         },
         "acreditable": {
-            "pue": acreditable["pue"]["iva"],
-            "ppd": acreditable["ppd"]["iva"],
-            "notas_credito": acreditable["notas_credito"]["iva"],
-            "excluido_efectivo": acreditable["excluido_efectivo"]["iva"],
-            "bruto": acreditable["bruto"],
-            "ajustado": ajustado,
+            "pue": a["origenes"]["contado"]["iva"]["total"],
+            "ppd": a["origenes"]["credito"]["iva"]["total"],
+            "notas_credito": a["origenes"]["notas_credito"]["iva"]["total"],
+            "excluido_efectivo": efectivo["iva"],
+            "bruto": a["total"]["total"],
+            "ajustado": a["ajustado"],
         },
-        "iva_retenido": retenido,
+        "iva_retenido": resumen["resultado"]["retenciones_a_favor"],
     }
 
 
@@ -182,8 +185,8 @@ def _bloque_iva_vacio(periodo: str) -> dict:
 
 
 def componer_iva_anual(ejercicio: int, meses_iva: Iterable[dict], periodo: Optional[str]) -> dict:
-    """IVA del ejercicio mes por mes. ``meses_iva`` trae, por mes, lo que devuelven
-    ``iva.iva_trasladado`` e ``iva.iva_acreditable`` (más ``iva_retenido``); el
+    """IVA del ejercicio mes por mes. ``meses_iva`` trae, por mes, el formato plano de
+    ``iva_mes_desde_motor`` (trasladado, acreditable e ``iva_retenido``); el
     resultado del mes es trasladado - acreditable ajustado - retenido. Los meses
     posteriores a ``periodo`` (si se indica) salen en cero."""
     dados = {m["periodo"]: m for m in meses_iva}
@@ -214,7 +217,7 @@ def componer_iva_anual(ejercicio: int, meses_iva: Iterable[dict], periodo: Optio
     return {
         "ejercicio": ejercicio,
         "factor_prorrateo": Decimal("1"),
-        "iva_retenido_incluido": False,
+        "iva_retenido_incluido": True,
         "meses": meses,
         "totales": {
             "trasladado": _q(tot_t),
@@ -227,30 +230,22 @@ def componer_iva_anual(ejercicio: int, meses_iva: Iterable[dict], periodo: Optio
     }
 
 
-_MENSAJES_IVA = {
-    "pago_proporcion": "El IVA de los cobros y pagos de facturas a crédito se estima por la proporción pagada del CFDI, no con los impuestos del complemento de pago.",
-    "moneda_extranjera": "Hay CFDI en moneda extranjera: su IVA no se convierte a pesos en esta tabla (los ingresos y gastos sí).",
-    "anticipos": "Hay anticipos o egresos de aplicación de anticipo: el IVA del anticipo no se cuenta en su mes y su aplicación sí se resta.",
-    "retenciones": "Aún no se incorporan las retenciones de IVA y el factor de prorrateo es 1.",
-}
-
-
-def advertencias_iva(cfdis: Iterable[dict], pagos: Iterable[dict]) -> list[dict]:
-    """Limitaciones del IVA anual que aplican a los datos del ejercicio (se corrigen en F5).
-
-    ``cfdi`` cuenta documentos distintos; ``None`` en un aviso que no depende de los datos.
-    """
-    def llave(u: Any) -> str:
-        return str(u or "").upper()
-
-    vigentes = [c for c in cfdis if c.get("estado") == "vigente" and c.get("tipo_comprobante") in ("I", "E")]
-    conteos = {
-        "pago_proporcion": len({llave(p.get("cfdi_uuid")) for p in pagos}),
-        "moneda_extranjera": len({llave(c["uuid"]) for c in vigentes
-                                  if (c.get("moneda") or "MXN") != "MXN" and _dec(c.get("iva_trasladado")) != 0}),
-        "anticipos": len({llave(c["uuid"]) for c in vigentes
-                          if c.get("es_anticipo_sat") or (c["tipo_comprobante"] == "E" and c.get("forma_pago") == "30")}),
-    }
-    avisos = [{"codigo": k, "mensaje": _MENSAJES_IVA[k], "cfdi": n} for k, n in conteos.items() if n]
-    avisos.append({"codigo": "retenciones", "mensaje": _MENSAJES_IVA["retenciones"], "cfdi": None})
+def advertencias_desde_motor(resumenes: Iterable[dict], periodo: Optional[str] = None) -> list[dict]:
+    """Advertencias del ejercicio: las de cada mes del motor, sumando los CFDI afectados mes por mes
+    (un CFDI con pagos en dos meses cuenta en cada uno), más el aviso fijo del factor de prorrateo.
+    Con ``periodo`` solo cuentan los meses hasta él, igual que la tabla (los posteriores salen en cero)."""
+    mensajes: dict[str, str] = {}
+    cuentas: dict[str, int] = {}
+    for r in resumenes:
+        if periodo is not None and r.get("periodo", "") > periodo:
+            continue
+        for a in r["advertencias"]:
+            mensajes[a["codigo"]] = a["mensaje"]
+            cuentas[a["codigo"]] = cuentas.get(a["codigo"], 0) + a["cfdi"]
+    avisos = [{"codigo": c, "mensaje": mensajes[c], "cfdi": n} for c, n in cuentas.items()]
+    avisos.append({
+        "codigo": "prorrateo",
+        "mensaje": "El factor de prorrateo del acreditable es 1 (actividad 100 % gravada); la cédula de IVA acepta otro factor.",
+        "cfdi": None,
+    })
     return avisos

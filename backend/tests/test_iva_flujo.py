@@ -190,7 +190,7 @@ def test_diferencia_de_centavos_no_es_descuadre():
 def test_sin_desglose_guardado_usa_el_encabezado_y_lo_marca():
     e = f.eventos_de_documento(doc(impuestos=[]), RFC)[0]
 
-    assert "sin_desglose" in e["marcas"] and e["iva_total"] == D("160") and e["bases"]["16"] == D("0")
+    assert "sin_desglose" in e["marcas"] and e["iva_total"] == D("160") and e["bases"]["16"] == D("1000")
 
 
 def test_no_objeto_se_informa_como_base_sin_iva():
@@ -390,7 +390,7 @@ def test_resumen_no_considerados_se_cuentan_aparte_con_su_iva():
 
     a = r["acreditable"]
     assert a["total"]["iva"]["total"] == D("160.00")
-    assert a["no_considerados"] == {"cfdi": 2, "iva": D("320.00")}
+    assert (a["no_considerados"]["cfdi"], a["no_considerados"]["iva"]) == (2, D("320.00"))
 
 
 def test_resumen_reasignados_salen_del_periodo_original_y_entran_al_destino():
@@ -751,3 +751,88 @@ def test_la_herencia_de_la_exclusion_solo_aplica_al_acreditable():
     e = f.eventos_de_documento(nc, RFC)[0]
 
     assert f.motivo_exclusion(e) is None
+
+
+# ── F5.3: lo que necesitan la cédula y el Inicio del motor ───────────────────
+
+def test_el_bloque_de_credito_suma_lo_pagado_en_pesos():
+    d = doc("U1", metodo_pago="PPD", total=D("1160"))
+    r = f.resumen(_construir([d], [pago("U1", importe="580"), pago("U1", importe="100", uuid_pago="REP2", parcialidad=2)]), "2026-09", {})
+
+    assert r["trasladado"]["origenes"]["credito"]["importe_pagado"] == D("680.00")
+    assert r["trasladado"]["origenes"]["contado"]["importe_pagado"] == D("0.00")
+
+
+def test_no_considerados_se_desglosan_por_motivo():
+    docs = [recibido("R1", uso_cfdi="S01"), recibido("R2", forma_pago="01", total=D("5000")),
+            recibido("R3", forma_pago="01", total=D("9000"))]
+    r = f.resumen(_construir(docs), "2026-09", {})
+
+    por = r["acreditable"]["no_considerados"]["por_motivo"]
+    assert por["efectivo"] == {"cfdi": 2, "iva": D("320.00")}
+    assert por["uso_no_deducible"] == {"cfdi": 1, "iva": D("160.00")}
+
+
+def test_la_retencion_que_no_cuadra_con_el_encabezado_se_marca():
+    d = doc("U1", iva_retenido=D("100"), impuestos=[tras("0.16", 1000, 160), imp("retencion", "002", "Tasa", "0.106667", 1000, "106.67")])
+
+    e = f.eventos_de_documento(d, RFC)[0]
+
+    assert "descuadre_retencion" in e["marcas"]
+
+
+def test_la_retencion_que_cuadra_no_se_marca():
+    d = doc("U1", iva_retenido=D("106.67"), impuestos=[tras("0.16", 1000, 160), imp("retencion", "002", "Tasa", "0.106667", 1000, "106.67")])
+
+    assert "descuadre_retencion" not in f.eventos_de_documento(d, RFC)[0]["marcas"]
+
+
+def test_sin_filas_de_retencion_pero_con_retencion_en_el_encabezado_usa_el_encabezado():
+    d = doc("U1", iva_retenido=D("106.67"), impuestos=[tras("0.16", 1000, 160)])
+
+    e = f.eventos_de_documento(d, RFC)[0]
+
+    assert e["retencion"] == D("106.67") and "retencion_sin_desglose" in e["marcas"]
+
+
+@pytest.mark.parametrize("moneda,tc,eq,pago_moneda,sospechosa", [
+    ("USD", "20", "0.05", "MXN", False),          # 1 MXN = 0.05 USD: correcta
+    ("USD", "20", "20", "MXN", True),             # invertida: daría 1 peso por dólar
+    ("MXN", "1", "20", "USD", False),             # documento en MXN pagado en USD: 1 USD = 20 MXN
+    ("MXN", "1", "0.05", "USD", True),            # invertida
+])
+def test_equivalencia_invertida_se_detecta_contra_el_tipo_de_cambio_del_documento(moneda, tc, eq, pago_moneda, sospechosa):
+    d = doc("U1", metodo_pago="PPD", moneda=moneda, tipo_cambio=D(tc) if moneda != "MXN" else D("1"), total=D("1160"))
+    p = pago("U1", moneda_dr=moneda, equivalencia_dr=D(eq), pago_moneda=pago_moneda,
+             pago_tipo_cambio=D("20") if pago_moneda != "MXN" else D("1"))
+
+    e = f.evento_de_pago(p, d, RFC)
+
+    assert ("equivalencia_sospechosa" in e["marcas"]) is sospechosa
+
+
+def test_equivalencia_sospechosa_se_advierte_pero_si_suma():
+    d = doc("U1", metodo_pago="PPD", moneda="USD", tipo_cambio=D("20"), total=D("1160"))
+    p = pago("U1", moneda_dr="USD", equivalencia_dr=D("20"), pago_moneda="MXN")
+    e = f.evento_de_pago(p, d, RFC)
+
+    assert f.motivo_exclusion(e) is None
+    assert "equivalencia_sospechosa" in {a["codigo"] for a in f.resumen([e], "2026-09", {})["advertencias"]}
+
+
+# ── CFDI sin desglose: la base sale del encabezado ───────────────────────────
+
+def test_sin_desglose_la_base_sale_del_encabezado_no_de_la_suma_de_bases():
+    d = doc("U1", subtotal=D("1000"), descuento=D("100"), iva_trasladado=D("144"), total=D("1044"), impuestos=[])
+
+    e = f.eventos_de_documento(d, RFC)[0]
+
+    assert "sin_desglose" in e["marcas"]
+    assert e["bases"]["16"] == D("900") and e["iva"]["16"] == D("144") and e["iva"]["total"] == D("144")
+
+
+def test_sin_desglose_a_tasa_de_8_o_distinta_cae_en_su_clave():
+    ocho = f.eventos_de_documento(doc("U1", subtotal=D("1000"), iva_trasladado=D("80"), impuestos=[]), RFC)[0]
+    otra = f.eventos_de_documento(doc("U2", subtotal=D("1000"), iva_trasladado=D("30"), impuestos=[]), RFC)[0]
+
+    assert ocho["bases"]["8"] == D("1000") and otra["bases"]["otras"] == D("1000")

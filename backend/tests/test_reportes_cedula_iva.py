@@ -1,9 +1,11 @@
+from datetime import date
 from decimal import Decimal
 
 from fastapi.testclient import TestClient
 
 import backend.main_api as main
 from backend.deps import get_current_user
+from backend import iva_flujo
 from backend.routers import reportes
 
 client = TestClient(main.app)
@@ -15,10 +17,15 @@ def _cfdi(**kw):
     base = {
         "uuid": "U", "tipo_comprobante": "I", "metodo_pago": "PUE", "estado": "vigente",
         "es_anticipo_sat": False, "rfc_emisor": RFC, "rfc_receptor": "XAXX010101000",
-        "forma_pago": "03", "fecha_emision": "2026-01-10",
-        "subtotal": Decimal("0"), "total": Decimal("0"), "iva_trasladado": Decimal("0"),
+        "forma_pago": "03", "uso_cfdi": "G03", "fecha_emision": date(2026, 1, 10),
+        "subtotal": Decimal("0"), "descuento": Decimal("0"), "total": Decimal("0"),
+        "iva_trasladado": Decimal("0"), "iva_retenido": Decimal("0"), "moneda": "MXN", "tipo_cambio": Decimal("1"),
+        "no_objeto": Decimal("0"), "nombre_emisor": "E", "nombre_receptor": "R",
     }
     base.update(kw)
+    iva = base["iva_trasladado"]
+    base["impuestos"] = [{"ambito": "traslado", "impuesto": "002", "tipo_factor": "Tasa",
+                          "tasa_o_cuota": Decimal("0.16"), "base": iva / Decimal("0.16"), "importe": iva}] if iva else []
     return base
 
 
@@ -53,8 +60,12 @@ def _fixture_saldo_a_favor():
 def _override(monkeypatch, fixture=_fixture_consultora):
     main.app.dependency_overrides[get_current_user] = lambda: {"user_id": "u1"}
     monkeypatch.setattr(reportes, "validar_acceso_empresa", lambda *a, **k: None)
-    monkeypatch.setattr(reportes, "_cargar_datos_cedula_iva",
-                        lambda emp, per: fixture())
+
+    def cargar(emp, per):
+        rfc, cfdis, _pagos, diot = fixture()
+        return [e for c in cfdis for e in iva_flujo.eventos_de_documento(c, rfc)], {}, diot
+
+    monkeypatch.setattr(reportes, "_cargar_datos_cedula_iva", cargar)
 
 
 def test_cedula_iva_consultora(monkeypatch):

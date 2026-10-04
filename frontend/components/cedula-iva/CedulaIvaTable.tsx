@@ -18,6 +18,7 @@ export function CedulaIvaTable({ cedula }: { cedula: CedulaIva }) {
     ["Factor de prorrateo", cedula.acreditable.factor_prorrateo],
     ["IVA acreditable ajustado", cedula.acreditable.ajustado],
     ["IVA retenido", cedula.iva_retenido],
+    ["Retenciones por enterar", cedula.retenciones_a_enterar],
     ["IVA por pagar", cedula.resultado.iva_por_pagar],
     ["Saldo a cargo", cedula.resultado.saldo_a_cargo],
     ["Saldo a favor", cedula.resultado.saldo_a_favor],
@@ -43,6 +44,23 @@ export function CedulaIvaTable({ cedula }: { cedula: CedulaIva }) {
             ))}
           </TableBody>
         </Table>
+        {cedula.acreditable.no_considerados.cfdi > 0 && (
+          <p className="mt-3 text-sm text-muted-foreground">
+            {cedula.acreditable.no_considerados.cfdi} CFDI recibidos no se acreditan (
+            {formatMoney(cedula.acreditable.no_considerados.iva)} de IVA): efectivo mayor a $2,000, uso sin
+            efectos o ajuste del contador.
+          </p>
+        )}
+        {cedula.advertencias.length > 0 && (
+          <ul aria-label="Advertencias de la cédula" className="mt-3 list-disc space-y-1 pl-5 text-sm text-muted-foreground">
+            {cedula.advertencias.map((a) => (
+              <li key={a.codigo}>
+                {a.mensaje}
+                {a.cfdi !== null && <span className="ml-1 font-medium">({a.cfdi} CFDI)</span>}
+              </li>
+            ))}
+          </ul>
+        )}
       </CardContent>
     </Card>
   );

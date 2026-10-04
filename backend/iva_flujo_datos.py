@@ -19,7 +19,6 @@ _FILAS_IMPUESTOS = """
         'tasa_o_cuota', tasa_o_cuota::text, 'base', base::text, 'importe', importe::text))
 """
 
-_MES = "(%s || '-01')::date"
 
 
 def cargar_ajustes(empresa_id: str) -> dict:
@@ -38,15 +37,32 @@ def cargar_ajustes(empresa_id: str) -> dict:
     }
 
 
-def cargar_eventos(empresa_id: str, rfc: str, periodo: str, ajustes: dict) -> list[dict]:
-    """Eventos de IVA que pueden caer en ``periodo``."""
-    reasignados = sorted({u for (u, _), a in ajustes.items() if a["periodo_destino"] == periodo})
+def _siguiente_mes(periodo: str) -> str:
+    anio, mes = int(periodo[:4]), int(periodo[5:])
+    return f"{anio + (mes == 12):04d}-{mes % 12 + 1:02d}"
 
+
+def cargar_eventos(empresa_id: str, rfc: str, periodo: str, ajustes: dict) -> list[dict]:
+    """Eventos de IVA que pueden caer en ``periodo`` (un mes)."""
+    reasignados = sorted({u for (u, _), a in ajustes.items() if a["periodo_destino"] == periodo})
+    return _cargar(empresa_id, rfc, f"{periodo}-01", f"{_siguiente_mes(periodo)}-01", reasignados)
+
+
+def cargar_eventos_ejercicio(empresa_id: str, rfc: str, ejercicio: int, ajustes: dict) -> list[dict]:
+    """Eventos de IVA que pueden caer en cualquier mes del ejercicio, en una sola lectura. Con ellos se
+    resume mes por mes (``iva_flujo.resumen``) sin volver a consultar la base."""
+    reasignados = sorted({u for (u, _), a in ajustes.items()
+                          if a["periodo_destino"] and a["periodo_destino"].startswith(f"{ejercicio:04d}-")})
+    return _cargar(empresa_id, rfc, f"{ejercicio:04d}-01-01", f"{ejercicio + 1:04d}-01-01", reasignados)
+
+
+def _cargar(empresa_id: str, rfc: str, desde: str, hasta: str, reasignados: list[str]) -> list[dict]:
+    """Eventos cuyo efecto natural cae en ``[desde, hasta)``, más los de los CFDI reasignados a ese rango."""
     docs = db.query_all(
         f"""
         SELECT c.uuid, c.tipo_comprobante, c.metodo_pago, c.forma_pago, c.uso_cfdi, c.estado, c.es_anticipo_sat,
                c.rfc_emisor, c.nombre_emisor, c.rfc_receptor, c.nombre_receptor, c.fecha_emision,
-               c.subtotal, c.descuento, c.total, c.iva_trasladado, c.moneda, c.tipo_cambio,
+               c.subtotal, c.descuento, c.total, c.iva_trasladado, c.iva_retenido, c.moneda, c.tipo_cambio,
                COALESCE(i.impuestos, '[]'::json) AS impuestos,
                COALESCE(n.base, 0) AS no_objeto,
                COALESCE(rel.info, '[]'::json) AS relacionados_info
@@ -72,14 +88,14 @@ def cargar_eventos(empresa_id: str, rfc: str, periodo: str, ajustes: dict) -> li
           AND c.tipo_comprobante IN ('I', 'E')
           AND (c.rfc_emisor = %s OR c.rfc_receptor = %s)
           AND (
-                (c.fecha_emision >= {_MES} AND c.fecha_emision < {_MES} + INTERVAL '1 month')
+                (c.fecha_emision >= %s::date AND c.fecha_emision < %s::date)
              OR (c.metodo_pago = 'PPD' AND UPPER(c.uuid) IN (
                     SELECT UPPER(pr.cfdi_uuid) FROM pagos_relaciones pr JOIN pagos_cfdi pc ON pc.id = pr.pago_id
-                    WHERE pc.empresa_id = %s AND pc.fecha_pago >= {_MES} AND pc.fecha_pago < {_MES} + INTERVAL '1 month'))
+                    WHERE pc.empresa_id = %s AND pc.fecha_pago >= %s::date AND pc.fecha_pago < %s::date))
              OR UPPER(c.uuid) = ANY(%s)
           )
         """,
-        (empresa_id, rfc, rfc, periodo, periodo, empresa_id, periodo, periodo, reasignados),
+        (empresa_id, rfc, rfc, desde, hasta, empresa_id, desde, hasta, reasignados),
     )
     por_uuid = {iva_flujo.llave(d["uuid"]): d for d in docs}
 
@@ -96,9 +112,9 @@ def cargar_eventos(empresa_id: str, rfc: str, periodo: str, ajustes: dict) -> li
             SELECT {_FILAS_IMPUESTOS} AS impuestos FROM pagos_relaciones_impuestos WHERE relacion_id = pr.id AND impuesto = '002'
         ) ri ON TRUE
         WHERE pc.empresa_id = %s
-          AND ((pc.fecha_pago >= {_MES} AND pc.fecha_pago < {_MES} + INTERVAL '1 month') OR UPPER(pr.cfdi_uuid) = ANY(%s))
+          AND ((pc.fecha_pago >= %s::date AND pc.fecha_pago < %s::date) OR UPPER(pr.cfdi_uuid) = ANY(%s))
         """,
-        (empresa_id, periodo, periodo, reasignados),
+        (empresa_id, desde, hasta, reasignados),
     )
 
     eventos = [e for d in docs for e in iva_flujo.eventos_de_documento(d, rfc)]
