@@ -8,6 +8,7 @@ import {
   Building2,
   Calculator,
   CloudDownload,
+  FileCheck2,
   FileSpreadsheet,
   FileText,
   GitBranch,
@@ -28,6 +29,7 @@ const NAV_ITEMS = [
   { slug: "cedula-iva", label: "Cédula de IVA", icon: FileText },
   { slug: "iva-flujo", label: "IVA base flujo", icon: Calculator },
   { slug: "sat", label: "Conexión SAT", icon: CloudDownload },
+  { slug: "informacion-fiscal", label: "Información fiscal", icon: FileCheck2 },
 ] as const;
 
 const CFDI_GROUP = {
