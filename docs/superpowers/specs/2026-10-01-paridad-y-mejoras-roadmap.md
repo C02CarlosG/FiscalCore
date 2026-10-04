@@ -267,7 +267,7 @@ la **primera entrega no hecha** de su lista.
 
 | Carril | Tema | Fases y entregas, en orden | Migraciones |
 |---|---|---|---|
-| **A — CFDI** | Listado, extracción del XML, visor | F3.4 (en curso) → F3.5a extracción v2 → F3.3 → F3.5b → M4 → M1 → M6 | `040`–`049` |
+| **A — CFDI** | Listado, extracción del XML, visor | F3.4 (PR #24) → F3.5a extracción v2 → F3.5b → M4 → M1 → M6 (F3.3 integrada con el PR #21) | `040`–`049` |
 | **B — SAT e infraestructura** | Descarga automática, worker, información fiscal, alertas | F2.1 (PR #17) → F2.2 → F2.3 → F2.4 → F2.5 → F8 → cierre de F0/F1 con datos reales → M3 → M7 | `031`–`039` |
 | **C — Cálculos fiscales** | Inicio, IVA, DIOT, ISR, papel de trabajo | F4 → F5 → F6 → F7 → M5 → M2 | `050`–`059` |
 
@@ -278,7 +278,7 @@ Detalle de las entregas que cambian respecto a las specs de su fase:
   percepción (`TipoPercepcion`, gravado/exento, `FechaPago`, `TipoNomina`, otros pagos,
   separación y jubilación), `pago20:Totales` e `ImpuestosP`, `ObjetoImpDR` y RFC de
   `ACuentaTerceros` (tabla "Pendientes de extracción" más abajo). Solo backend: parser,
-  migración, reproceso y pruebas. Va antes de F3.3 porque desbloquea F5 y F7 del carril C.
+  migración, reproceso y pruebas. Va antes de F3.5b porque desbloquea F5 y F7 del carril C.
 - **F3.5b (carril A)**: pestañas y totales de Nómina y Pagos en la pantalla, descarga de
   cancelados y retiro de `/emitidos`, `/recibidos`, `/cfdi/visor` y `/cfdi/nomina`.
 - **M1 Trazabilidad (carril A)**: el clic en un importe abre el listado filtrado; el
@@ -292,9 +292,9 @@ Detalle de las entregas que cambian respecto a las specs de su fase:
 
 | Carril | Sesión | Qué hace ahora |
 |---|---|---|
-| A | "F3.2 work" | F3.4 (backend listo, frontend en curso). Antes del PR trae `main`: su versión de F3.2 (PR #19) se cerró y la integrada es la del PR #20 |
+| A | "F3.2 work" | F3.4 (backend listo, frontend en curso). Antes del PR trae `main`: su versión de F3.2 (PR #19) se cerró y la integrada es la del PR #20. El PR #21 (F3.3) ya está en `main`; el PR #24 (F3.4) lo trae con merge antes de marcarse listo: los dos tocan `routers/cfdis.py`, los componentes de `components/cfdi/` y `api-client.ts` |
 | B | "Cambios en ezaudita" | F2.1 en el PR #17; sigue F2.2 (worker) |
-| C | "Acceso al proyecto" | Empieza F4 (Inicio). **No toma F3.4**: ya la hace el carril A |
+| C | "Acceso al proyecto" | Empieza F4 (Inicio). **No toma F3.4**: ya la hace el carril A. Antes de pasar al carril C dejó F3.3 hecha en el PR #21 |
 
 Una sesión nueva que se abra para este plan reemplaza a la de su carril; no se abre una
 cuarta sesión de implementación sin agregar antes un carril aquí.
@@ -381,7 +381,7 @@ ramifica desde la rama de otra sesión.
 | F0 | B | Integrada salvo la carga de CFDI reales (se cierra con F2) | (no requiere) | (lista de verificación abajo) |
 | F1 | B (cierre) | Integrada. Falta el cierre con datos reales: reprocesar los CFDI de COPLASUR y cuadrar el IVA por tasa contra el encabezado | este documento, sección "Fases" y "Reglas comunes" | `docs/superpowers/plans/2026-10-01-fase1-detalle-fiscal-cfdi.md` |
 | F2 | B | F2.1 en revisión (PR #17); F2.2 a F2.5 pendientes | `docs/superpowers/specs/2026-10-03-f2-descarga-automatica-design.md` (en PR #17) | un plan por entrega |
-| F3 | A | F3.1 y F3.2 integradas; F3.4 en curso; luego F3.5a extracción v2, F3.3, F3.5b | `docs/superpowers/specs/2026-10-02-f3-listado-cfdi-design.md` | `2026-10-02-f3-1-api-listado-cfdi.md`, `2026-10-03-f3-2-pantalla-cfdi.md`; un plan por entrega restante |
+| F3 | A | F3.1, F3.2 y F3.3 (PR #21) integradas; F3.4 en revisión (PR #24); luego F3.5a extracción v2 y F3.5b | `docs/superpowers/specs/2026-10-02-f3-listado-cfdi-design.md` | `2026-10-02-f3-1-api-listado-cfdi.md`, `2026-10-03-f3-2-pantalla-cfdi.md`; un plan por entrega restante |
 | F4 | C | Por empezar (sesión "Acceso al proyecto") | — | — |
 | F5, F6, F7 | C | Pendiente | — | — |
 | F8 | B | Pendiente (después de F2.5) | — | — |
