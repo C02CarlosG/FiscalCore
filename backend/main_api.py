@@ -25,6 +25,7 @@ from slowapi.middleware import SlowAPIMiddleware
 from . import db
 from .deps import limiter  # importar deps.py valida JWT_SECRET al arrancar
 from .routers import auth, empresas, ingesta, riesgos, scoring, conciliacion, emitidos, dashboard, sat, admin, reportes, movimientos, cfdi, cfdis
+from .routers import inicio
 
 logging.basicConfig(
     level=logging.INFO,
@@ -75,6 +76,7 @@ app.include_router(reportes.router)
 app.include_router(movimientos.router)
 app.include_router(cfdi.router)
 app.include_router(cfdis.router)
+app.include_router(inicio.router)
 
 
 @app.on_event("startup")
