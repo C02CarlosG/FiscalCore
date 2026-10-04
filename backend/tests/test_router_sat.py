@@ -24,7 +24,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import backend.main_api as main
-from backend import db
+from backend import db, sat_sync
 from backend.deps import get_current_user, limiter
 from backend.routers import sat
 from backend.sat_fiel import FIELError
@@ -615,7 +615,7 @@ def test_sync_completo_error_sat_al_solicitar_da_502(monkeypatch):
 
     def _raise(*a, **k):
         raise FIELError("SAT no disponible")
-    monkeypatch.setattr(sat, "solicitar_descarga", _raise)
+    monkeypatch.setattr(sat_sync, "solicitar_descarga", _raise)
 
     try:
         r = client.post(
@@ -642,7 +642,7 @@ def test_sync_completo_exitoso_ambos_tipos_agenda_background(monkeypatch):
             return {"id": f"sol-{contador['n']}"}
         return None
     monkeypatch.setattr(db, "execute", _execute)
-    monkeypatch.setattr(sat, "solicitar_descarga", lambda *a, **k: "id-sat-x")
+    monkeypatch.setattr(sat_sync, "solicitar_descarga", lambda *a, **k: "id-sat-x")
 
     llamadas_bg = []
     monkeypatch.setattr(sat, "_sync_completo_bg", lambda **kw: llamadas_bg.append(kw))
@@ -696,7 +696,7 @@ def _preparar_sync(monkeypatch, respuestas_sat, solicitudes_previas=0):
         if isinstance(r, Exception):
             raise r
         return r
-    monkeypatch.setattr(sat, "solicitar_descarga", _solicitar)
+    monkeypatch.setattr(sat_sync, "solicitar_descarga", _solicitar)
     monkeypatch.setattr(sat, "_sync_completo_bg", lambda **kw: None)
     return pedidas, actualizaciones
 
@@ -792,6 +792,45 @@ def test_sync_con_una_parte_agotada_conserva_la_otra(monkeypatch):
     assert len(fallos) == 1 and fallos[0].startswith("Parte 2 de 2 ")
 
 
+def test_sync_ventana_ya_en_curso_da_409(monkeypatch):
+    import psycopg2.errors
+
+    _preparar_sync(monkeypatch, [])
+
+    def _execute(sql, params=(), returning=False):
+        raise psycopg2.errors.UniqueViolation("duplicada")
+    monkeypatch.setattr(db, "execute", _execute)
+
+    r = _sync("emitidos")
+
+    assert r.status_code == 409
+    assert "en curso" in r.json()["detail"]
+
+
+def test_sync_ambos_si_uno_ya_esta_en_curso_pide_el_otro(monkeypatch):
+    import psycopg2.errors
+
+    pedidas, _ = _preparar_sync(monkeypatch, ["id-rec"])
+    ejecutar = db.execute
+    llamadas = {"n": 0}
+
+    def _execute(sql, params=(), returning=False):
+        if sql.lstrip().startswith("INSERT"):
+            llamadas["n"] += 1
+            if llamadas["n"] == 1:
+                raise psycopg2.errors.UniqueViolation("duplicada")
+        return ejecutar(sql, params, returning)
+    monkeypatch.setattr(db, "execute", _execute)
+
+    r = _sync("ambos")
+
+    assert r.status_code == 200
+    assert [t for t, _, _ in pedidas] == ["recibidos"]
+    assert r.json()["errores"] == ["emitidos: ya hay una descarga en curso para 2026-09"]
+
+
+
+
 # ─── POST /sat/empresas/{id}/fiel/sync/avanzar ──────────────────────────────────
 
 _AVANZAR_URL = f"/api/v1/sat/empresas/{EMPRESA}/fiel/sync/avanzar"
@@ -809,7 +848,7 @@ def _preparar_avanzar(monkeypatch, pendientes, verificacion, tomada=True):
     _auth(monkeypatch)
     monkeypatch.setattr(db, "query_all", lambda *a, **k: pendientes)
     monkeypatch.setattr(fiel_store, "obtener_signer", lambda db_, eid: _FakeSigner())
-    monkeypatch.setattr(sat, "verificar_solicitud", lambda *a, **k: verificacion)
+    monkeypatch.setattr(sat_sync, "verificar_solicitud", lambda *a, **k: verificacion)
 
     sqls = []
 
@@ -826,7 +865,7 @@ def _preparar_avanzar(monkeypatch, pendientes, verificacion, tomada=True):
     def _importar(**kw):
         importaciones.append(kw)
         return "descargado"
-    monkeypatch.setattr(sat, "_importar_paquetes_bg", _importar)
+    monkeypatch.setattr(sat_sync, "importar_paquetes", _importar)
     return sqls, importaciones
 
 
@@ -919,7 +958,7 @@ def test_avanzar_error_al_verificar_conserva_el_estado(monkeypatch):
 
     def _raise(*a, **k):
         raise FIELError("timeout SAT")
-    monkeypatch.setattr(sat, "verificar_solicitud", _raise)
+    monkeypatch.setattr(sat_sync, "verificar_solicitud", _raise)
 
     try:
         r = client.post(_AVANZAR_URL)
@@ -927,7 +966,9 @@ def test_avanzar_error_al_verificar_conserva_el_estado(monkeypatch):
         _teardown()
 
     assert r.json() == {"avanzadas": [{"id": "sol-1", "estado": "en_proceso"}]}
-    assert sqls == []
+    # el fallo transitorio cuenta un intento y agenda el siguiente; no cambia el estado
+    assert any("intentos = intentos + 1" in q for q in sqls)
+    assert not any("estado='fallo'" in q for q in sqls)
 
 
 def test_avanzar_sin_fiel_guardada_da_422(monkeypatch):
@@ -970,7 +1011,7 @@ def test_avanzar_estado_numerico_rechazada_guarda_el_mensaje_del_sat(monkeypatch
     _auth(monkeypatch)
     monkeypatch.setattr(db, "query_all", lambda *a, **k: [_solicitud_pendiente()])
     monkeypatch.setattr(fiel_store, "obtener_signer", lambda db_, eid: _FakeSigner())
-    monkeypatch.setattr(sat, "verificar_solicitud", lambda *a, **k: {
+    monkeypatch.setattr(sat_sync, "verificar_solicitud", lambda *a, **k: {
         "estado": 5, "id_paquetes": [], "num_cfdi": 0, "mensaje": "No se encontró la información",
     })
     params_vistos = []
@@ -1013,7 +1054,7 @@ def test_avanzar_estado_cero_del_sat_deja_de_esperar_y_guarda_el_motivo(monkeypa
     _auth(monkeypatch)
     monkeypatch.setattr(db, "query_all", lambda *a, **k: [_solicitud_pendiente("en_proceso")])
     monkeypatch.setattr(fiel_store, "obtener_signer", lambda db_, eid: _FakeSigner())
-    monkeypatch.setattr(sat, "verificar_solicitud", lambda *a, **k: {
+    monkeypatch.setattr(sat_sync, "verificar_solicitud", lambda *a, **k: {
         "estado": 0, "id_paquetes": [], "num_cfdi": 0, "mensaje": "No se encontro la informacion",
     })
     params_vistos = []
@@ -1150,7 +1191,7 @@ def _preparar_importacion(monkeypatch, paquetes_sat, fila_final, pipeline=None):
     import backend.routers.ingesta as ingesta
 
     monkeypatch.setattr(cfdi_parser, "CFDIParser", _FakeParser)
-    monkeypatch.setattr(sat, "_insertar_cfdi", lambda *a, **k: None)
+    monkeypatch.setattr(sat_sync, "_insertar_cfdi", lambda *a, **k: None)
     monkeypatch.setattr(ingesta, "_correr_pipeline", lambda *a: (pipeline if pipeline is not None else []).append(a))
 
     descargados = []
@@ -1161,7 +1202,7 @@ def _preparar_importacion(monkeypatch, paquetes_sat, fila_final, pipeline=None):
         if isinstance(xmls, Exception):
             raise xmls
         return xmls
-    monkeypatch.setattr(sat, "descargar_paquete", _descargar)
+    monkeypatch.setattr(sat_sync, "descargar_paquete", _descargar)
 
     def _query_one(sql, params=()):
         if "FROM empresas" in sql:
@@ -1175,7 +1216,7 @@ def _preparar_importacion(monkeypatch, paquetes_sat, fila_final, pipeline=None):
 
 
 def _importar(paquetes, desde=0):
-    return sat._importar_paquetes_bg(
+    return sat_sync.importar_paquetes(
         creds=_FakeSigner(), solicitud_id="sol-1", empresa_id=EMPRESA,
         periodo="2026-09", paquetes=paquetes, desde=desde,
     )

@@ -225,6 +225,9 @@ def init_db() -> None:
         # 030 es idempotente — índices del listado de CFDI y preferencias de tabla por usuario
         _run_sql_file("030_listado_cfdi.sql")
 
+        # 031 es idempotente — descarga automática del SAT: sat_solicitudes ampliada, índice de ventana activa y sat_sync_config
+        _run_sql_file("031_sat_sync.sql")
+
         # Seed inicial: usuario admin si la base aún no tiene usuarios
         _seed_admin()
 
