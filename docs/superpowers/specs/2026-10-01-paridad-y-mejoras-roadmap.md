@@ -254,7 +254,7 @@ Criterios que los cálculos deben respetar con lo ya guardado:
 
 ## Trabajo en paralelo (3 sesiones)
 
-Desde el 2026-10-04 el trabajo avanza en **tres sesiones simultáneas**. Cada sesión es
+Desde el 2026-10-04 el trabajo avanza en **sesiones simultáneas** (tres al inicio, cuatro desde que se abrió el carril D). Cada sesión es
 dueña de un carril: unas fases, unos archivos y un rango de migraciones. **Ninguna
 sesión toma una fase de otro carril**, aunque esté libre: si un carril se queda sin
 trabajo desbloqueado, pasa a la siguiente fase de su propia lista o a las mejoras (M)
@@ -267,9 +267,10 @@ la **primera entrega no hecha** de su lista.
 
 | Carril | Tema | Fases y entregas, en orden | Migraciones |
 |---|---|---|---|
-| **A — CFDI** | Listado, extracción del XML, visor | F3.4 (PR #24) → F3.5a extracción v2 → F3.5b → M4 → M1 → M6 (F3.3 integrada con el PR #21) | `040`–`049` |
-| **B — SAT e infraestructura** | Descarga automática, worker, información fiscal, alertas | F2.1 (PR #17) → F2.2 → F2.3 → F2.4 → F2.5 → F8 → cierre de F0/F1 con datos reales → M3 → M7 | `031`–`039` |
+| **A — CFDI** | Listado, extracción del XML, visor | F3.5a extracción v2 → F3.5b → M4 → M1 → M6 (F3.3 y F3.4 integradas con los PR #21 y #24) | `040`–`049` |
+| **B — SAT e infraestructura** | Descarga automática, worker, alertas | F2.1 (PR #17) → F2.2 → F2.3 → F2.4 → F2.5 → cierre de F0/F1 con datos reales → M3 | `031`–`039` |
 | **C — Cálculos fiscales** | Inicio, IVA, DIOT, ISR, papel de trabajo | F4 → F5 → F6 → F7 → M5 → M2 | `050`–`059` |
+| **D — Información fiscal y cuenta** | Constancia y opinión de cumplimiento, suscripción | F8 → M7 | `060`–`069` |
 
 Detalle de las entregas que cambian respecto a las specs de su fase:
 
@@ -292,12 +293,13 @@ Detalle de las entregas que cambian respecto a las specs de su fase:
 
 | Carril | Sesión | Qué hace ahora |
 |---|---|---|
-| A | "F3.2 work" | F3.4 (backend listo, frontend en curso). Antes del PR trae `main`: su versión de F3.2 (PR #19) se cerró y la integrada es la del PR #20. El PR #21 (F3.3) ya está en `main`; el PR #24 (F3.4) lo trae con merge antes de marcarse listo: los dos tocan `routers/cfdis.py`, los componentes de `components/cfdi/` y `api-client.ts` |
+| A | "F3.2 work" | F3.5a (extracción v2) en una rama nueva desde `main`. F3.4 integrada (PR #24) |
 | B | "Cambios en ezaudita" | F2.1 en el PR #17; sigue F2.2 (worker) |
-| C | "Acceso al proyecto" | Empieza F4 (Inicio). **No toma F3.4**: ya la hace el carril A. Antes de pasar al carril C dejó F3.3 hecha en el PR #21 |
+| C | "Acceso al proyecto" | F4 (Inicio). Antes de pasar al carril C dejó F3.3 hecha en el PR #21 |
+| D | "Carril D — Información fiscal" (abierta el 2026-10-04) | F8 |
 
 Una sesión nueva que se abra para este plan reemplaza a la de su carril; no se abre una
-cuarta sesión de implementación sin agregar antes un carril aquí.
+otra sesión de implementación sin agregar antes un carril aquí.
 
 ### Propiedad de archivos
 
@@ -306,9 +308,11 @@ Cada carril solo **modifica** los archivos de su columna; los de otro carril se 
 
 | Carril A — CFDI | Carril B — SAT | Carril C — Cálculos |
 |---|---|---|
-| `backend/cfdi_parser.py`, `cfdi_store.py`, `reproceso.py`, `cfdi_columnas.py`, `cfdi_listado.py`, `catalogos_sat.py` | `backend/sat_fiel.py`, `sat_sync.py`, `worker.py`, `fiel_store.py`, `constancia_parser.py`, `auditoria.py`; `Procfile`, `dev.sh`, `dev.bat`, `.env.example` | `backend/iva.py`, `isr.py`, `deducciones.py`, `motor_fiscal.py`, módulos nuevos (`diot.py`, `proveedores.py`, `isr_flujo.py`…) |
+| `backend/cfdi_parser.py`, `cfdi_store.py`, `reproceso.py`, `cfdi_columnas.py`, `cfdi_listado.py`, `catalogos_sat.py` | `backend/sat_fiel.py`, `sat_sync.py`, `worker.py`, `fiel_store.py`, `auditoria.py`; `Procfile`, `dev.sh`, `dev.bat`, `.env.example` | `backend/iva.py`, `isr.py`, `deducciones.py`, `motor_fiscal.py`, módulos nuevos (`diot.py`, `proveedores.py`, `isr_flujo.py`…) |
 | `backend/routers/cfdis.py`, `cfdi.py`, `emitidos.py`, `ingesta.py` | `backend/routers/sat.py`, `empresas.py`, `auth.py`, `admin.py` | `backend/routers/reportes.py`, `dashboard.py`, `scoring.py`, `riesgos.py`, `conciliacion.py`, `movimientos.py`, routers nuevos de IVA/DIOT/ISR |
 | `frontend/components/cfdi/`, `ingesta/`, `lib/cfdi-url.ts` | `frontend/components/sat/`, `empresas/`, `auth/`, `layout/Header.tsx` (campana), componentes nuevos de alertas e información fiscal | `frontend/components/dashboard/`, `cedula-iva/`, `conciliacion/`, componentes nuevos de IVA, DIOT, ISR |
+
+**Carril D** es dueño de `backend/constancia_parser.py` (se lo cede B), de los módulos y routers nuevos de información fiscal y suscripción, y de `frontend/components/informacion-fiscal/` y `components/suscripcion/` (nuevos). Lee la e.firma y la empresa sin editar los archivos de B.
 
 Si una entrega necesita cambiar un archivo de otro carril (por ejemplo, un filtro nuevo
 en `cfdi_listado.py` para F5), **no lo edita**: lo resuelve dentro de su área (una
@@ -381,12 +385,13 @@ ramifica desde la rama de otra sesión.
 | F0 | B | Integrada salvo la carga de CFDI reales (se cierra con F2) | (no requiere) | (lista de verificación abajo) |
 | F1 | B (cierre) | Integrada. Falta el cierre con datos reales: reprocesar los CFDI de COPLASUR y cuadrar el IVA por tasa contra el encabezado | este documento, sección "Fases" y "Reglas comunes" | `docs/superpowers/plans/2026-10-01-fase1-detalle-fiscal-cfdi.md` |
 | F2 | B | F2.1 implementada, en revisión (PR #17: migración 031, `sat_sync.py`, reintentos, partición por volumen y por 5002); F2.2 (worker: `backend/worker.py`, `procesar_empresa`, candado por empresa, carga inicial y corrida diaria) implementada, en revisión; F2.3 a F2.5 pendientes. Pendiente de quien tenga acceso: documentar `FIEL_ENCRYPTION_KEY` y `SAT_SYNC_*` en `.env.example` (texto en el plan de F2.2) | `docs/superpowers/specs/2026-10-03-f2-descarga-automatica-design.md` (en PR #17) | un plan por entrega |
-| F3 | A | F3.1, F3.2 y F3.3 (PR #21) integradas; F3.4 en revisión (PR #24); luego F3.5a extracción v2 y F3.5b | `docs/superpowers/specs/2026-10-02-f3-listado-cfdi-design.md` | `2026-10-02-f3-1-api-listado-cfdi.md`, `2026-10-03-f3-2-pantalla-cfdi.md`; un plan por entrega restante |
-| F4 | C | Por empezar (sesión "Acceso al proyecto") | — | — |
+| F3 | A | F3.1, F3.2, F3.3 (PR #21) y F3.4 (PR #24) integradas; F3.5a extracción v2 en curso; luego F3.5b | `docs/superpowers/specs/2026-10-02-f3-listado-cfdi-design.md` | `2026-10-02-f3-1-api-listado-cfdi.md`, `2026-10-03-f3-2-pantalla-cfdi.md`; un plan por entrega restante |
+| F4 | C | En curso | — | — |
 | F5, F6, F7 | C | Pendiente | — | — |
-| F8 | B | Pendiente (después de F2.5) | — | — |
+| F8 | D | En curso | — | — |
 | M1, M4, M6 | A | Pendiente | — | — |
-| M3, M7 | B | Pendiente | — | — |
+| M3 | B | Pendiente |
+| M7 | D | Pendiente (después de F8) | — | — |
 | M2, M5 | C | Pendiente | — | — |
 
 ### Lista de verificación de F0
