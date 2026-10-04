@@ -1,22 +1,27 @@
 "use client";
 
 import { useParams } from "next/navigation";
-import { useState } from "react";
 import { AlertTriangle, DollarSign, GitBranch, TrendingUp } from "lucide-react";
 import { useDashboard } from "@/hooks/useDashboard";
+import { usePeriodoGlobal } from "@/hooks/usePeriodoGlobal";
+import { usePeriodos } from "@/hooks/usePeriodos";
 import { ResumenRiesgos } from "@/components/dashboard/ResumenRiesgos";
 import { RiesgosTable } from "@/components/dashboard/RiesgosTable";
 import { ErrorState } from "@/components/shared/ErrorState";
 import { StatCard } from "@/components/shared/StatCard";
 import { PageHeader } from "@/components/shared/PageHeader";
-import { PeriodFilter } from "@/components/shared/PeriodFilter";
+import { PeriodSelector } from "@/components/shared/PeriodSelector";
 import { LoadingState } from "@/components/shared/LoadingState";
+import { etiquetaPeriodo } from "@/lib/periodo";
+import { scoreDelPeriodo } from "@/lib/score";
 
 export default function DashboardPage() {
   const params = useParams<{ empresaId: string }>();
-  const [periodo, setPeriodo] = useState("");
+  const [periodo, setPeriodo] = usePeriodoGlobal(params.empresaId);
+  const periodos = usePeriodos(params.empresaId);
 
   const dashboard = useDashboard(params.empresaId, periodo);
+  const score = dashboard.data ? scoreDelPeriodo(dashboard.data.tendencia_score, periodo) : null;
 
   return (
     <main className="space-y-7">
@@ -26,7 +31,11 @@ export default function DashboardPage() {
         description={dashboard.data?.empresa.razon_social ?? "Resumen de riesgo y cumplimiento fiscal."}
       />
 
-      <PeriodFilter value={periodo} onChange={setPeriodo} />
+      <PeriodSelector
+        value={periodo}
+        onChange={setPeriodo}
+        periodosConDatos={periodos.data?.periodos ?? []}
+      />
 
       {dashboard.isLoading && <LoadingState label="Cargando dashboard" />}
       {dashboard.isError && (
@@ -39,21 +48,17 @@ export default function DashboardPage() {
         <>
           <section aria-label="Indicadores principales" className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <StatCard
-              label="Score fiscal actual"
-              value={`${dashboard.data.tendencia_score.at(-1)?.score ?? "—"}/100`}
+              label="Score fiscal del periodo"
+              value={score?.score != null ? `${score.score}/100` : "—"}
               icon={TrendingUp}
               tone="ok"
               delta={
-                dashboard.data.tendencia_score.length >= 2
-                  ? (() => {
-                      const [prev, curr] = dashboard.data.tendencia_score.slice(-2);
-                      const diff = curr.score - prev.score;
-                      return {
-                        value: `${diff >= 0 ? "+" : ""}${diff} pts`,
-                        direction: diff >= 0 ? ("up" as const) : ("down" as const),
-                        label: `vs. ${prev.periodo}`,
-                      };
-                    })()
+                score?.delta
+                  ? {
+                      value: `${score.delta.puntos >= 0 ? "+" : ""}${score.delta.puntos} pts`,
+                      direction: score.delta.puntos >= 0 ? ("up" as const) : ("down" as const),
+                      label: `vs. ${etiquetaPeriodo(score.delta.contra)}`,
+                    }
                   : undefined
               }
             />

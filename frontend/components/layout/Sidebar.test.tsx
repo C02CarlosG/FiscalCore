@@ -63,39 +63,33 @@ describe("Sidebar", () => {
     );
   });
 
-  it("expands the Gestión de CFDI submenu with its 4 options on click", async () => {
+  it("expands the CFDIs submenu with only Emitidos and Recibidos on click", async () => {
     const user = userEvent.setup();
     render(<Sidebar mobileOpen={false} onMobileOpenChange={() => {}} />);
 
-    expect(screen.queryByRole("link", { name: "Visor SAT" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Emitidos" })).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: /Gestión de CFDI/ }));
+    await user.click(screen.getByRole("button", { name: "CFDIs" }));
 
-    expect(screen.getByRole("link", { name: "Visor SAT" })).toHaveAttribute(
-      "href",
-      "/empresas/e1/cfdi",
-    );
-    expect(screen.getByRole("link", { name: "CFDI Emitidos" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "Emitidos" })).toHaveAttribute(
       "href",
       "/empresas/e1/cfdi/emitidos",
     );
-    expect(screen.getByRole("link", { name: "CFDI Recibidos" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "Recibidos" })).toHaveAttribute(
       "href",
       "/empresas/e1/cfdi/recibidos",
     );
-    expect(screen.getByRole("link", { name: "CFDI Nómina" })).toHaveAttribute(
-      "href",
-      "/empresas/e1/cfdi/nomina",
-    );
+    expect(screen.queryByRole("link", { name: "Visor SAT" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Nómina/ })).not.toBeInTheDocument();
   });
 
-  it("auto-expands the Gestión de CFDI submenu when a cfdi route is active", () => {
-    mockPathname.mockReturnValue("/empresas/e1/cfdi/nomina");
+  it("auto-expands the CFDIs submenu when a cfdi route is active", () => {
+    mockPathname.mockReturnValue("/empresas/e1/cfdi/recibidos");
     render(<Sidebar mobileOpen={false} onMobileOpenChange={() => {}} />);
 
-    expect(screen.getByRole("link", { name: "CFDI Nómina" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "Recibidos" })).toHaveAttribute(
       "href",
-      "/empresas/e1/cfdi/nomina",
+      "/empresas/e1/cfdi/recibidos",
     );
   });
 
@@ -111,9 +105,27 @@ describe("Sidebar", () => {
       screen.queryByRole("link", { name: /Dashboard/ }),
     ).not.toBeInTheDocument();
     expect(
-      screen.queryByRole("button", { name: /Gestión de CFDI/ }),
+      screen.queryByRole("button", { name: "CFDIs" }),
     ).not.toBeInTheDocument();
-    expect(screen.getByText("Gestión de CFDI")).toBeInTheDocument();
+    expect(screen.getByText("CFDIs")).toBeInTheDocument();
+  });
+
+  it.each([
+    ["admin", "Administrador"],
+    ["contador", "Contador"],
+  ])("shows the real role of the user (%s)", (rol, etiqueta) => {
+    saveSession({ ...loginResponse, rol: rol as "admin" | "contador" });
+    render(<Sidebar mobileOpen={false} onMobileOpenChange={() => {}} />);
+
+    expect(screen.getByText(etiqueta)).toBeInTheDocument();
+  });
+
+  it("shows no role line for an old session that has none", () => {
+    saveSession(loginResponse);
+    render(<Sidebar mobileOpen={false} onMobileOpenChange={() => {}} />);
+
+    expect(screen.queryByText("Contador")).not.toBeInTheDocument();
+    expect(screen.queryByText("Administrador")).not.toBeInTheDocument();
   });
 
   it("clears the session and redirects to /login on logout", async () => {

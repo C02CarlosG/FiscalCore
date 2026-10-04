@@ -1,5 +1,6 @@
 "use client";
 
+import { formatearInstante } from "@/lib/formato";
 import { FormEvent, useState } from "react";
 import { AlertCircle, CloudDownload, LoaderCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -43,12 +44,6 @@ const ESTADOS: Record<string, { label: string; className: string }> = {
 // Descargada, pero faltaron CFDI de los que reportó el SAT (el motivo viene en error_msg).
 const INCOMPLETA = { label: "Incompleta", className: "bg-status-pendiente-soft text-status-pendiente" };
 
-function fechaHora(iso: string): string {
-  const fecha = new Date(iso);
-  if (Number.isNaN(fecha.getTime())) return iso;
-  return fecha.toLocaleString("es-MX", { dateStyle: "short", timeStyle: "short" });
-}
-
 function avance(solicitud: SatSolicitud): string {
   if (solicitud.num_cfdi == null) return "—";
   return `${solicitud.cfdi_importados ?? 0} de ${solicitud.num_cfdi}`;
@@ -82,7 +77,7 @@ function Solicitudes({ solicitudes }: { solicitudes: SatSolicitud[] }) {
                 : (ESTADOS[s.estado] ?? { label: s.estado, className: "" });
             return (
               <TableRow key={s.id}>
-                <TableCell className="whitespace-nowrap">{fechaHora(s.created_at)}</TableCell>
+                <TableCell className="whitespace-nowrap">{formatearInstante(s.created_at)}</TableCell>
                 <TableCell>{s.tipo === "emitidos" ? "Emitidos" : "Recibidos"}</TableCell>
                 <TableCell className="font-mono">
                   {s.periodo_inicio === s.periodo_fin

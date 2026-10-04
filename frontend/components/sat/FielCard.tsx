@@ -1,5 +1,6 @@
 "use client";
 
+import { formatearFecha } from "@/lib/formato";
 import { FormEvent, useState } from "react";
 import { AlertCircle, KeyRound, LoaderCircle, ShieldCheck, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -14,12 +15,6 @@ import type { FielEstado } from "@/types/api";
 
 const FILE_INPUT_CLASS =
   "h-auto min-h-11 cursor-pointer py-2 file:mr-3 file:rounded file:border-0 file:bg-primary/10 file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-primary";
-
-function fechaLegible(iso: string | null | undefined): string {
-  if (!iso) return "—";
-  const [anio, mes, dia] = iso.slice(0, 10).split("-");
-  return `${dia}/${mes}/${anio}`;
-}
 
 function EstadoFiel({ estado }: { estado: FielEstado }) {
   if (!estado.tiene_fiel) {
@@ -53,7 +48,7 @@ function EstadoFiel({ estado }: { estado: FielEstado }) {
         <div>
           <dt className="text-xs text-muted-foreground">Vigente hasta</dt>
           <dd>
-            {fechaLegible(estado.vigencia_fin)}
+            {formatearFecha(estado.vigencia_fin)}
             {typeof estado.dias_restantes === "number" && estado.dias_restantes >= 0 && (
               <span className="text-muted-foreground"> · {estado.dias_restantes} días</span>
             )}
@@ -61,7 +56,7 @@ function EstadoFiel({ estado }: { estado: FielEstado }) {
         </div>
         <div>
           <dt className="text-xs text-muted-foreground">Guardada el</dt>
-          <dd>{fechaLegible(estado.guardada_el)}</dd>
+          <dd>{formatearFecha(estado.guardada_el)}</dd>
         </div>
       </dl>
     </div>
