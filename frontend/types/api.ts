@@ -533,6 +533,8 @@ export interface DiotFlujo {
   terceros: DiotTercero[];
   totales: DiotTotales;
   cuadre_con_iva: { iva_acreditable_diot: number; iva_acreditable_resumen: number; cuadra: boolean };
+  /** Avisos del periodo (p. ej. actos a 8 % sin región). */
+  advertencias: { codigo: string; mensaje: string }[];
   advertencias_iva: InicioAdvertencia[];
   operaciones_por_cfdi: number;
 }

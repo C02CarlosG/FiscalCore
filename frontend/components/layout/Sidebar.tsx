@@ -15,6 +15,7 @@ import {
   GitBranch,
   LayoutGrid,
   LogOut,
+  Receipt,
   Upload,
 } from "lucide-react";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
@@ -29,6 +30,7 @@ const NAV_ITEMS = [
   { slug: "conciliacion", label: "Conciliación", icon: GitBranch },
   { slug: "cedula-iva", label: "Cédula de IVA", icon: FileText },
   { slug: "iva-flujo", label: "IVA base flujo", icon: Calculator },
+  { slug: "diot", label: "DIOT por flujo", icon: Receipt },
   { slug: "sat", label: "Conexión SAT", icon: CloudDownload },
   { slug: "informacion-fiscal", label: "Información fiscal", icon: FileCheck2 },
   { slug: "validaciones", label: "Validaciones", icon: ListChecks },
