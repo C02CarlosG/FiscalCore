@@ -29,6 +29,7 @@ from .routers import inicio
 from .routers import informacion_fiscal
 from .routers import iva_flujo
 from .routers import isr_flujo as isr_flujo_router
+from .routers import proveedores as proveedores_router
 from .routers import validaciones_cfdi
 
 logging.basicConfig(
@@ -85,6 +86,7 @@ app.include_router(inicio.router)
 app.include_router(informacion_fiscal.router)
 app.include_router(iva_flujo.router)
 app.include_router(isr_flujo_router.router)
+app.include_router(proveedores_router.router)
 app.include_router(validaciones_cfdi.router)
 
 
