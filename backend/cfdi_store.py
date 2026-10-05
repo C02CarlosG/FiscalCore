@@ -17,6 +17,8 @@ import json
 import logging
 import uuid as _uuid
 
+import psycopg2.extras
+
 from . import db
 
 _log = logging.getLogger(__name__)
@@ -266,38 +268,51 @@ def _fila_de_pago(empresa_id: str, cfdi_db_id: str, uuid_rep: str, pago) -> str:
 
     Cada nodo tiene su fila, identificada por su orden en el XML (``nodo``): dos pagos
     de la misma fecha y monto ya no comparten fila. Un REP guardado antes de la
-    migración 041 tiene filas con nodo = 0 ("sin asignar"); el nodo reclama la que
-    coincide en fecha y monto (conservando sus relaciones y lo que apunte a ella) y
-    solo si no hay ninguna inserta una nueva."""
-    fila = db.query_one("SELECT id FROM pagos_cfdi WHERE cfdi_id = %s AND nodo = %s", (cfdi_db_id, pago.nodo))
-    if fila:
-        return str(fila["id"])
-    fila = db.query_one(
-        """
-        UPDATE pagos_cfdi SET nodo = %s
-        WHERE id = (
-            SELECT id FROM pagos_cfdi
-            WHERE cfdi_id = %s AND nodo = 0 AND fecha_pago = %s AND monto = %s
-            ORDER BY created_at, id LIMIT 1
-        )
-        RETURNING id
-        """,
-        (pago.nodo, cfdi_db_id, pago.fecha_pago, str(pago.monto)),
-    )
-    if fila:
-        return str(fila["id"])
-    fila = db.execute(
-        """
-        INSERT INTO pagos_cfdi (empresa_id, cfdi_id, uuid_cfdi_pago, fecha_pago, monto, moneda, tipo_cambio, nodo)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-        ON CONFLICT (cfdi_id, nodo) WHERE nodo > 0 DO UPDATE SET nodo = EXCLUDED.nodo
-        RETURNING id
-        """,
-        (empresa_id, cfdi_db_id, uuid_rep, pago.fecha_pago, str(pago.monto), pago.moneda,
-         str(pago.tipo_cambio), pago.nodo),
-        returning=True,
-    )
-    return str(fila["id"])
+    migración 041 tiene filas con nodo = 0 ("sin asignar"), y una de ellas pudo juntar las
+    relaciones de varios nodos. El nodo reclama la que coincide en fecha y monto,
+    conservando su id (a él apuntan las conciliaciones) pero **borrando sus relaciones**:
+    las del nodo se vuelven a insertar justo después y las de los demás nodos van en sus
+    propias filas; si no se borraran, una parcialidad quedaría en dos filas y se contaría dos
+    veces. Solo si no hay fila que reclamar se inserta una nueva.
+
+    Todo en una transacción y bajo un candado por REP: dos copias simultáneas del mismo REP
+    antiguo no pueden reclamar la misma fila ni crear dos."""
+    with db.get_conn() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (f"pagos_cfdi:{cfdi_db_id}",))
+            cur.execute("SELECT id FROM pagos_cfdi WHERE cfdi_id = %s AND nodo = %s", (cfdi_db_id, pago.nodo))
+            fila = cur.fetchone()
+            if fila:
+                return str(fila["id"])
+
+            cur.execute(
+                """
+                UPDATE pagos_cfdi SET nodo = %s
+                WHERE id = (
+                    SELECT id FROM pagos_cfdi
+                    WHERE cfdi_id = %s AND nodo = 0 AND fecha_pago = %s AND monto = %s
+                    ORDER BY created_at, id LIMIT 1
+                )
+                RETURNING id
+                """,
+                (pago.nodo, cfdi_db_id, pago.fecha_pago, str(pago.monto)),
+            )
+            fila = cur.fetchone()
+            if fila:
+                # pagos_relaciones_impuestos cae en cascada.
+                cur.execute("DELETE FROM pagos_relaciones WHERE pago_id = %s", (fila["id"],))
+                return str(fila["id"])
+
+            cur.execute(
+                """
+                INSERT INTO pagos_cfdi (empresa_id, cfdi_id, uuid_cfdi_pago, fecha_pago, monto, moneda, tipo_cambio, nodo)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING id
+                """,
+                (empresa_id, cfdi_db_id, uuid_rep, pago.fecha_pago, str(pago.monto), pago.moneda,
+                 str(pago.tipo_cambio), pago.nodo),
+            )
+            return str(cur.fetchone()["id"])
 
 
 def persistir_complemento_pago(empresa_id: str, resultado) -> None:

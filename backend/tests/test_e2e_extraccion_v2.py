@@ -436,3 +436,99 @@ def test_con_dos_rep_solo_el_cancelado_deja_de_contar(entorno):
         assert _cobrado_de_la_factura(db) == {"m": D("500.00"), "e": "pagado_parcial"}
     finally:
         db.execute("DELETE FROM cfdi WHERE uuid = %s", (uuid_rep2,))
+
+
+# ─── Reproceso de un REP anterior a la 041 con relaciones en varios nodos ─────
+
+def _xml_rep_dos_nodos_con_documentos() -> bytes:
+    """REP con dos pago:Pago de la misma fecha y monto; cada uno paga una parcialidad distinta de
+    la misma factura (580 y 580 de 1,660)."""
+    def pago(parcialidad: int, saldo_ant: str, saldo: str) -> str:
+        return f"""<pago20:Pago FechaPago="2026-12-23T12:00:00" FormaDePagoP="03" MonedaP="MXN" TipoCambioP="1" Monto="580.00">
+        <pago20:DoctoRelacionado IdDocumento="{UUID_FACTURA}" MonedaDR="MXN" EquivalenciaDR="1" NumParcialidad="{parcialidad}"
+            ImpSaldoAnt="{saldo_ant}" ImpPagado="580.00" ImpSaldoInsoluto="{saldo}" ObjetoImpDR="01"/>
+      </pago20:Pago>"""
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<cfdi:Comprobante xmlns:cfdi="http://www.sat.gob.mx/cfd/4" xmlns:pago20="http://www.sat.gob.mx/Pagos20"
+    xmlns:tfd="http://www.sat.gob.mx/TimbreFiscalDigital"
+    Version="4.0" Fecha="2026-12-23T10:00:00" TipoDeComprobante="P" SubTotal="0" Total="0" Moneda="XXX"
+    Exportacion="01" LugarExpedicion="01000">
+  <cfdi:Emisor Rfc="{RFC}" Nombre="Emisora E2E" RegimenFiscal="601"/>
+  <cfdi:Receptor Rfc="{CLIENTE}" Nombre="Cliente" UsoCFDI="CP01" DomicilioFiscalReceptor="01000" RegimenFiscalReceptor="616"/>
+  <cfdi:Complemento>
+    <pago20:Pagos Version="2.0">
+      <pago20:Totales MontoTotalPagos="1160.00"/>
+      {pago(1, "1660.00", "1080.00")}{pago(2, "1080.00", "500.00")}
+    </pago20:Pagos>
+    <tfd:TimbreFiscalDigital UUID="{UUID_REP_DOBLE}" FechaTimbrado="2026-12-23T10:01:00"/>
+  </cfdi:Complemento>
+</cfdi:Comprobante>""".encode()
+
+
+def _relaciones(db, cfdi_id):
+    return db.query_all(
+        "SELECT p.nodo, pr.parcialidad FROM pagos_relaciones pr JOIN pagos_cfdi p ON p.id = pr.pago_id "
+        "WHERE p.cfdi_id = %s ORDER BY p.nodo, pr.parcialidad", (cfdi_id,))
+
+
+def test_reprocesar_un_rep_antiguo_con_relaciones_en_varios_nodos_no_las_duplica(entorno):
+    """Antes de la 041 los dos nodos compartían una fila (nodo 0) con las relaciones de ambos. El nodo 1
+    reclama esa fila sin las del nodo 2, que viven en la suya: la parcialidad 2 no se cuenta dos veces."""
+    db, client, headers, empresa_id = entorno
+    from backend import reproceso
+
+    r = client.post(f"/api/v1/empresas/{empresa_id}/cfdi/upload", headers=headers, data={"periodo": PERIODO},
+                    files=[("archivos", ("rep3.xml", _xml_rep_dos_nodos_con_documentos(), "text/xml"))])
+    assert r.status_code == 200, r.text
+    cfdi_id = _uno(db, "SELECT id FROM cfdi WHERE uuid = %s", UUID_REP_DOBLE)["id"]
+    assert [(x["nodo"], x["parcialidad"]) for x in _relaciones(db, cfdi_id)] == [(1, 1), (2, 2)]
+
+    # Estado anterior a la 041: una sola fila, sin nodo, con las relaciones de los dos nodos.
+    fila_unica = _uno(db, "SELECT id FROM pagos_cfdi WHERE cfdi_id = %s AND nodo = 1", cfdi_id)["id"]
+    otra = _uno(db, "SELECT id FROM pagos_cfdi WHERE cfdi_id = %s AND nodo = 2", cfdi_id)["id"]
+    db.execute("UPDATE pagos_relaciones SET pago_id = %s WHERE pago_id = %s", (fila_unica, otra))
+    db.execute("DELETE FROM pagos_cfdi WHERE id = %s", (otra,))
+    db.execute("UPDATE pagos_cfdi SET nodo = 0 WHERE id = %s", (fila_unica,))
+    db.execute("UPDATE cfdi SET detalle_version = 2 WHERE id = %s", (cfdi_id,))
+
+    resultado = reproceso.reprocesar_detalle(empresa_id=empresa_id)
+
+    assert resultado["errores"] == [] and resultado["pendientes"] == 0
+    assert [(x["nodo"], x["parcialidad"]) for x in _relaciones(db, cfdi_id)] == [(1, 1), (2, 2)]   # cada una, una vez
+    assert _uno(db, "SELECT id FROM pagos_cfdi WHERE cfdi_id = %s AND nodo = 1", cfdi_id)["id"] == fila_unica   # conservó su id
+    # y lo cobrado de la factura no se infla: 580 + 580 (más el REP vigente de la fixture, 1,160) tope 1,660
+    assert _uno(db, "SELECT monto_cobrado AS m FROM cfdi WHERE uuid = %s", UUID_FACTURA)["m"] == D("1660.00")
+
+
+def test_dos_copias_simultaneas_de_un_rep_antiguo_no_crean_dos_filas(entorno):
+    """El candado por REP serializa la resolución de la fila: dos hilos reprocesando el mismo REP
+    antiguo terminan con una fila por nodo, no con dos para el mismo."""
+    import threading
+
+    db, client, headers, empresa_id = entorno
+    from backend import cfdi_store
+    from backend.cfdi_parser import CFDIParser
+
+    client.post(f"/api/v1/empresas/{empresa_id}/cfdi/upload", headers=headers, data={"periodo": PERIODO},
+                files=[("archivos", ("rep3.xml", _xml_rep_dos_nodos_con_documentos(), "text/xml"))])
+    cfdi_id = str(_uno(db, "SELECT id FROM cfdi WHERE uuid = %s", UUID_REP_DOBLE)["id"])
+    db.execute("DELETE FROM pagos_cfdi WHERE cfdi_id = %s AND nodo = 2", (cfdi_id,))
+    db.execute("UPDATE pagos_cfdi SET nodo = 0 WHERE cfdi_id = %s", (cfdi_id,))
+    resultado = CFDIParser().parse_xml(_xml_rep_dos_nodos_con_documentos())
+    errores = []
+
+    def correr():
+        try:
+            cfdi_store.persistir_complemento_pago(empresa_id, resultado)
+        except Exception as exc:     # pragma: no cover - solo si el candado falla
+            errores.append(exc)
+
+    hilos = [threading.Thread(target=correr) for _ in range(4)]
+    for h in hilos:
+        h.start()
+    for h in hilos:
+        h.join()
+
+    assert errores == []
+    assert [f["nodo"] for f in db.query_all("SELECT nodo FROM pagos_cfdi WHERE cfdi_id = %s ORDER BY nodo", (cfdi_id,))] == [1, 2]
+    assert [(x["nodo"], x["parcialidad"]) for x in _relaciones(db, cfdi_id)] == [(1, 1), (2, 2)]
