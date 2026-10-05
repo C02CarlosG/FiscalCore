@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS isr_ajustes (
     empresa_id  UUID NOT NULL REFERENCES empresas(id) ON DELETE CASCADE,
     cfdi_uuid   VARCHAR(36) NOT NULL,                      -- en mayúsculas, como cfdi.uuid
     lado        VARCHAR(10) NOT NULL CHECK (lado IN ('ingreso', 'deduccion')),
-    motivo      TEXT NOT NULL DEFAULT '',
+    motivo      TEXT NOT NULL CHECK (length(btrim(motivo)) > 0),
     usuario_id  UUID REFERENCES usuarios(id) ON DELETE SET NULL,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()

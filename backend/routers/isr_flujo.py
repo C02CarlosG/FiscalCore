@@ -35,7 +35,14 @@ class AjusteIn(BaseModel):
 
 
 class ConfigIn(BaseModel):
-    pct_nomina_exenta: float = Field(..., ge=0, le=1, description="0.47 por defecto; 0.53 si se acredita la no disminución")
+    pct_nomina_exenta: Decimal = Field(..., description="0.47 por defecto; 0.53 si se acredita la no disminución")
+
+    @field_validator("pct_nomina_exenta")
+    @classmethod
+    def _solo_47_o_53(cls, v: Decimal) -> Decimal:
+        if v not in (Decimal("0.47"), Decimal("0.53")):
+            raise ValueError("Solo se admite 0.47 o 0.53")
+        return v
 
 
 def _json(obj):
@@ -74,7 +81,7 @@ async def guardar_config(empresa_id: str, ejercicio: int, datos: ConfigIn, curre
     """Cambia el porcentaje deducible de la nómina exenta del ejercicio y lo audita."""
     validar_acceso_empresa(empresa_id, current_user)
     _ejercicio_o_422(ejercicio)
-    pct = Decimal(str(datos.pct_nomina_exenta))
+    pct = datos.pct_nomina_exenta
     isr_flujo_datos.guardar_porcentaje(empresa_id, ejercicio, pct, current_user["user_id"])
     return _json({"ejercicio": ejercicio, "pct_nomina_exenta": pct})
 

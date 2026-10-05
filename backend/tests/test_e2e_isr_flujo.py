@@ -118,7 +118,7 @@ def test_ingresos_del_mes_y_acumulado(entorno):
     assert (ing["contado"], ing["credito"], ing["devoluciones"], ing["total"]) == (1400.0, 500.0, 100.0, 1800.0)
     assert ing["retenciones_a_favor"] == 40.0
     assert d["acumulado"]["ingresos"]["total"] == 2300.0                  # + enero
-    assert d["regimen"] == {"codigo": "612", "modulo": "flujo"}
+    assert d["regimen"]["codigo"] == "612" and d["regimen"]["modulo"] == "flujo"
 
 
 def test_deducciones_con_efectivo_inversion_y_nomina(entorno):
@@ -194,5 +194,5 @@ def test_otra_empresa_recibe_403(entorno):
     ajeno = headers_usuario_e2e(db, EMAIL_AJENO)
 
     assert client.get(_url(entorno, "2026-09"), headers=ajeno).status_code == 403
-    assert client.put(_url(entorno, "config/2026"), headers=ajeno, json={"pct_nomina_exenta": 0.5}).status_code == 403
+    assert client.put(_url(entorno, "config/2026"), headers=ajeno, json={"pct_nomina_exenta": 0.53}).status_code == 403
     assert client.put(_url(entorno, "ajustes"), headers=ajeno, json={"uuid": _uuid(1), "lado": "ingreso", "motivo": "x"}).status_code == 403

@@ -67,10 +67,16 @@ def cargar_eventos(empresa_id: str, rfc: str, periodo: str) -> list[dict]:
         """
         SELECT pc.uuid_cfdi_pago AS uuid_pago, pc.fecha_pago, pc.version_pago, pc.moneda AS pago_moneda,
                pc.tipo_cambio AS pago_tipo_cambio, rep.estado AS pago_estado,
-               pr.cfdi_uuid, pr.parcialidad, pr.importe_pagado, pr.moneda_dr, pr.equivalencia_dr
+               pr.cfdi_uuid, pr.parcialidad, pr.importe_pagado, pr.moneda_dr, pr.equivalencia_dr,
+               pc.monto AS pago_monto, agg.suma_equivalente, agg.n_relaciones
         FROM pagos_relaciones pr
         JOIN pagos_cfdi pc ON pc.id = pr.pago_id
         JOIN cfdi rep ON rep.id = pc.cfdi_id
+        CROSS JOIN LATERAL (
+            SELECT SUM(x.importe_pagado / COALESCE(NULLIF(x.equivalencia_dr, 0), 1))::text AS suma_equivalente,
+                   COUNT(*) AS n_relaciones
+            FROM pagos_relaciones x WHERE x.pago_id = pc.id
+        ) agg
         WHERE pc.empresa_id = %s AND pc.fecha_pago >= %s::date AND pc.fecha_pago < %s::date
         """,
         (empresa_id, desde, hasta),

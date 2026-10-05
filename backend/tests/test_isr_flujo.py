@@ -257,4 +257,40 @@ def test_el_redondeo_es_medio_hacia_arriba():
     ("626", "626", "no_soportado"), ("6120", None, "no_soportado"), ("", None, "no_soportado"), (None, None, "no_soportado"),
 ])
 def test_aplicabilidad_por_regimen(texto, codigo, modulo):
-    assert f.aplicabilidad(texto) == {"codigo": codigo, "modulo": modulo}
+    a = f.aplicabilidad(texto)
+    assert (a["codigo"], a["modulo"]) == (codigo, modulo)
+    assert bool(a["avisos"]) == (codigo == "606")
+
+
+# ── revisión del #39 ─────────────────────────────────────────────────────────
+
+def test_b1_usd_con_rep_en_pesos_y_equivalencia_invertida_se_excluye_con_estimado():
+    d = recibido("R1", moneda="USD", tipo_cambio=D("20"), subtotal=D("1000"), total=D("1160"), forma_pago="03",
+                 metodo_pago="PPD", isr_retenido=D("100"))
+    p = pago("R1", "23200", pago_moneda="MXN", pago_tipo_cambio=D("1"), moneda_dr="USD", equivalencia_dr=D("20"),
+             pago_monto=D("23200"), suma_equivalente="1160", n_relaciones=1)
+    r = res(d, pagos=[p])["mes"]["deducciones"]
+
+    assert r["credito"] == D("0.00") and r["total"] == D("0.00")
+
+
+def test_b2_pago_en_efectivo_mayor_a_2000_via_rep_no_se_deduce():
+    d = recibido("R1", metodo_pago="PPD", forma_pago="99", subtotal=D("5000"), total=D("5800"))
+    p = pago("R1", "5800", forma_pago_p="01")
+    r = res(d, pagos=[p])["mes"]["deducciones"]
+
+    assert r["total"] == D("0.00")
+
+
+def test_b3_devolucion_resta_la_retencion_a_favor():
+    ing = doc("U1", isr_retenido=D("1000"))
+    nc = doc("U2", tipo_comprobante="E", subtotal=D("100"), total=D("116"), isr_retenido=D("100"),
+             relacionados_info=[{"metodo_pago": "PUE", "forma_pago": "03", "total": "1160", "moneda": "MXN"}])
+
+    assert res(ing, nc)["mes"]["ingresos"]["retenciones_a_favor"] == D("900.00")
+
+
+def test_b4_efectivo_no_deducible_conserva_la_retencion_a_cargo():
+    r = res(recibido("R1", forma_pago="01", subtotal=D("5000"), total=D("5800"), isr_retenido=D("500")))["mes"]
+
+    assert r["deducciones"]["total"] == D("0.00") and r["retenciones_a_cargo"]["proveedores"] == D("500.00")

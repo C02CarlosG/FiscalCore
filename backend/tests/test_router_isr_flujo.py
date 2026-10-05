@@ -32,7 +32,7 @@ def test_resumen_delega_y_trae_la_aplicabilidad_del_regimen(con_acceso, monkeypa
     assert r.status_code == 200, r.text
     assert visto == {"ejercicio": 2026, "rfc": "AAA010101AAA", "periodo": "2026-09"}
     d = r.json()
-    assert d["regimen"] == {"codigo": "612", "modulo": "flujo"} and d["porcentaje_nomina_exenta"] == 0.47
+    assert d["regimen"]["codigo"] == "612" and d["regimen"]["modulo"] == "flujo" and d["porcentaje_nomina_exenta"] == 0.47
     assert d["mes"]["utilidad_fiscal_estimada"] == 0.0
 
 
@@ -41,7 +41,7 @@ def test_resumen_rechaza_periodo_invalido(con_acceso, periodo):
     assert client.get(f"{BASE}/{periodo}").status_code == 422
 
 
-@pytest.mark.parametrize("cuerpo", [{"pct_nomina_exenta": 1.5}, {"pct_nomina_exenta": -0.1}, {}])
+@pytest.mark.parametrize("cuerpo", [{"pct_nomina_exenta": 1.5}, {"pct_nomina_exenta": -0.1}, {"pct_nomina_exenta": 0.5}, {}])
 def test_config_rechaza_porcentajes_invalidos(con_acceso, cuerpo):
     assert client.put(f"{BASE}/config/2026", json=cuerpo).status_code == 422
 

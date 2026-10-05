@@ -3181,7 +3181,7 @@ paths:
               type: object
               required: [pct_nomina_exenta]
               properties:
-                pct_nomina_exenta: { type: number, minimum: 0, maximum: 1 }
+                pct_nomina_exenta: { type: number, enum: [0.47, 0.53] }
       responses:
         '200':
           description: Configuracion guardada
@@ -3276,7 +3276,7 @@ paths:
         Ingresos cobrados (contado y REP, menos devoluciones), deducciones pagadas (compras y gastos, nomina,
         inversiones aparte), ISR retenido a favor y a cargo, y la utilidad fiscal estimada, para el mes y el acumulado
         del ejercicio hasta el. `regimen.modulo` dice si el regimen de la empresa usa este modulo (`flujo`), el
-        coeficiente de utilidad (`coeficiente`) o no esta soportado. No calcula el pago provisional.
+        coeficiente de utilidad (`coeficiente`) o no esta soportado; `regimen.avisos` lista las salvedades del regimen (p. ej. 606: deduccion opcional ciega del 35 %). No calcula el pago provisional.
       parameters:
         - $ref: '#/components/parameters/EmpresaId'
         - { name: periodo, in: path, required: true, schema: { type: string, pattern: '^20[0-9]{2}-(0[1-9]|1[0-2])$' } }

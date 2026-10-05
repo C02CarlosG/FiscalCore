@@ -18,7 +18,7 @@ from datetime import date, datetime
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, Optional
 
-from .iva_flujo import factor_a_pesos
+from .flujo_pagos import equivalencia_invertida, factor_del_pago, forma_pago_del_cobro, tc_documento
 
 CENTAVOS = Decimal("0.01")
 CERO = Decimal("0")
@@ -31,6 +31,7 @@ PORCENTAJE_NOMINA_EXENTA = Decimal("0.47")                          # D-F7-2
 TIPOS_PERCEPCION_FUERA_DE_BASE = {"003": "ptu", "050": "viaticos"}  # c_TipoPercepcion: PTU y viáticos
 LADOS = ("ingreso", "deduccion")
 ORIGENES = ("contado", "credito", "devoluciones", "nomina")
+MOTIVOS_QUE_CONSERVAN_RETENCION = frozenset({"efectivo", "uso_no_deducible"})   # el gasto no se deduce, la retención se entera igual
 
 
 def _dec(valor: Any) -> Decimal:
@@ -53,12 +54,7 @@ def _mes(fecha: Any) -> str:
     return str(fecha)[:7]
 
 
-def _tc_documento(doc: dict) -> Optional[Decimal]:
-    """Tipo de cambio a pesos del comprobante: 1 en MXN o XXX; en moneda extranjera sin tipo de cambio, ``None``."""
-    if (doc.get("moneda") or "MXN") in ("MXN", "XXX"):
-        return UNO
-    tc = _dec(doc.get("tipo_cambio"))
-    return tc if tc > 0 else None
+_tc_documento = tc_documento
 
 
 def _base(doc: dict) -> Decimal:
@@ -113,6 +109,15 @@ def _no_deducible_por_si_mismo(rel: dict) -> bool:
         or rel.get("uso_cfdi") in USOS_NO_DEDUCIBLES
 
 
+def _marcas_de_deduccion(doc: dict, marcas: set) -> None:
+    """Avisos informativos de una compra o gasto: efectivo hasta el umbral (puede ser combustible, que en efectivo no se
+    deduce por ningún monto, LISR 27-III) e inversiones (se identifican sin depreciación)."""
+    if doc.get("forma_pago") == "01":
+        marcas.add("efectivo_hasta_umbral")
+    if doc.get("uso_cfdi") in USOS_INVERSION:
+        marcas.add("inversion_sin_depreciacion")
+
+
 def _marcas_de_egreso(doc: dict, lado: str) -> set:
     relacionados = doc.get("relacionados_info") or []
     marcas: set = set()
@@ -145,6 +150,8 @@ def eventos_de_documento(doc: dict, rfc: str) -> list[dict]:
             marcas.add("anticipo")
         if tipo == "E":
             marcas |= _marcas_de_egreso(doc, lado)
+        elif lado == "deduccion":
+            _marcas_de_deduccion(doc, marcas)
         eventos.append(_evento(doc, lado, "devoluciones" if tipo == "E" else "contado", doc["fecha_emision"],
                                base, retencion, marcas, monto_efecto=_dec(doc.get("total")) * (tc or UNO),
                                cubeta=None))
@@ -160,9 +167,17 @@ def eventos_de_pago(pago: dict, doc: dict, rfc: str) -> list[dict]:
         return []
     marcas: set = set()
     total = _dec(doc.get("total"))
-    f = factor_a_pesos(pago.get("moneda_dr") or doc.get("moneda"), pago.get("equivalencia_dr"),
-                       pago.get("pago_moneda"), pago.get("pago_tipo_cambio"))
-    if f is None:
+    f = factor_del_pago(pago, doc)
+    if equivalencia_invertida(pago):
+        # Se excluye (motivo equivalencia_sospechosa) pero se muestra el estimado: proporción pagada con el TC del CFDI
+        tc = _tc_documento(doc)
+        if tc is not None and total > 0:
+            k = _dec(pago.get("importe_pagado")) / total
+            base, retencion, pagado = _base(doc) * k * tc, _dec(doc.get("isr_retenido")) * k * tc, _dec(pago.get("importe_pagado")) * tc
+        else:
+            base = retencion = pagado = CERO
+        marcas.add("equivalencia_sospechosa")
+    elif f is None:
         base = retencion = pagado = CERO
         marcas.add("sin_equivalencia")
     elif total <= 0:
@@ -176,12 +191,17 @@ def eventos_de_pago(pago: dict, doc: dict, rfc: str) -> list[dict]:
     if pago.get("version_pago") == "1.0":
         marcas.add("pago_v1")
     eventos = []
+    forma = forma_pago_del_cobro(pago)
     for lado in _lados(doc, rfc):
         marcas_ev = set(marcas)
         if lado == "deduccion":
-            marcas_ev.add("forma_pago_rep")         # FormaDePagoP aún no se guarda: no se detecta el efectivo
+            if forma is None:
+                marcas_ev.add("forma_pago_rep")     # FormaDePagoP aún no se guarda: no se detecta el efectivo
+            _marcas_de_deduccion(doc, marcas_ev)
         ev = _evento(doc, lado, "credito", pago["fecha_pago"], base, retencion, marcas_ev, monto_efecto=pagado,
                      uuid_pago=pago.get("uuid_pago"))
+        if forma is not None:
+            ev["forma_pago"] = forma                # cuenta cómo se pagó, no la forma del PPD (99)
         eventos.append(ev)
     return eventos
 
@@ -212,7 +232,8 @@ def evento_de_nomina(nomina: dict) -> Optional[dict]:
 
 def motivo_exclusion(ev: dict) -> Optional[str]:
     """Por qué un evento no se considera (regla automática), o ``None``."""
-    for marca in ("sin_equivalencia", "sin_tipo_cambio", "sin_proporcion", "aplicado_en_rep", "original_no_deducible"):
+    for marca in ("sin_equivalencia", "equivalencia_sospechosa", "sin_tipo_cambio", "sin_proporcion", "aplicado_en_rep",
+                  "original_no_deducible"):
         if marca in ev["marcas"]:
             return marca
     if ev["lado"] == "deduccion" and ev["origen"] in ("contado", "credito"):
@@ -249,6 +270,9 @@ MENSAJES = {
     "sin_proporcion": "Hay pagos de documentos con total en cero: no se puede calcular su importe.",
     "forma_pago_rep": "La forma de pago del REP no se guarda: un pago en efectivo de una factura a crédito no se detecta como no deducible.",
     "anticipo": "Hay anticipos del SAT: se acumulan al cobro y su aplicación (forma de pago 30) los resta de la factura final.",
+    "equivalencia_sospechosa": "Hay pagos cuya equivalencia no cuadra con el Monto del propio complemento (parece invertida): no se suman, revisa esos renglones.",
+    "efectivo_hasta_umbral": "Hay compras pagadas en efectivo por $2,000 o menos: se deducen, salvo los combustibles (ClaveProdServ 151015xx), que en efectivo no se deducen por ningún monto (LISR 27-III). Esta versión no lee los conceptos: revisa las validaciones de CFDI.",
+    "inversion_sin_depreciacion": "Hay inversiones (I01–I08): se identifican y no suman a la deducción del mes; la depreciación no está incluida (LISR 104 y 115-VI).",
 }
 
 
@@ -258,6 +282,7 @@ class _Lado:
     def __init__(self) -> None:
         self.origen = {o: CERO for o in ORIGENES}
         self.retenciones = CERO
+        self.retenciones_conservadas = CERO       # retención de gastos no deducibles: igual se entera (LISR 106/116)
         self.docs: set = set()
         self.fuera: dict[str, list] = {}
         self.fuera_total = [set(), CERO]
@@ -266,7 +291,7 @@ class _Lado:
 
     def sumar(self, ev: dict) -> None:
         self.origen[ev["origen"]] += ev["base"]
-        self.retenciones += ev["retencion"]
+        self.retenciones += (-1 if ev["origen"] == "devoluciones" else 1) * ev["retencion"]
         self.docs.add(llave(ev["uuid"]))
         if ev.get("nomina"):
             for k, v in ev["nomina"].items():
@@ -288,7 +313,10 @@ def _resumen_de_lado(eventos: list[dict], lado: str, meses: set, ajustes: dict, 
         elif kind == "inversion":
             acum.inversiones[0].add(llave(ev["uuid"]))
             acum.inversiones[1] += signo * ev["base"]
+            acum.retenciones_conservadas += signo * ev["retencion"]
         else:
+            if motivo in MOTIVOS_QUE_CONSERVAN_RETENCION:
+                acum.retenciones_conservadas += signo * ev["retencion"]
             acum.fuera_total[0].add(llave(ev["uuid"]))
             acum.fuera_total[1] += signo * ev["base"]
             por = acum.fuera.setdefault(motivo, [set(), CERO])
@@ -319,7 +347,7 @@ def _publico_deducciones(a: _Lado, pct: Decimal) -> dict:
             "porcentaje_exento": pct, "exento_deducible": _q(exento_deducible), "deducible": _q(nomina_deducible),
             "excluido_ptu": _q(a.nomina["ptu"]), "excluido_viaticos": _q(a.nomina["viaticos"]),
         },
-        "total": _q(sin_nomina + nomina_deducible),
+        "total": _q(sin_nomina) + _q(nomina_deducible),
         "inversiones": {"cfdi": len(a.inversiones[0]), "base": _q(a.inversiones[1])},
         "cfdi": len(a.docs),
     }
@@ -339,7 +367,7 @@ def _bloque(eventos: list[dict], meses: set, ajustes: dict, pct: Decimal, avisos
     # La retención a cargo: la que se hizo a los trabajadores (nómina) y la de los proveedores pagados
     de_nomina = sum((e["retencion"] for e in eventos if e["lado"] == "deduccion" and e["origen"] == "nomina"
                      and e["periodo_natural"] in meses and estado(e, ajustes)[0] == "considerado"), CERO)
-    a_cargo = ded.retenciones
+    a_cargo = ded.retenciones + ded.retenciones_conservadas
     return {
         "ingresos": {**ingresos, "no_considerados": _fuera(ing)},
         "deducciones": {**deducciones, "no_considerados": _fuera(ded)},
@@ -461,4 +489,8 @@ def aplicabilidad(texto_regimen: Optional[str]) -> dict:
         modulo = "coeficiente"
     else:
         modulo = "no_soportado"
-    return {"codigo": codigo, "modulo": modulo}
+    avisos = []
+    if codigo == "606":
+        avisos.append("606: la deducción opcional ciega del 35 % (LISR 115) sustituye a los gastos y la nómina y el predial siguen "
+                      "reglas propias: este flujo no las aplica.")
+    return {"codigo": codigo, "modulo": modulo, "avisos": avisos}
