@@ -2871,6 +2871,114 @@ paths:
         '403':
           $ref: '#/components/responses/ForbiddenError'
 
+  /api/v1/empresas/{empresa_id}/proveedores:
+    get:
+      operationId: listarProveedores
+      tags: [Proveedores]
+      summary: Catalogo de proveedores de la empresa
+      description: |
+        **Escribe**: antes de listar agrega al catalogo los emisores de los CFDI recibidos vigentes que falten
+        (`agregados` dice cuantos; un RFC con formato invalido no entra y se cuenta en `omitidos`) y deja el evento
+        `proveedores_sincronizados` en la auditoria. `q` busca en RFC, nombre e ID fiscal.
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - { name: q, in: query, schema: { type: string, maxLength: 100 } }
+      responses:
+        '200':
+          description: Proveedores
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total: { type: integer }
+                  agregados: { type: integer }
+                  omitidos: { type: integer }
+                  items: { type: array, items: { $ref: '#/components/schemas/Proveedor' } }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+    post:
+      operationId: crearProveedor
+      tags: [Proveedores]
+      summary: Alta manual de un proveedor
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [rfc]
+              properties:
+                rfc: { type: string, maxLength: 30, description: "Se normaliza a mayusculas. XAXX010101000 se rechaza (422)" }
+                nombre: { type: string, maxLength: 300 }
+                tipo_tercero: { type: string, enum: ['04', '05', '15'], nullable: true }
+                tipo_operacion: { type: string, enum: ['02', '03', '06', '07', '08', '85', '87'], nullable: true, description: "Por defecto 85" }
+                pais: { type: string, minLength: 3, maxLength: 3, nullable: true }
+                jurisdiccion_detalle: { type: string, maxLength: 300, nullable: true }
+                id_fiscal: { type: string, maxLength: 40, nullable: true }
+                efectos_fiscales: { type: boolean, nullable: true }
+      responses:
+        '201':
+          description: Proveedor creado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Proveedor'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '409':
+          description: El RFC (no generico) o el ID fiscal del extranjero ya existen
+        '422':
+          description: RFC, codigos o reglas cruzadas invalidos (el 05 exige ID fiscal y pais; el 04 un RFC no generico; la 87 solo con el 15)
+
+  /api/v1/empresas/{empresa_id}/proveedores/{proveedor_id}:
+    patch:
+      operationId: editarProveedor
+      tags: [Proveedores]
+      summary: Edita un proveedor
+      description: Solo cambia los campos enviados y queda en la auditoria. Editar el nombre impide que la alimentacion desde los CFDI lo pise; `nombre_editado=false` la reactiva. `nombre` y `nombre_editado` no admiten null.
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - { name: proveedor_id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                nombre: { type: string, maxLength: 300 }
+                nombre_editado: { type: boolean }
+                tipo_tercero: { type: string, enum: ['04', '05', '15'], nullable: true }
+                tipo_operacion: { type: string, enum: ['02', '03', '06', '07', '08', '85', '87'], nullable: true }
+                pais: { type: string, minLength: 3, maxLength: 3, nullable: true }
+                jurisdiccion_detalle: { type: string, maxLength: 300, nullable: true }
+                id_fiscal: { type: string, maxLength: 40, nullable: true }
+                efectos_fiscales: { type: boolean, nullable: true }
+      responses:
+        '200':
+          description: Proveedor actualizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Proveedor'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          description: Proveedor no encontrado
+        '409':
+          description: Ya existe un extranjero con ese ID fiscal
+        '422':
+          description: Codigos o reglas cruzadas invalidos
+
   /api/v1/empresas/{empresa_id}/cedula-iva/{periodo}:
     get:
       operationId: cedulaIva
@@ -3563,6 +3671,23 @@ components:
             detail: "Error SAT: Servicio no disponible"
 
   schemas:
+    Proveedor:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        rfc: { type: string }
+        nombre: { type: string }
+        nombre_editado: { type: boolean }
+        tipo_tercero: { type: string, enum: ['04', '05', '15'], nullable: true, description: "Catalogo por confirmar contra el instructivo oficial del SAT" }
+        tipo_operacion: { type: string, enum: ['02', '03', '06', '07', '08', '85', '87'], nullable: true, description: "La 87 solo con tercero 15" }
+        pais: { type: string, minLength: 3, maxLength: 3, nullable: true, description: "ISO 3166-1 alfa-3" }
+        jurisdiccion_detalle: { type: string, nullable: true }
+        id_fiscal: { type: string, nullable: true }
+        efectos_fiscales: { type: boolean, nullable: true }
+        origen: { type: string, enum: [cfdi, manual] }
+        pendiente: { type: boolean, description: "Extranjero sin pais o sin ID fiscal" }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
 
     ErrorResponse:
       type: object
