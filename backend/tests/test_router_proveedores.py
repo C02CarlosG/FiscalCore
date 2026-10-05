@@ -79,21 +79,50 @@ def test_crear_extranjero_con_id_fiscal_y_pais(con_acceso, monkeypatch):
     assert r.status_code == 201 and visto["datos"]["pais"] == "USA"
 
 
-def test_editar_valida_el_estado_resultante_y_solo_pasa_lo_enviado(con_acceso, monkeypatch):
+def _actualizar_falso(visto=None, base=None):
+    """Imita ``proveedores.actualizar``: aplica el validador al estado resultante antes de «guardar»."""
+    def _f(e, pid, cambios, u, validar=None):
+        if visto is not None:
+            visto.update(pid=pid, cambios=cambios, valida=validar is not None)
+        if validar is not None:
+            errores = validar({**FILA, **(base or {}), **cambios})
+            if errores:
+                raise proveedores.Invalido(errores)
+        return FILA
+    return _f
+
+
+def test_editar_solo_pasa_lo_enviado_y_valida_dentro_de_la_transaccion(con_acceso, monkeypatch):
     visto = {}
-    monkeypatch.setattr(proveedores, "estado_para_validar", lambda e, pid, c: {**FILA, **c})
-    monkeypatch.setattr(proveedores, "actualizar", lambda e, pid, cambios, u: visto.update(pid=pid, cambios=cambios) or FILA)
+    monkeypatch.setattr(proveedores, "actualizar", _actualizar_falso(visto))
 
     r = client.patch(f"{BASE}/{PID}", json={"tipo_operacion": "06"})
 
-    assert r.status_code == 200 and visto == {"pid": PID, "cambios": {"tipo_operacion": "06"}}
+    assert r.status_code == 200 and visto == {"pid": PID, "cambios": {"tipo_operacion": "06"}, "valida": True}
+
+
+def test_editar_el_nombre_no_dispara_las_reglas_cruzadas(con_acceso, monkeypatch):
+    visto = {}
+    monkeypatch.setattr(proveedores, "actualizar", _actualizar_falso(visto))
+
+    assert client.patch(f"{BASE}/{PID}", json={"nombre": "NUEVO"}).status_code == 200
+    assert visto["valida"] is False
 
 
 def test_editar_rechaza_un_estado_resultante_invalido(con_acceso, monkeypatch):
-    monkeypatch.setattr(proveedores, "estado_para_validar", lambda e, pid, c: {**FILA, **c})
+    monkeypatch.setattr(proveedores, "actualizar", _actualizar_falso())
 
     assert client.patch(f"{BASE}/{PID}", json={"tipo_tercero": "05"}).status_code == 422       # sin ID fiscal ni país
     assert client.patch(f"{BASE}/{PID}", json={"tipo_operacion": "87"}).status_code == 422
+
+
+def test_alta_manual_de_xexx_sin_tipo_aplica_el_05_y_exige_id_fiscal_y_pais(con_acceso, monkeypatch):
+    visto = {}
+    monkeypatch.setattr(proveedores, "crear", lambda e, rfc, datos, u: visto.update(datos=datos) or FILA)
+
+    assert client.post(BASE, json={"rfc": "XEXX010101000", "nombre": "ACME"}).status_code == 422
+    r = client.post(BASE, json={"rfc": "XEXX010101000", "nombre": "ACME", "id_fiscal": "1", "pais": "usa"})
+    assert r.status_code == 201 and visto["datos"]["tipo_tercero"] == "05"
 
 
 @pytest.mark.parametrize("cuerpo", [{"nombre": None}, {"nombre_editado": None}])
@@ -103,14 +132,14 @@ def test_editar_rechaza_nulos_en_nombre(con_acceso, cuerpo):
 
 def test_editar_nombre_editado_false_vuelve_a_la_alimentacion(con_acceso, monkeypatch):
     visto = {}
-    monkeypatch.setattr(proveedores, "actualizar", lambda e, pid, cambios, u: visto.update(cambios=cambios) or FILA)
+    monkeypatch.setattr(proveedores, "actualizar", lambda e, pid, cambios, u, validar=None: visto.update(cambios=cambios) or FILA)
 
     assert client.patch(f"{BASE}/{PID}", json={"nombre_editado": False}).status_code == 200
     assert visto["cambios"] == {"nombre_editado": False}
 
 
 def test_editar_inexistente_o_id_mal_formado_es_404(con_acceso, monkeypatch):
-    monkeypatch.setattr(proveedores, "actualizar", lambda *a: None)
+    monkeypatch.setattr(proveedores, "actualizar", lambda *a, **k: None)
 
     assert client.patch(f"{BASE}/{PID}", json={"nombre": "x"}).status_code == 404
     assert client.patch(f"{BASE}/no-es-uuid", json={"nombre": "x"}).status_code == 404

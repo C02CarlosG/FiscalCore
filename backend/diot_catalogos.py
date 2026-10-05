@@ -12,6 +12,7 @@ from .cfdi_parser import RFC_REGEX
 TIPOS_TERCERO = ("04", "05", "15")            # nacional, extranjero, global
 TIPOS_OPERACION = ("02", "03", "06", "07", "08", "85", "87")
 OPERACION_SOLO_GLOBAL = frozenset({"87"})     # la 87 solo con tercero 15
+OPERACION_SOLO_EXTRANJERO = frozenset({"07", "08"})   # por confirmar contra el instructivo; solo advierte
 RFC_EXTRANJERO = "XEXX010101000"
 RFC_PUBLICO_GENERAL = "XAXX010101000"
 RFC_GENERICOS = frozenset({RFC_EXTRANJERO, RFC_PUBLICO_GENERAL})

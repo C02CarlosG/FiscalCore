@@ -4,7 +4,7 @@ Aquí vive la lectura/escritura en la base; las reglas de validación están en 
 hecho por el contador, y la alimentación que agrega proveedores, se audita en la misma transacción."""
 from __future__ import annotations
 
-from typing import Optional
+from typing import Callable, Optional
 
 import psycopg2.extras
 
@@ -12,7 +12,7 @@ from . import db, diot_catalogos
 
 CAMPOS_EDITABLES = ("nombre", "nombre_editado", "tipo_tercero", "tipo_operacion", "pais", "jurisdiccion_detalle",
                     "id_fiscal", "efectos_fiscales")
-_COLUMNAS = ("id, rfc, nombre, nombre_editado, tipo_tercero, tipo_operacion, pais, jurisdiccion_detalle, id_fiscal, "
+_COLUMNAS = ("id, rfc, nombre, nombre_cfdi, nombre_editado, tipo_tercero, tipo_operacion, pais, jurisdiccion_detalle, id_fiscal, "
              "efectos_fiscales, origen, created_at, updated_at")
 
 
@@ -55,11 +55,11 @@ def sincronizar(empresa_id: str, rfc_empresa: str, usuario_id: Optional[str] = N
                     continue
                 if rfc == diot_catalogos.RFC_EXTRANJERO:
                     cur.execute(
-                        """INSERT INTO proveedores (empresa_id, rfc, nombre, tipo_tercero, tipo_operacion, origen)
-                           VALUES (%s, %s, %s, %s, %s, 'cfdi')
-                           ON CONFLICT (empresa_id, rfc, nombre) WHERE rfc = 'XEXX010101000' AND origen = 'cfdi'
+                        """INSERT INTO proveedores (empresa_id, rfc, nombre, nombre_cfdi, tipo_tercero, tipo_operacion, origen)
+                           VALUES (%s, %s, %s, %s, %s, %s, 'cfdi')
+                           ON CONFLICT (empresa_id, rfc, nombre_cfdi) WHERE rfc = 'XEXX010101000' AND nombre_cfdi IS NOT NULL
                            DO NOTHING RETURNING 1""",
-                        (empresa_id, rfc, nombre, diot_catalogos.tipo_tercero_por_defecto(rfc), diot_catalogos.OPERACION_POR_DEFECTO),
+                        (empresa_id, rfc, nombre, nombre, diot_catalogos.tipo_tercero_por_defecto(rfc), diot_catalogos.OPERACION_POR_DEFECTO),
                     )
                 else:
                     cur.execute(
@@ -107,6 +107,14 @@ class Duplicado(Exception):
     """El RFC (o el ID fiscal del extranjero) ya está en el catálogo."""
 
 
+class Invalido(Exception):
+    """El proveedor resultante no cumple las reglas del catálogo de la DIOT (``errores`` los lista)."""
+
+    def __init__(self, errores: list[str]) -> None:
+        super().__init__("; ".join(errores))
+        self.errores = errores
+
+
 def crear(empresa_id: str, rfc: str, datos: dict, usuario_id: str) -> dict:
     """Alta manual. ``Duplicado`` si el RFC (no genérico) o el ID fiscal del extranjero ya existen."""
     rfc = rfc_normalizado(rfc)
@@ -114,10 +122,10 @@ def crear(empresa_id: str, rfc: str, datos: dict, usuario_id: str) -> dict:
         with db.get_conn() as conn:
             with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
                 cur.execute(
-                    """INSERT INTO proveedores (empresa_id, rfc, nombre, nombre_editado, tipo_tercero, tipo_operacion,
+                    """INSERT INTO proveedores (empresa_id, rfc, nombre, nombre_cfdi, nombre_editado, tipo_tercero, tipo_operacion,
                                                 pais, jurisdiccion_detalle, id_fiscal, efectos_fiscales, origen)
-                       VALUES (%s, %s, %s, TRUE, %s, %s, %s, %s, %s, %s, 'manual') RETURNING id""",
-                    (empresa_id, rfc, datos.get("nombre") or "", datos.get("tipo_tercero"), datos.get("tipo_operacion"),
+                       VALUES (%s, %s, %s, %s, TRUE, %s, %s, %s, %s, %s, %s, 'manual') RETURNING id""",
+                    (empresa_id, rfc, datos.get("nombre") or "", (datos.get("nombre") or "") if rfc == diot_catalogos.RFC_EXTRANJERO else None, datos.get("tipo_tercero"), datos.get("tipo_operacion"),
                      datos.get("pais"), datos.get("jurisdiccion_detalle"), datos.get("id_fiscal"), datos.get("efectos_fiscales")),
                 )
                 nuevo = str(cur.fetchone()["id"])
@@ -127,9 +135,12 @@ def crear(empresa_id: str, rfc: str, datos: dict, usuario_id: str) -> dict:
     return obtener(empresa_id, nuevo)
 
 
-def actualizar(empresa_id: str, proveedor_id: str, cambios: dict, usuario_id: str) -> Optional[dict]:
-    """Cambia campos del proveedor y lo audita, todo o nada. ``None`` si no existe; ``Duplicado`` si el nuevo ID fiscal
-    choca con otro extranjero. Editar el nombre lo protege de la alimentación; ``nombre_editado=False`` la reactiva."""
+def actualizar(empresa_id: str, proveedor_id: str, cambios: dict, usuario_id: str,
+               validar: Optional[Callable[[dict], list]] = None) -> Optional[dict]:
+    """Cambia campos del proveedor y lo audita, todo o nada. Con ``validar`` se revisa el estado resultante **con la fila
+    bloqueada** (``FOR UPDATE``), en la misma transacción que el cambio: ``Invalido`` si no cumple. ``None`` si no existe;
+    ``Duplicado`` si el nuevo ID fiscal choca con otro extranjero. Editar el nombre lo protege de la alimentación;
+    ``nombre_editado=False`` la reactiva."""
     cambios = {k: v for k, v in cambios.items() if k in CAMPOS_EDITABLES}
     if "nombre" in cambios and "nombre_editado" not in cambios:
         cambios["nombre_editado"] = True
@@ -138,24 +149,22 @@ def actualizar(empresa_id: str, proveedor_id: str, cambios: dict, usuario_id: st
     try:
         with db.get_conn() as conn:
             with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-                cur.execute("SELECT " + ", ".join(cambios) + " FROM proveedores WHERE empresa_id = %s AND id = %s FOR UPDATE",
-                            (empresa_id, proveedor_id))
-                antes = cur.fetchone()
-                if antes is None:
+                cur.execute(f"SELECT rfc, {', '.join(c for c in CAMPOS_EDITABLES)} FROM proveedores "
+                            "WHERE empresa_id = %s AND id = %s FOR UPDATE", (empresa_id, proveedor_id))
+                actual = cur.fetchone()
+                if actual is None:
                     return None
+                if validar is not None:
+                    errores = validar({**actual, **cambios})
+                    if errores:
+                        raise Invalido(errores)
                 cur.execute(
                     f"UPDATE proveedores SET {', '.join(f'{k} = %s' for k in cambios)}, updated_at = NOW() "
                     "WHERE empresa_id = %s AND id = %s",
                     (*cambios.values(), empresa_id, proveedor_id),
                 )
                 _auditar(cur, usuario_id, "proveedor_editado", empresa_id, proveedor_id,
-                         {"antes": dict(antes), "despues": cambios})
+                         {"antes": {k: actual[k] for k in cambios}, "despues": cambios})
     except psycopg2.errors.UniqueViolation as exc:
         raise Duplicado() from exc
     return obtener(empresa_id, proveedor_id)
-
-
-def estado_para_validar(empresa_id: str, proveedor_id: str, cambios: dict) -> Optional[dict]:
-    """El proveedor tal como quedaría después de aplicar ``cambios`` (para validar reglas cruzadas); ``None`` si no existe."""
-    actual = obtener(empresa_id, proveedor_id)
-    return None if actual is None else {**actual, **cambios}
