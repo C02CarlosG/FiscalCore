@@ -13,11 +13,12 @@ import {
   useCancelarInvitacion,
   useInvitar,
   useQuitarUsuario,
+  useResolverAceptacion,
   useUsuariosEmpresa,
 } from "@/hooks/useCuenta";
 import { ApiError } from "@/lib/api-client";
 import { formatearFecha } from "@/lib/formato";
-import { ETIQUETA_ROL_EMPRESA, type InvitacionEmpresa, type RolEmpresa } from "./tipos";
+import { ETIQUETA_ROL_EMPRESA, type AceptacionPorAprobar, type InvitacionEmpresa, type RolEmpresa } from "./tipos";
 
 const SELECT_CLASS =
   "h-9 rounded-md border border-input bg-background px-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring";
@@ -98,6 +99,59 @@ function InvitacionesPendientes({ empresaId, invitaciones }: { empresaId: string
   );
 }
 
+function PorAprobar({ empresaId, pendientes }: { empresaId: string; pendientes: AceptacionPorAprobar[] }) {
+  const resolver = useResolverAceptacion(empresaId);
+  const [error, setError] = useState<string | null>(null);
+  if (pendientes.length === 0) return null;
+
+  async function handle(id: string, aprobar: boolean) {
+    setError(null);
+    try {
+      await resolver.mutateAsync({ id, aprobar });
+    } catch (err) {
+      setError(mensajeDe(err, "No se pudo resolver la aceptación"));
+    }
+  }
+
+  return (
+    <div className="space-y-2">
+      <h3 className="text-sm font-semibold">Por aprobar</h3>
+      <p className="text-xs text-muted-foreground">
+        Estas personas aceptaron una invitación. Revisa que el nombre y el correo correspondan a quien invitaste
+        antes de darles acceso: una cuenta creada hace poco con un correo que no reconoces puede ser de alguien más.
+      </p>
+      {error && (
+        <p role="alert" className="text-sm text-destructive">
+          {error}
+        </p>
+      )}
+      <ul className="divide-y divide-border rounded-md border border-border">
+        {pendientes.map((p) => (
+          <li key={p.id} className="flex flex-col gap-2 p-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0 text-sm">
+              <p className="truncate font-medium">{p.nombre ?? "Sin nombre"}</p>
+              <p className="truncate text-xs text-muted-foreground">
+                <span>{p.email}</span> · {ETIQUETA_ROL_EMPRESA[p.rol]} · cuenta creada el {formatearFecha(p.cuenta_creada)}{" "}
+                · aceptó el {formatearFecha(p.aceptada)}
+              </p>
+            </div>
+            <div className="flex flex-none gap-2">
+              <Button type="button" size="sm" disabled={resolver.isPending}
+                      aria-label={`Aprobar acceso de ${p.email}`} onClick={() => handle(p.id, true)}>
+                Aprobar
+              </Button>
+              <Button type="button" size="sm" variant="outline" disabled={resolver.isPending}
+                      aria-label={`Rechazar acceso de ${p.email}`} onClick={() => handle(p.id, false)}>
+                Rechazar
+              </Button>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 export function UsuariosEmpresa({ empresaId }: { empresaId: string }) {
   const consulta = useUsuariosEmpresa(empresaId);
   const cambiarRol = useCambiarRol(empresaId);
@@ -109,7 +163,7 @@ export function UsuariosEmpresa({ empresaId }: { empresaId: string }) {
   if (consulta.isError || !consulta.data) {
     return <ErrorState message="No se pudieron consultar los usuarios." onRetry={() => consulta.refetch()} />;
   }
-  const { usuarios, puede_administrar, invitaciones = [] } = consulta.data;
+  const { usuarios, puede_administrar, invitaciones = [], por_aprobar = [] } = consulta.data;
 
   async function handleRol(usuarioId: string, rol: RolEmpresa) {
     setError(null);
@@ -198,6 +252,7 @@ export function UsuariosEmpresa({ empresaId }: { empresaId: string }) {
             </li>
           ))}
         </ul>
+        {puede_administrar && <PorAprobar empresaId={empresaId} pendientes={por_aprobar} />}
         {puede_administrar && <InvitacionesPendientes empresaId={empresaId} invitaciones={invitaciones} />}
         {puede_administrar && <InvitarForm empresaId={empresaId} />}
       </CardContent>

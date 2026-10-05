@@ -12,7 +12,7 @@ vi.mock("@/lib/api-client", async () => {
 import { apiFetch } from "@/lib/api-client";
 
 const invitacion = {
-  id: "i1", rol: "contador", creada: "2026-10-04T00:00:00+00:00", rfc: "ACM010101AA1",
+  id: "i1", rol: "contador", estado: "pendiente", creada: "2026-10-04T00:00:00+00:00", rfc: "ACM010101AA1",
   razon_social: "ACME SA DE CV", invitada_por: "Carlos",
 };
 
@@ -59,5 +59,12 @@ describe("MisInvitaciones", () => {
     await waitFor(() =>
       expect(apiFetch).toHaveBeenCalledWith("/api/v1/cuenta/invitaciones/i1/rechazar", { method: "POST" }),
     );
+  });
+
+  it("una aceptada muestra que espera aprobación, sin botones", async () => {
+    renderInvitaciones([{ ...invitacion, estado: "aceptada_pendiente" }]);
+    expect(await screen.findByText("Esperando aprobación")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Aceptar invitación/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Rechazar invitación/ })).not.toBeInTheDocument();
   });
 });

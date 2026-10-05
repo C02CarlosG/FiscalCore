@@ -414,6 +414,7 @@ pausa.
 | 2026-10-04 | D → B | U1: (1) `POST /mis-empresas` (`empresas.py`) vincula al creador con `rol = 'administrador'` (hoy usa el valor por defecto; U1 lo compensa al leer). (2) Breadcrumb de `Header.tsx` para `/perfil` ("Mi perfil") y `usuarios` ("Usuarios"); `"usuarios"` en `SUB_RUTAS` de `EmpresaSwitcher.tsx`. (3) Ya no aplica: U1 da acceso por invitación y no crea contraseñas temporales | Pendiente |
 | 2026-10-04 | D → B | Requisito de U1: normalizar correos a minúsculas al registrar e iniciar sesión, e índice único sobre `lower(email)`; la migración detecta duplicados y falla con mensaje claro, sin borrar cuentas | Autorizado por Carlos; después de F2.4 |
 | 2026-10-04 | Coordinación → B | Verificación de correo con enlace y recuperación de contraseña (requiere servicio de envío de correo) antes de abrir producción a clientes externos (D9) | Pendiente |
+| 2026-10-05 | D → B | U1 (m5): `registrar_evento` (`auditoria.py`) acepta un cursor opcional para escribir la auditoría en la misma transacción que el cambio; hoy abre su propia conexión y U1 audita justo después del commit | Pendiente |
 
 ## Riesgos
 

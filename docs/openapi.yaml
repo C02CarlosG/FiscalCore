@@ -3391,6 +3391,12 @@ paths:
                     type: array
                     description: Pendientes; vacía si quien consulta no administra la empresa.
                     items: { $ref: '#/components/schemas/InvitacionEmpresa' }
+                  por_aprobar:
+                    type: array
+                    description: |
+                      Aceptaciones que esperan la aprobación de un administrador (doble
+                      confirmación); vacía si quien consulta no administra la empresa.
+                    items: { $ref: '#/components/schemas/AceptacionPorAprobar' }
         '401':
           $ref: '#/components/responses/UnauthorizedError'
         '403':
@@ -3507,12 +3513,54 @@ paths:
         '404':
           $ref: '#/components/responses/NotFoundError'
 
+  /api/v1/cuenta/empresas/{empresa_id}/invitaciones/{invitacion_id}/aprobar:
+    post:
+      operationId: aprobarAceptacion
+      tags: [Cuenta]
+      summary: Aprobar a quien aceptó una invitación (le da acceso con el rol invitado)
+      description: |
+        Solo administradores de la empresa (o de la plataforma). El vínculo se crea en la
+        misma transacción que bloquea los vínculos de la empresa. Se audita
+        (`cuenta.aprobar_invitacion`).
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - { name: invitacion_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '204':
+          description: Aprobada; la persona ya tiene acceso
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          description: No hay una aceptación vigente con ese id en esta empresa (no existe, es de otra empresa, ya se resolvió o venció)
+
+  /api/v1/cuenta/empresas/{empresa_id}/invitaciones/{invitacion_id}/rechazar:
+    post:
+      operationId: rechazarAceptacion
+      tags: [Cuenta]
+      summary: Rechazar a quien aceptó una invitación (no le da acceso)
+      description: Solo administradores. Se audita (`cuenta.rechazar_aceptacion`).
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - { name: invitacion_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '204':
+          description: Rechazada
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          description: No hay una aceptación vigente con ese id en esta empresa
+
   /api/v1/cuenta/invitaciones:
     get:
       operationId: misInvitaciones
       tags: [Cuenta]
       summary: Invitaciones pendientes y vigentes (7 días) al correo de la cuenta
       description: |
+        Incluye las que esta cuenta ya aceptó y esperan aprobación (`aceptada_pendiente`).
         Vacía si hay más de una cuenta con el mismo correo en minúsculas (se audita) o si la
         empresa está inactiva.
       responses:
@@ -3527,6 +3575,7 @@ paths:
                   properties:
                     id: { type: string, format: uuid }
                     rol: { type: string, enum: [administrador, contador] }
+                    estado: { type: string, enum: [pendiente, aceptada_pendiente] }
                     creada: { type: string, format: date-time }
                     rfc: { type: string }
                     razon_social: { type: string }
@@ -3538,18 +3587,21 @@ paths:
     post:
       operationId: aceptarInvitacion
       tags: [Cuenta]
-      summary: Aceptar una invitación (da acceso a la empresa con el rol invitado)
+      summary: Aceptar una invitación (queda por aprobar; todavía no da acceso)
+      description: |
+        Doble confirmación: la invitación pasa a `aceptada_pendiente` y un administrador de
+        la empresa debe aprobarla en los siguientes 7 días para que se cree el acceso.
       parameters:
         - { name: invitacion_id, in: path, required: true, schema: { type: string, format: uuid } }
       responses:
         '200':
-          description: Aceptada
+          description: Aceptada, por aprobar
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  empresa_id: { type: string, format: uuid }
+                  estado: { type: string, enum: [aceptada_pendiente] }
         '401':
           $ref: '#/components/responses/UnauthorizedError'
         '404':
@@ -4915,5 +4967,15 @@ components:
         id: { type: string, format: uuid }
         email: { type: string }
         rol: { type: string, enum: [administrador, contador] }
-        estado: { type: string, enum: [pendiente, aceptada, rechazada, cancelada] }
+        estado: { type: string, enum: [pendiente] }
         creada: { type: string, format: date-time }
+
+    AceptacionPorAprobar:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string, description: Correo de la cuenta que aceptó, tal como se registró }
+        nombre: { type: string, nullable: true }
+        rol: { type: string, enum: [administrador, contador] }
+        cuenta_creada: { type: string, format: date-time, nullable: true }
+        aceptada: { type: string, format: date-time, nullable: true }

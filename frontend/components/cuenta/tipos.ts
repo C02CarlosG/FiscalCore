@@ -25,8 +25,19 @@ export interface InvitacionEmpresa {
   id: string;
   email: string;
   rol: RolEmpresa;
-  estado: "pendiente" | "aceptada" | "rechazada" | "cancelada";
+  estado: "pendiente";
   creada: string | null;
+}
+
+/** Alguien aceptó una invitación y espera que un administrador le dé acceso. */
+export interface AceptacionPorAprobar {
+  id: string;
+  /** Correo y nombre de la cuenta que aceptó, tal como se registró. */
+  email: string;
+  nombre: string | null;
+  rol: RolEmpresa;
+  cuenta_creada: string | null;
+  aceptada: string | null;
 }
 
 export interface UsuariosDeEmpresa {
@@ -34,6 +45,7 @@ export interface UsuariosDeEmpresa {
   puede_administrar: boolean;
   usuarios: UsuarioEmpresa[];
   invitaciones: InvitacionEmpresa[];
+  por_aprobar: AceptacionPorAprobar[];
 }
 
 export interface InvitacionInput {
@@ -44,6 +56,8 @@ export interface InvitacionInput {
 export interface MiInvitacion {
   id: string;
   rol: RolEmpresa;
+  /** aceptada_pendiente: ya la aceptó y espera la aprobación de un administrador. */
+  estado: "pendiente" | "aceptada_pendiente";
   creada: string;
   rfc: string;
   razon_social: string;

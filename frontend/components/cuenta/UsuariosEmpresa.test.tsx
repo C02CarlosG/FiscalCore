@@ -24,6 +24,10 @@ const datos = (puede: boolean): UsuariosDeEmpresa => ({
   invitaciones: puede
     ? [{ id: "i1", email: "pendiente@despacho.mx", rol: "contador", estado: "pendiente", creada: "2026-10-04T00:00:00+00:00" }]
     : [],
+  por_aprobar: puede
+    ? [{ id: "a1", email: "Victima@corp.com", nombre: "Impostor", rol: "administrador",
+         cuenta_creada: "2026-10-04T00:00:00+00:00", aceptada: "2026-10-04T01:00:00+00:00" }]
+    : [],
 });
 
 function renderUsuarios(puede = true) {
@@ -116,5 +120,33 @@ describe("UsuariosEmpresa", () => {
     expect(apiFetch).not.toHaveBeenCalledWith(`${BASE}/u2`, { method: "DELETE" });
     await user.click(screen.getByRole("button", { name: "Confirmar: quitar acceso a ana@despacho.mx" }));
     await waitFor(() => expect(apiFetch).toHaveBeenCalledWith(`${BASE}/u2`, { method: "DELETE" }));
+  });
+
+  it("muestra las aceptaciones por aprobar con nombre y correo de la cuenta", async () => {
+    renderUsuarios();
+    expect(await screen.findByText("Por aprobar")).toBeInTheDocument();
+    expect(screen.getByText("Impostor")).toBeInTheDocument();
+    expect(screen.getByText("Victima@corp.com")).toBeInTheDocument();
+    expect(screen.getByText(/cuenta creada el/)).toBeInTheDocument();
+  });
+
+  it("aprueba y rechaza una aceptación", async () => {
+    const user = userEvent.setup();
+    renderUsuarios();
+    await user.click(await screen.findByRole("button", { name: "Aprobar acceso de Victima@corp.com" }));
+    await waitFor(() =>
+      expect(apiFetch).toHaveBeenCalledWith("/api/v1/cuenta/empresas/e1/invitaciones/a1/aprobar", { method: "POST" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Rechazar acceso de Victima@corp.com" }));
+    await waitFor(() =>
+      expect(apiFetch).toHaveBeenCalledWith("/api/v1/cuenta/empresas/e1/invitaciones/a1/rechazar", { method: "POST" }),
+    );
+  });
+
+  it("un contador no ve la sección por aprobar", async () => {
+    renderUsuarios(false);
+    await screen.findByText("ana@despacho.mx");
+    expect(screen.queryByText("Por aprobar")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Aprobar acceso/ })).not.toBeInTheDocument();
   });
 });

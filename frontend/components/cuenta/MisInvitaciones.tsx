@@ -7,7 +7,7 @@ import { useMisInvitaciones, useResponderInvitacion } from "@/hooks/useCuenta";
 import { ApiError } from "@/lib/api-client";
 import { ETIQUETA_ROL_EMPRESA } from "./tipos";
 
-/** Invitaciones recibidas: solo se muestra si hay alguna pendiente. */
+/** Invitaciones recibidas: solo se muestra si hay alguna pendiente o esperando aprobación. */
 export function MisInvitaciones() {
   const consulta = useMisInvitaciones();
   const responder = useResponderInvitacion();
@@ -28,7 +28,10 @@ export function MisInvitaciones() {
     <Card>
       <CardHeader className="px-5 py-5 sm:px-6">
         <CardTitle className="font-display text-base">Invitaciones</CardTitle>
-        <CardDescription>Te invitaron a trabajar en estas empresas. Acepta solo las que reconozcas.</CardDescription>
+        <CardDescription>
+          Te invitaron a trabajar en estas empresas. Acepta solo las que reconozcas; el acceso llega cuando un
+          administrador de la empresa aprueba tu aceptación.
+        </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3 px-5 pb-5 sm:px-6">
         {error && (
@@ -46,6 +49,9 @@ export function MisInvitaciones() {
                   {i.invitada_por && <> · invita {i.invitada_por}</>}
                 </p>
               </div>
+              {i.estado === "aceptada_pendiente" ? (
+                <p className="flex-none text-sm text-muted-foreground">Esperando aprobación</p>
+              ) : (
               <div className="flex flex-none gap-2">
                 <Button type="button" size="sm" disabled={responder.isPending}
                         aria-label={`Aceptar invitación de ${i.razon_social}`} onClick={() => handle(i.id, true)}>
@@ -56,6 +62,7 @@ export function MisInvitaciones() {
                   Rechazar
                 </Button>
               </div>
+              )}
             </li>
           ))}
         </ul>

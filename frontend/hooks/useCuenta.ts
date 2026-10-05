@@ -83,11 +83,18 @@ export function useResponderInvitacion() {
   return useMutation({
     mutationFn: ({ id, aceptar }: { id: string; aceptar: boolean }) =>
       apiFetch<unknown>(`/api/v1/cuenta/invitaciones/${id}/${aceptar ? "aceptar" : "rechazar"}`, { method: "POST" }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: MIS_INVITACIONES });
-      // Aceptar agrega una empresa a la lista del selector.
-      queryClient.invalidateQueries({ queryKey: ["empresas"] });
-    },
+    // Aceptar no da acceso todavía: la invitación queda esperando la aprobación de un administrador.
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: MIS_INVITACIONES }),
+  });
+}
+
+/** Un administrador aprueba (da acceso) o rechaza a quien aceptó una invitación. */
+export function useResolverAceptacion(empresaId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, aprobar }: { id: string; aprobar: boolean }) =>
+      apiFetch<void>(`${rutaInvitaciones(empresaId)}/${id}/${aprobar ? "aprobar" : "rechazar"}`, { method: "POST" }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: usuarios(empresaId) }),
   });
 }
 
