@@ -213,7 +213,11 @@ def guardar_detalle(empresa_id: str, resultado) -> bool:
 
 def recalcular_cobrado(empresa_id: str, uuid: str) -> None:
     """Recalcula monto_cobrado y estado_pago de un CFDI a partir de los pagos
-    registrados para él (suma de ``pagos_relaciones`` de la empresa)."""
+    registrados para él (suma de ``pagos_relaciones`` de la empresa).
+
+    Solo cuentan los pagos de un REP **vigente**: uno cancelado (o sustituido) ya no es un
+    cobro, y sumarlo inflaría ``monto_cobrado``, ``estado_pago`` y el saldo PPD, con lo que
+    se desviarían la conciliación y los riesgos."""
     uuid = uuid.upper()
     db.execute(
         """
@@ -228,12 +232,33 @@ def recalcular_cobrado(empresa_id: str, uuid: str) -> None:
             SELECT COALESCE(SUM(pr.importe_pagado), 0) AS pagado
             FROM pagos_relaciones pr
             JOIN pagos_cfdi pc ON pc.id = pr.pago_id
-            WHERE pc.empresa_id = %s AND pr.cfdi_uuid = %s
+            JOIN cfdi rep ON rep.id = pc.cfdi_id
+            WHERE pc.empresa_id = %s AND pr.cfdi_uuid = %s AND rep.estado = 'vigente'
         ) p
         WHERE c.empresa_id = %s AND c.uuid = %s
         """,
         (empresa_id, uuid, empresa_id, uuid),
     )
+
+
+def recalcular_cobrado_de_rep(empresa_id: str, uuid_rep: str) -> int:
+    """Recalcula lo cobrado de todos los documentos que paga un REP. Se llama cuando el
+    estado de un REP cambia (por ejemplo, el SAT lo reporta cancelado): ``recalcular_cobrado``
+    es derivado y ya excluye al REP no vigente, pero alguien tiene que volver a correrlo
+    sobre las facturas que ese REP había cobrado. Devuelve cuántos documentos recalculó."""
+    filas = db.query_all(
+        """
+        SELECT DISTINCT UPPER(pr.cfdi_uuid) AS uuid
+        FROM pagos_relaciones pr
+        JOIN pagos_cfdi pc ON pc.id = pr.pago_id
+        JOIN cfdi rep ON rep.id = pc.cfdi_id
+        WHERE pc.empresa_id = %s AND rep.empresa_id = %s AND rep.uuid = %s
+        """,
+        (empresa_id, empresa_id, uuid_rep.upper()),
+    )
+    for f in filas:
+        recalcular_cobrado(empresa_id, f["uuid"])
+    return len(filas)
 
 
 def _fila_de_pago(empresa_id: str, cfdi_db_id: str, uuid_rep: str, pago) -> str:

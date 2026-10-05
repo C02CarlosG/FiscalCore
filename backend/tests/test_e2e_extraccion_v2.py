@@ -367,3 +367,72 @@ def test_un_rep_guardado_antes_de_la_041_reclama_su_fila_y_agrega_la_que_faltaba
     assert [(p["nodo"], p["forma_pago"]) for p in pagos] == [(1, "03"), (2, "03")]
     assert pagos[0]["id"] == fila_vieja                                       # reclamó la fila anterior
     assert _uno(db, "SELECT COUNT(*) AS n FROM pagos_impuestos i JOIN pagos_cfdi p ON p.id = i.pago_id WHERE p.cfdi_id = %s", cfdi_id)["n"] == 2
+
+
+# ─── Un REP cancelado ya no es un cobro (pedido del carril B) ─────────────────
+
+def _cobrado_de_la_factura(db):
+    return _uno(db, "SELECT monto_cobrado AS m, estado_pago AS e FROM cfdi WHERE uuid = %s", UUID_FACTURA)
+
+
+def test_un_rep_cancelado_ya_no_cuenta_como_cobro(entorno):
+    db, *_ = entorno
+    from backend import cfdi_store
+
+    assert _cobrado_de_la_factura(db) == {"m": D("1160.00"), "e": "pagado_parcial"}     # el REP vigente cobra 1,160
+
+    db.execute("UPDATE cfdi SET estado = 'cancelado' WHERE uuid = %s", (UUID_REP,))
+    recalculados = cfdi_store.recalcular_cobrado_de_rep(_empresa(db), UUID_REP)
+
+    assert recalculados == 1
+    assert _cobrado_de_la_factura(db) == {"m": D("0.00"), "e": "pendiente"}
+
+
+def _empresa(db):
+    return str(_uno(db, "SELECT id FROM empresas WHERE rfc = %s", RFC)["id"])
+
+
+def test_recalcular_directo_tampoco_cuenta_un_rep_cancelado(entorno):
+    """Aunque nadie llame al recálculo por REP, cualquier recálculo posterior de la factura
+    (otro REP, reproceso) ya excluye al cancelado."""
+    db, *_ = entorno
+    from backend import cfdi_store
+
+    db.execute("UPDATE cfdi SET estado = 'cancelado' WHERE uuid = %s", (UUID_REP,))
+    cfdi_store.recalcular_cobrado(_empresa(db), UUID_FACTURA)
+
+    assert _cobrado_de_la_factura(db) == {"m": D("0.00"), "e": "pendiente"}
+
+
+def test_reprocesar_un_rep_cancelado_no_vuelve_a_inflar_lo_cobrado(entorno):
+    db, _client, _headers, empresa_id = entorno
+    from backend import reproceso
+
+    db.execute("UPDATE cfdi SET estado = 'cancelado' WHERE uuid = %s", (UUID_REP,))
+    db.execute("UPDATE cfdi SET detalle_version = 1 WHERE empresa_id = %s", (empresa_id,))
+    reproceso.reprocesar_detalle(empresa_id=empresa_id)
+
+    assert _cobrado_de_la_factura(db) == {"m": D("0.00"), "e": "pendiente"}
+
+
+def test_con_dos_rep_solo_el_cancelado_deja_de_contar(entorno):
+    """La factura de 1,660 cobrada por dos REP (1,160 y 500): al cancelar uno queda el otro."""
+    db, client, headers, empresa_id = entorno
+    from backend import cfdi_store
+
+    uuid_rep2 = "0E0E0E0E-BBBB-CCCC-DDDD-EEEEFFFFEE20"
+    xml = _xml_rep().replace(UUID_REP.encode(), uuid_rep2.encode()) \
+        .replace(b'Monto="1160.00"', b'Monto="500.00"').replace(b'ImpPagado="1160.00"', b'ImpPagado="500.00"') \
+        .replace(b'FechaPago="2026-12-20T12:00:00"', b'FechaPago="2026-12-21T12:00:00"')
+    try:
+        r = client.post(f"/api/v1/empresas/{empresa_id}/cfdi/upload", headers=headers, data={"periodo": PERIODO},
+                        files=[("archivos", ("rep_b.xml", xml, "text/xml"))])
+        assert r.status_code == 200, r.text
+        assert _cobrado_de_la_factura(db)["m"] == D("1660.00")
+
+        db.execute("UPDATE cfdi SET estado = 'cancelado' WHERE uuid = %s", (UUID_REP,))
+        cfdi_store.recalcular_cobrado_de_rep(empresa_id, UUID_REP)
+
+        assert _cobrado_de_la_factura(db) == {"m": D("500.00"), "e": "pagado_parcial"}
+    finally:
+        db.execute("DELETE FROM cfdi WHERE uuid = %s", (uuid_rep2,))
