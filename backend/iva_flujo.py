@@ -11,7 +11,7 @@ importe es ``Decimal`` en pesos; el redondeo a centavos se hace solo al resumir.
 from __future__ import annotations
 
 from datetime import date, datetime
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import ROUND_FLOOR, ROUND_HALF_UP, Decimal
 from typing import Any, Optional
 
 CENTAVOS = Decimal("0.01")
@@ -763,3 +763,138 @@ def detalle(eventos: list[dict], periodo: str, direccion: str, origen: str, ajus
         "pagina": pagina,
         "por_pagina": por_pagina,
     }
+
+
+# ── por contraparte (DIOT, F6.2) ──────────────────────────────────────────────
+
+RFC_EXTRANJERO = "XEXX010101000"        # varios extranjeros comparten este RFC: se distinguen por nombre
+
+
+def clave_de_contraparte(rfc: Optional[str], nombre: Optional[str]) -> tuple:
+    """Llave de un tercero: su RFC, y su nombre si es un extranjero (que comparten el RFC genérico)."""
+    rfc = (rfc or "").strip().upper()
+    return (rfc, (nombre or "").strip() if rfc == RFC_EXTRANJERO else "")
+
+
+MOTIVOS_NO_ACREDITABLES = ("efectivo", "uso_no_deducible", "original_no_acreditable")
+"""Únicos motivos que son IVA **no acreditable** (el acto se pagó pero la ley no deja acreditarlo). Las demás exclusiones
+(falta de datos, ajuste manual, aplicación en un REP) no son IVA no acreditable: salen como advertencias del tercero."""
+
+
+class _Tercero:
+    def __init__(self, rfc: str, nombre: str, operacion: Optional[str]) -> None:
+        self.rfc, self.nombre, self.operacion = rfc, nombre, operacion
+        self.bases = {k: CERO for k in CLAVES_TASA}
+        self.iva = {"16": CERO, "8": CERO, "otras": CERO, "total": CERO}
+        self.bases_na = {k: CERO for k in CLAVES_TASA}                      # actos pagados cuyo IVA no es acreditable
+        self.iva_na = {"16": CERO, "8": CERO, "otras": CERO, "total": CERO}
+        self.devoluciones = {"base": CERO, "iva": CERO}
+        self.retenciones = CERO
+        self.docs: set = set()
+        self.fuera: dict[str, list] = {}
+        self.otros: dict[str, set] = {}
+
+    def sumar(self, ev: dict) -> None:
+        self.docs.add(llave(ev["uuid"]))
+        if ev["origen"] == "notas_credito":
+            self.devoluciones["base"] += sum(ev["bases"].values(), CERO)
+            self.devoluciones["iva"] += ev["iva_total"]
+            self.retenciones -= ev["retencion"]
+            return
+        for k, v in ev["bases"].items():
+            self.bases[k] += v
+        for k in ("16", "8", "otras"):
+            self.iva[k] += ev["iva"][k]
+        self.iva["total"] += ev["iva_total"]
+        self.retenciones += ev["retencion"]
+
+    def excluir(self, ev: dict, motivo: str) -> None:
+        if motivo not in MOTIVOS_NO_ACREDITABLES:
+            self.otros.setdefault(motivo, set()).add(llave(ev["uuid"]))
+            return
+        acum = self.fuera.setdefault(motivo, [set(), CERO, CERO])
+        signo = -1 if ev["origen"] == "notas_credito" else 1
+        acum[0].add(llave(ev["uuid"]))
+        acum[1] += signo * ev["iva_total"]
+        acum[2] += signo * sum(ev["bases"].values(), CERO)
+        if ev["origen"] != "notas_credito":                                  # el acto pagado cuenta en los actos aunque no se acredite
+            for k, v in ev["bases"].items():
+                self.bases_na[k] += v
+            for k in ("16", "8", "otras"):
+                self.iva_na[k] += ev["iva"][k]
+            self.iva_na["total"] += ev["iva_total"]
+
+    @property
+    def neto(self) -> Decimal:
+        """IVA acreditable antes del prorrateo, redondeado a centavos."""
+        return _q(self.iva["total"] - self.devoluciones["iva"])
+
+    def publico(self, factor: Decimal, acreditable: Decimal) -> dict:
+        """``acreditable`` ya viene asignado (y cuadrado con el resumen) por ``por_contraparte``."""
+        neto = self.neto
+        proporcion = neto - acreditable                                       # por resta: acreditable + proporción = neto
+        otros_motivos = sum((v[1] for v in self.fuera.values()), CERO)
+        return {
+            "contraparte_rfc": self.rfc,
+            "contraparte": self.nombre,
+            "tipo_operacion": self.operacion,
+            "cfdi": len(self.docs | {u for v in self.fuera.values() for u in v[0]}),
+            "actos": {k: _q(self.bases[k] + self.bases_na[k]) for k in self.bases},      # incluye «no_objeto» y «exento»
+            "iva_pagado": {k: _q(self.iva[k] + self.iva_na[k]) for k in self.iva},
+            "devoluciones": {"base": _q(self.devoluciones["base"]), "iva": _q(self.devoluciones["iva"])},
+            "iva_acreditable": acreditable,
+            "iva_no_acreditable": {
+                "proporcion": proporcion,
+                "por_motivo": {m: {"cfdi": len(v[0]), "iva": _q(v[1]), "base": _q(v[2])} for m, v in self.fuera.items()},
+                "total": _q(proporcion + otros_motivos),
+            },
+            "excluidos": {m: len(u) for m, u in self.otros.items()},           # falta de datos, ajuste manual, aplicado en REP
+            "retenciones": _q(self.retenciones),
+        }
+
+
+def _repartir_acreditable(terceros: list["_Tercero"], factor: Decimal, objetivo: Decimal) -> list[Decimal]:
+    """Acreditable de cada tercero (en centavos) tal que **la suma es exactamente** ``objetivo`` (el acreditable ajustado del
+    resumen). Cada uno parte de ``neto × factor`` truncado a centavos y el residuo se reparte de a un centavo por mayor
+    residuo, para que ningún redondeo individual desvíe el total."""
+    exactos = [t.neto * factor for t in terceros]
+    pisos = [e.quantize(CENTAVOS, rounding=ROUND_FLOOR) for e in exactos]
+    residuos = [e - p for e, p in zip(exactos, pisos)]
+    unidades = int(((objetivo - sum(pisos, CERO)) / CENTAVOS).to_integral_value(rounding=ROUND_HALF_UP))
+    orden = sorted(range(len(terceros)), key=lambda i: residuos[i], reverse=(unidades >= 0))
+    for j in range(abs(unidades)):
+        if not orden:
+            break
+        pisos[orden[j % len(orden)]] += CENTAVOS if unidades > 0 else -CENTAVOS
+    return pisos
+
+
+def por_contraparte(eventos: list[dict], periodo: str, ajustes: dict, factor: Decimal = UNO,
+                    operacion_de: Optional[Any] = None) -> list[dict]:
+    """El acreditable del periodo visto por tercero y tipo de operación (insumo de la DIOT).
+
+    Usa las mismas reglas que ``resumen`` (``estado_en_periodo``: excluidos, reasignados y ajustes), así que la suma de
+    ``iva_acreditable`` de todos los terceros es el ``acreditable.ajustado`` del resumen del mismo periodo. Las notas de
+    crédito recibidas van en ``devoluciones`` (valor e IVA aparte) y restan del neto. ``operacion_de(evento)`` devuelve el
+    tipo de operación que le toca a un CFDI (por defecto ``None``); un tercero con dos operaciones sale en dos renglones.
+    La región (zona norte/sur) no se calcula: no está en los datos."""
+    factor = _dec(factor)
+    terceros: dict[tuple, _Tercero] = {}
+    for ev in eventos:
+        if ev["direccion"] != "acreditable":
+            continue
+        est = estado_en_periodo(ev, periodo, ajustes)
+        if est is None or est[0] == "reasignado":
+            continue
+        rfc, nombre = clave_de_contraparte(ev["contraparte_rfc"], ev["contraparte"])
+        operacion = operacion_de(ev) if operacion_de else None
+        t = terceros.get((rfc, nombre, operacion))
+        if t is None:
+            t = terceros[(rfc, nombre, operacion)] = _Tercero(rfc, nombre or (ev["contraparte"] or ""), operacion)
+        if est[0] == "considerado":
+            t.sumar(ev)
+        else:
+            t.excluir(ev, est[1])
+    ordenados = sorted(terceros.values(), key=lambda x: (x.nombre, x.rfc, x.operacion or ""))
+    objetivo = resumen(eventos, periodo, ajustes, factor)["acreditable"]["ajustado"]
+    return [t.publico(factor, a) for t, a in zip(ordenados, _repartir_acreditable(ordenados, factor, objetivo))]

@@ -118,3 +118,17 @@ Con una empresa sembrada en marzo de 2026 (y febrero para el acumulado):
 
 Unitarias del módulo puro; router con base mockeada; E2E `-m db` con la siembra de los
 criterios; migración 061 idempotente; vitest de la pantalla.
+
+## Seguimiento (después de integrar el PR #34)
+
+- `PUT /configuracion` responde 422, y no 500, si `inactivas` trae algo que no es texto.
+- El periodo acepta solo años de 2000 a 2100; fuera de ese rango responde 422.
+- La migración 064 agrega el `CHECK (jsonb_typeof(config) = 'object')` a las bases donde
+  `validaciones_cfdi_config` ya existía antes de que la 061 lo declarara.
+
+Pendientes de decisión:
+
+- `PUT /configuracion` lo puede usar cualquier persona con acceso a la empresa. Cuando U1
+  (roles por empresa) esté en `main`, se restringe a `administrador`.
+- Gas LP o natural de uso vehicular (clase 151115): ¿entra en la regla de combustibles
+  en efectivo sin importar el monto? Hoy solo se revisa la clase 151015.
