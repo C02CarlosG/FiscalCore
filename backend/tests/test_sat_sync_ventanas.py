@@ -87,7 +87,7 @@ def test_espera_reintento_fuera_de_rango_es_none(intentos):
 # ─── config_sync ─────────────────────────────────────────────────────────────
 
 _VARIABLES = ("SAT_SYNC_INTERVALO_SEG", "SAT_SYNC_HORA_LOCAL", "SAT_SYNC_TRASLAPE_DIAS",
-              "SAT_SYNC_MESES_CANCELACION", "SAT_SYNC_MAX_EN_VUELO")
+              "SAT_SYNC_MESES_CANCELACION", "SAT_SYNC_MAX_EN_VUELO", "SAT_SYNC_DIAS_BARRIDO_CANCELADOS")
 
 
 @pytest.fixture()
@@ -127,6 +127,14 @@ def test_config_sync_valor_invalido_cae_al_defecto(sin_variables, variable, valo
     cfg = sat_sync.config_sync()  # no truena
     assert (cfg.intervalo_seg, cfg.hora_local, cfg.traslape_dias,
             cfg.meses_cancelacion, cfg.max_en_vuelo) == (60, "03:00", 7, 3, 4)
+
+
+def test_config_sync_dias_entre_barridos_de_cancelados(sin_variables):
+    assert sat_sync.config_sync().dias_barrido_cancelados == 7
+    sin_variables.setenv("SAT_SYNC_DIAS_BARRIDO_CANCELADOS", "14")
+    assert sat_sync.config_sync().dias_barrido_cancelados == 14
+    sin_variables.setenv("SAT_SYNC_DIAS_BARRIDO_CANCELADOS", "0")
+    assert sat_sync.config_sync().dias_barrido_cancelados == 7
 
 
 def test_config_sync_es_inmutable(sin_variables):

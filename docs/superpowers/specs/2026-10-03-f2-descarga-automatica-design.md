@@ -64,7 +64,7 @@ CFDI cancelado deje de contar.
 | D3 | Candado por empresa con `pg_try_advisory_lock(hashtext(empresa_id))` por corrida | Evita dos workers (o worker + `/avanzar` manual) sobre la misma empresa sin tabla ni expiración que mantener | Cambiar a columna `bloqueada_hasta` |
 | D4 | `/fiel/sync` manual y `/fiel/sync/avanzar` **se conservan** (respaldo y entornos serverless), pero `/fiel/sync` deja de lanzar el loop dormido: solo crea la solicitud y el worker la avanza | Un solo camino de avance; se elimina el loop de 30 min en el proceso web | Mantener el loop si no hay worker en el hospedaje (ver riesgos) |
 | D5 | Las corridas automáticas **no tienen usuario**: `sat_solicitudes.usuario_id` pasa a nulo y se agrega `origen` (`manual`, `inicial`, `diaria`, `cancelados`) | Lo exigía el plan maestro | — |
-| D6 | Una solicitud por (empresa, tipo, mes, estado de comprobante). La carga inicial parte en meses; nunca se pide un rango mayor a un mes | Mantiene cada solicitud bajo los límites del SAT y permite retomar mes a mes | Ver "Ventanas" |
+| D6 | Una solicitud por (empresa, tipo, mes, estado de comprobante) para XML: nunca se pide un rango mayor a un mes. Los metadatos de cancelados (hasta 1,000,000 de registros por solicitud) sí abarcan varios meses, y se parten por volumen igual que los XML | Mantiene cada solicitud bajo los límites del SAT y permite retomar mes a mes | Ver "Ventanas" |
 | D7 | La e.firma se descifra en memoria por corrida y no se guarda en ninguna variable global ni log | D8 del plan maestro | — |
 
 ## Datos — migración 031
@@ -188,16 +188,48 @@ detiene a las demás. Al arrancar no necesita reconciliar nada: lo pendiente sig
 
 ### Cancelaciones
 
-- La solicitud de cancelados pide metadatos (`Metadata`, `Cancelado`). Cada fila del
-  paquete trae UUID y estatus; para cada UUID existente de la empresa se hace
-  `UPDATE cfdi SET estado='cancelado'` (solo si estaba vigente) y se registra el cambio.
-- Si el CFDI cancelado pertenece a un periodo que ya tiene cédula de IVA calculada, se
-  guarda el dato (`cfdi.estado` + evento en `auditoria` con `accion =
-  'cfdi_cancelado_posterior'`) pero **no se recalcula nada**; la alerta es de M3.
-- El formato de los metadatos (paquete ZIP con `.txt` delimitado por `~`) lo lee un
-  parser nuevo `parsear_metadata` en `sat_fiel.py`. Qué trae exactamente el SAT en ese
-  paquete y si satcfdi lo expone se **verifica al empezar a implementar**; si no se
-  puede, el fallback es pedir `CFDI` + `Cancelado` (XML) y marcar por UUID.
+Implementado en F2.4 (plan `2026-10-04-f2-4-cancelaciones.md`; revisado con el agente
+`dominio-fiscal`).
+
+- La corrida diaria pide **metadatos** (`tipo_solicitud='Metadata'`, `estado_comprobante='Cancelado'`,
+  origen `cancelados`): una ventana por tipo que **siempre termina hoy**. Así los parámetros enviados
+  al SAT difieren cada día y no se agota el límite 5002 (límite de por vida por parámetros idénticos).
+  - Normalmente cubre el mes en curso y los `SAT_SYNC_MESES_CANCELACION` (3) anteriores.
+  - Cada `SAT_SYNC_DIAS_BARRIDO_CANCELADOS` (7) días hace un **barrido** desde enero del ejercicio
+    anterior: el SAT filtra por fecha de **emisión** y una cancelación puede ocurrir meses después
+    (hasta cerca de la declaración anual del año siguiente). La decisión del barrido es estable durante
+    toda la corrida.
+  - Un tipo cuyos metadatos ya se pidieron hoy no se vuelve a pedir ("Actualizar ahora" el mismo día).
+  - La carga inicial no los pide: baja XML vigentes y no hay nada previo que cancelar.
+- El paquete es un ZIP con un `.txt` delimitado por `~`. `satcfdi` no trae lector, así que
+  `sat_fiel.parsear_metadata` lo lee guiándose por el **encabezado** (`Uuid` y `Estatus`
+  obligatorios; `Estatus` 1 = vigente, 0 = cancelado; tolera BOM, mayúsculas, columnas extra y
+  Latin-1). Un encabezado desconocido, un paquete sin `.txt` o un archivo ilegible dejan la solicitud
+  en `fallo` sin marcar nada de ese paquete. **El formato sale de descripciones públicas del SAT y debe
+  validarse con un paquete real (COPLASUR).**
+- `sat_sync.marcar_cancelados` hace solo `vigente -> cancelado` de CFDI que ya existen (por UUID,
+  en la empresa); no crea CFDI, no des-cancela y no toca `sustituido`. Es idempotente. El cambio de
+  estado y su evento `cfdi_cancelado_posterior` van **en la misma transacción**: si el evento no se
+  escribe, el CFDI sigue vigente y la siguiente corrida lo reintenta. El evento trae UUID, periodo,
+  tipo, fechas, dirección, si el CFDI estaba conciliado, las facturas que cobraba (si es un REP) y sus
+  CFDI relacionados, para que M3 distinga una alerta real de ruido.
+- **Sin recálculo silencioso**: no corre el pipeline y no modifica `monto_cobrado` de las facturas
+  que un REP cancelado había cobrado (`cfdi_store.recalcular_cobrado` no mira el estado del REP).
+  El IVA/ISR de flujo ya excluye los REP cancelados (`iva_flujo`, `estado = 'vigente'`).
+- Las cancelaciones son de **mejor esfuerzo**: una ventana de metadatos que falla no deja la
+  corrida en `error` ni detiene `ultima_exitosa`; se informa en `sync_corrida_fin`
+  (`cancelados_fallidas`, `cancelados_marcados`) y en el log.
+
+**Pendientes para otros carriles** (hallazgos de la revisión fiscal):
+- `monto_cobrado` / `estado_pago` de una factura PPD quedan inflados si su REP se cancela (y si lo
+  sustituye otro REP hay doble conteo). La regla correcta es derivar lo cobrado solo de REP con
+  `estado = 'vigente'`: `cfdi_store.recalcular_cobrado` (carril A) o derivarlo en lectura (F5/F7,
+  carril C). Mientras tanto, el evento lista las facturas afectadas.
+- El pipeline no corre al cancelar, así que la regla `CFDI_CANCELADO_COBRADO` solo se evalúa en el
+  siguiente pipeline del periodo; M3 debe alertar con el dato del evento (`tiene_conciliacion`).
+- Cancelar un egreso de aplicación de anticipo, el ingreso de un anticipo o una nómina cambia el
+  ingreso/deducción del periodo: M3 debe distinguirlos (el evento trae `tipo_comprobante` y
+  `relacionados`).
 
 ### Fallas y salud
 

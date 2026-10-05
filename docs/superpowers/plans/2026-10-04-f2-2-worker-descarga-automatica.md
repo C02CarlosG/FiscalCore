@@ -187,6 +187,7 @@ Comportamiento:
   # SAT_SYNC_HORA_LOCAL=03:00        # hora (Ciudad de México) de la corrida diaria
   # SAT_SYNC_TRASLAPE_DIAS=7         # días que se repiten de la corrida anterior
   # SAT_SYNC_MESES_CANCELACION=3     # meses recientes que se revisan por cancelaciones (F2.4)
+  # SAT_SYNC_DIAS_BARRIDO_CANCELADOS=7  # cada cuántos días se revisa desde el ejercicio anterior (F2.4)
   # SAT_SYNC_MAX_EN_VUELO=4          # solicitudes simultáneas al SAT por empresa
   ```
 
