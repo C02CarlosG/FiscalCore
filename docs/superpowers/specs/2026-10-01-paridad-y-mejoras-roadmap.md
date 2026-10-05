@@ -413,6 +413,7 @@ pausa.
 | 2026-10-04 | D → B | Agregar `"informacion-fiscal": "Información fiscal"` al mapa del breadcrumb de `layout/Header.tsx` (hoy muestra "Empresas" en `/empresas/{id}/informacion-fiscal`) y `"informacion-fiscal"` a `SUB_RUTAS` de `layout/EmpresaSwitcher.tsx` (para conservar la pantalla al cambiar de empresa) | Hecho en el PR #30 (F2.3) |
 | 2026-10-04 | D → B | Lo mismo para la pantalla de V1: `"validaciones": "Validaciones de CFDI"` en el breadcrumb de `Header.tsx` y `"validaciones"` en `SUB_RUTAS` de `EmpresaSwitcher.tsx` | Pendiente |
 | 2026-10-04 | D → B | Requisito de U1: normalizar correos a minúsculas al registrar e iniciar sesión, e índice único sobre `lower(email)`; la migración detecta duplicados y falla con mensaje claro, sin borrar cuentas | Autorizado por Carlos; después de F2.4 |
+| 2026-10-05 | A → B | Descarga manual de **cancelados** (spec F3, "Cancelados"): que "Conexión SAT" (`routers/sat.py`, `components/sat/`) acepte el estado a pedir (vigentes o cancelados) y que al importar un paquete pedido como cancelado cada CFDI quede con `estado = 'cancelado'`, sea nuevo o ya existente. Lo que el SAT permite descargar de cancelados (XML o solo metadatos) se verifica al implementar; si solo entrega metadatos, va con F2.4. El listado ya filtra por `estado`, así que no necesita cambios | Pendiente (se hace con F2.4) |
 | 2026-10-04 | Coordinación → B | Verificación de correo con enlace y recuperación de contraseña (requiere servicio de envío de correo) antes de abrir producción a clientes externos (D9) | Pendiente |
 
 ## Riesgos
