@@ -13,7 +13,9 @@ from __future__ import annotations
 import base64
 import io
 import logging
+import re
 import zipfile
+from dataclasses import dataclass
 from datetime import date, datetime, time
 from typing import Optional
 
@@ -250,16 +252,19 @@ def verificar_solicitud(creds: "Signer", id_solicitud: str) -> dict:
 # Función 4: Descargar paquete y extraer XMLs
 # ---------------------------------------------------------------------------
 
-def descargar_paquete(creds: "Signer", id_paquete: str) -> list[bytes]:
+def descargar_paquete(creds: "Signer", id_paquete: str, extensiones: tuple[str, ...] = (".xml",)) -> list[bytes]:
     """Descarga un paquete ZIP del SAT y retorna la lista de XMLs que contiene.
 
     Args:
         creds: Signer con la FIEL cargada.
         id_paquete: ID de paquete (uno de los devueltos por ``verificar_solicitud``).
 
+        extensiones: extensiones de los archivos que se extraen. Por defecto solo
+            XML (paquetes de CFDI); los paquetes de metadatos traen un ``.txt``.
+
     Returns:
-        Lista de ``bytes``, uno por cada archivo XML dentro del paquete ZIP.
-        Si el paquete no contiene XMLs, retorna lista vacía.
+        Lista de ``bytes``, uno por cada archivo con esas extensiones dentro del
+        paquete ZIP. Si el paquete no contiene ninguno, retorna lista vacía.
 
     Raises:
         FIELError: Si satcfdi no está instalado, si el SAT devuelve error, o si
@@ -291,7 +296,7 @@ def descargar_paquete(creds: "Signer", id_paquete: str) -> list[bytes]:
             xmls = [
                 zf.read(name)
                 for name in zf.namelist()
-                if name.lower().endswith(".xml")
+                if name.lower().endswith(tuple(e.lower() for e in extensiones))
             ]
     except zipfile.BadZipFile as exc:
         raise FIELError(f"El paquete descargado no es un ZIP válido: {exc}") from exc
@@ -303,3 +308,86 @@ def descargar_paquete(creds: "Signer", id_paquete: str) -> list[bytes]:
         id_paquete, len(xmls), len(zip_bytes),
     )
     return xmls
+
+
+# ---------------------------------------------------------------------------
+# Metadatos de CFDI (descarga masiva con tipo_solicitud="Metadata")
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class MetadataCFDI:
+    """Una fila del archivo de metadatos: lo justo para saber si un CFDI sigue vigente."""
+    uuid: str
+    rfc_emisor: str
+    rfc_receptor: str
+    efecto: str                       # I, E, T, N, P
+    estatus: str                      # 'vigente' | 'cancelado'
+    fecha_cancelacion: Optional[datetime]
+
+
+_UUID_RE = re.compile(r"^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$")
+_ESTATUS_METADATA = {"0": "cancelado", "cancelado": "cancelado", "1": "vigente", "vigente": "vigente"}
+
+
+def _fecha_metadata(valor: str) -> Optional[datetime]:
+    valor = valor.strip()
+    if not valor:
+        return None
+    try:
+        return datetime.fromisoformat(valor)
+    except ValueError:
+        return None
+
+
+def parsear_metadata(contenido: bytes) -> list[MetadataCFDI]:
+    """Lee el ``.txt`` de un paquete de metadatos del SAT (columnas separadas por ``~``).
+
+    El formato sale de descripciones públicas del SAT, así que el lector se guía por el
+    **encabezado** (no por la posición de las columnas) y tolera BOM, mayúsculas distintas,
+    columnas extra y UTF-8 o Latin-1. Si el encabezado no trae ``Uuid`` y ``Estatus``
+    levanta ``FIELError`` y no devuelve nada: más vale no marcar nada que marcar mal.
+    Las filas con UUID mal formado, estatus desconocido o columnas faltantes se omiten.
+    """
+    try:
+        texto = contenido.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        texto = contenido.decode("latin-1")
+    lineas = texto.splitlines()
+    if not lineas or not lineas[0].strip():
+        return []
+
+    columnas = [c.strip().lower() for c in lineas[0].split("~")]
+    if "uuid" not in columnas or "estatus" not in columnas:
+        raise FIELError(
+            "Formato de metadatos no reconocido: el encabezado debe incluir Uuid y Estatus "
+            f"(se recibió {lineas[0][:80]!r})."
+        )
+    idx = {nombre: i for i, nombre in enumerate(columnas)}
+    minimo = max(idx["uuid"], idx["estatus"])
+
+    def _campo(fila: list[str], nombre: str) -> str:
+        i = idx.get(nombre)
+        return fila[i].strip() if i is not None and i < len(fila) else ""
+
+    registros: list[MetadataCFDI] = []
+    omitidas = 0
+    for linea in lineas[1:]:
+        if not linea.strip():
+            continue
+        fila = linea.split("~")
+        uuid = _campo(fila, "uuid").upper() if len(fila) > minimo else ""
+        estatus = _ESTATUS_METADATA.get(_campo(fila, "estatus").lower()) if len(fila) > minimo else None
+        if not _UUID_RE.match(uuid) or estatus is None:
+            omitidas += 1
+            continue
+        registros.append(MetadataCFDI(
+            uuid=uuid,
+            rfc_emisor=_campo(fila, "rfcemisor").upper(),
+            rfc_receptor=_campo(fila, "rfcreceptor").upper(),
+            efecto=_campo(fila, "efectocomprobante").upper(),
+            estatus=estatus,
+            fecha_cancelacion=_fecha_metadata(_campo(fila, "fechacancelacion")),
+        ))
+    if omitidas:
+        _log.warning("Metadatos: %d fila(s) omitida(s) por UUID o estatus inválidos", omitidas)
+    return registros
