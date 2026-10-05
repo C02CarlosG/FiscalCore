@@ -244,6 +244,9 @@ def init_db() -> None:
         # 061 es idempotente — configuración por empresa de las validaciones de CFDI (V1, carril D)
         _run_sql_file("061_validaciones_cfdi_config.sql")
 
+        # 064 es idempotente — CHECK de objeto en validaciones_cfdi_config para bases donde la tabla ya existía (V1)
+        _run_sql_file("064_validaciones_config_check.sql")
+
         # Seed inicial: usuario admin si la base aún no tiene usuarios
         _seed_admin()
 
