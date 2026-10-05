@@ -84,9 +84,30 @@ CREATE TABLE IF NOT EXISTS suscripciones (
 - `backend/suscripcion.py` (puro): plan efectivo, uso y límite, validación de cambios de
   plan y de asignación.
 - `backend/suscripcion_datos.py`: lecturas y escrituras, y
-  `verificar_alta_rfc(usuario_id)` (lanza `LimiteRfcAlcanzado` con el mensaje para el
-  usuario) para que la use `POST /mis-empresas`.
+  `verificar_alta_rfc(cur, usuario_id, de_tercero=False)` (lanza `LimiteRfcAlcanzado`
+  con el mensaje para el usuario; ver "Contrato del límite").
 - `backend/routers/suscripcion.py`.
+
+## Contrato del límite
+
+Toda operación que haga a una cuenta administrar un RFC más llama a
+`verificar_alta_rfc(cur, usuario_id)` **con el cursor de su propia transacción y antes
+del INSERT/UPDATE** que crea el vínculo de administrador, y responde 403 con el mensaje
+de `LimiteRfcAlcanzado`. La función toma `pg_advisory_xact_lock` por cuenta antes de
+contar: dos altas simultáneas de la misma cuenta se forman y la segunda cuenta ya con
+la primera confirmada (sin el candado, con `max_rfc = 1` pasaban las dos). El candado
+se suelta al terminar la transacción.
+
+| Operación | Carril | Cuenta que se verifica |
+|---|---|---|
+| `POST /mis-empresas` (crear empresa) | B (pedido) | quien la crea |
+| Aprobar una invitación de administrador | D (U1) | la persona aprobada (`de_tercero=True`) |
+| Cambiar el rol de alguien a administrador | D (U1) | la persona promovida (`de_tercero=True`) |
+
+Validación de la administración: `plan_clave`, `estado`, `notas`, `nombre` que no son
+texto y `activo` que no es booleano dan 422 (antes, 500 o `bool("false") == True`). La
+búsqueda de cuentas trata `%` y `_` como literales. La siembra de la 063 no marca
+`prueba` como plan por defecto si al reinsertarla ya hay otro.
 
 ## API
 
@@ -118,4 +139,5 @@ tabla de planes. Si la sesión es de administrador de la plataforma: sección
 4. Un admin de plataforma no tiene límite.
 5. Un no admin recibe 403 en `/admin/*`.
 6. Editar un plan cambia el límite efectivo de todas las cuentas que lo tienen.
-7. `verificar_alta_rfc` lanza al llegar al límite y no lanza por debajo.
+7. `verificar_alta_rfc` lanza al llegar al límite y no lanza por debajo. Dos altas
+   concurrentes de una cuenta con plan de 1 RFC: una pasa y la otra recibe el límite.

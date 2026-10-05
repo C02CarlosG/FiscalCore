@@ -1,8 +1,10 @@
 """
 suscripcion_datos.py
 Consultas de M7.1: catálogo de planes, suscripción de cada cuenta, uso de RFC y
-`verificar_alta_rfc`, que `POST /mis-empresas` (carril B) debe llamar antes de crear
-una empresa. Las reglas viven en `suscripcion.py`.
+`verificar_alta_rfc`, que se llama dentro de la transacción de toda alta que haga
+administrar un RFC más a una cuenta (`POST /mis-empresas` del carril B, aprobar una
+invitación de administrador y promover a administrador en U1). Las reglas viven en
+`suscripcion.py`.
 """
 from __future__ import annotations
 
@@ -91,12 +93,34 @@ def resumen(usuario_id: str) -> dict:
     }
 
 
-def verificar_alta_rfc(usuario_id: str) -> None:
-    """Para `POST /mis-empresas`: lanza `LimiteRfcAlcanzado` si el plan ya no permite otro RFC."""
-    catalogo = planes()
-    plan, _motivo = s.plan_efectivo(suscripcion_de(usuario_id), catalogo, hoy())
-    if not s.puede_agregar_rfc(plan, uso_rfc(usuario_id), es_admin_plataforma(usuario_id)):
-        raise LimiteRfcAlcanzado(s.mensaje_limite(plan))
+def _filas(cur, sql: str, params: tuple) -> list[dict]:
+    cur.execute(sql, params)
+    columnas = [c[0] for c in cur.description]
+    return [dict(f) if isinstance(f, dict) else dict(zip(columnas, f)) for f in cur.fetchall()]
+
+
+def verificar_alta_rfc(cur, usuario_id: str, de_tercero: bool = False) -> None:
+    """Lanza `LimiteRfcAlcanzado` si el plan de la cuenta ya no permite administrar otro RFC.
+
+    Contrato: `cur` es el cursor de la transacción que va a crear el vínculo de
+    administrador (empresa nueva, invitación aprobada o promoción), y se llama ANTES de
+    ese INSERT/UPDATE. Toma un candado de transacción por cuenta
+    (`pg_advisory_xact_lock`) antes de contar, así que dos altas simultáneas de la misma
+    cuenta se forman: la segunda cuenta después de que la primera hace commit. El candado
+    se suelta solo al terminar la transacción. ``de_tercero`` cambia el mensaje cuando
+    la cuenta limitada no es la de quien hace la operación.
+    """
+    cur.execute("SELECT pg_advisory_xact_lock(hashtextextended('suscripcion_rfc:' || %s, 0))", (str(usuario_id),))
+    catalogo = {f["clave"]: f for f in _filas(
+        cur, "SELECT clave, nombre, precio_mensual, max_rfc, por_defecto, activo, orden FROM planes", ())}
+    sus = _filas(cur, "SELECT plan_clave, estado, vigente_hasta FROM suscripciones WHERE usuario_id = %s",
+                 (str(usuario_id),))
+    plan, _motivo = s.plan_efectivo(sus[0] if sus else None, catalogo, hoy())
+    uso = _filas(cur, f"SELECT ({_USO_RFC.format(usuario='%s')}) AS n", (str(usuario_id),))[0]["n"]
+    rol = _filas(cur, "SELECT rol FROM usuarios WHERE id = %s", (str(usuario_id),))
+    es_admin = bool(rol and rol[0]["rol"] == "admin")
+    if not s.puede_agregar_rfc(plan, int(uso), es_admin):
+        raise LimiteRfcAlcanzado(s.mensaje_limite(plan, de_tercero))
 
 
 def asignar(usuario_id: str, asignacion: dict, admin_id: str) -> None:
@@ -130,7 +154,9 @@ def guardar_plan(plan: dict) -> dict:
 
 def cuentas(busqueda: str, limite: int = 200) -> list[dict]:
     """Cuentas con su plan asignado, estado y uso (para el administrador de la plataforma)."""
-    patron = f"%{busqueda.strip()}%" if busqueda and busqueda.strip() else "%"
+    # % y _ de la búsqueda son literales, no comodines de ILIKE.
+    texto = (busqueda or "").strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    patron = f"%{texto}%"
     return db.query_all(
         f"""
         SELECT u.id AS usuario_id, u.email, u.nombre, u.rol,

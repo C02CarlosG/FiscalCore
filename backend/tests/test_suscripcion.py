@@ -66,6 +66,11 @@ def test_mensaje_de_limite():
         "Tu plan Prueba permite 1 RFC y ya lo usaste. Pide un cambio de plan para agregar otra empresa."
     )
     assert "15 RFC y ya los usaste" in s.mensaje_limite({"nombre": "Despacho", "max_rfc": 15})
+    # Cuando el límite es de otra cuenta, el mensaje no le habla a quien actúa.
+    assert s.mensaje_limite({"nombre": "Prueba", "max_rfc": 1}, de_tercero=True) == (
+        "El plan Prueba de esa persona permite 1 RFC y ya lo usa. "
+        "Necesita un cambio de plan para administrar otra empresa."
+    )
 
 
 def test_validar_asignacion():
@@ -82,6 +87,10 @@ def test_validar_asignacion():
     {"plan_clave": "despacho", "estado": "pausada"},
     {"plan_clave": "despacho", "vigente_hasta": "31/12/2026"},
     {"plan_clave": "despacho", "notas": "x" * 1001},
+    {"plan_clave": ["despacho"]},
+    {"plan_clave": {"a": 1}},
+    {"plan_clave": "despacho", "estado": ["activa"]},
+    {"plan_clave": "despacho", "notas": 5},
 ])
 def test_validar_asignacion_rechaza(cuerpo):
     with pytest.raises(s.DatoInvalido):
@@ -101,6 +110,10 @@ def test_validar_plan():
     ("basico", {"nombre": "B", "precio_mensual": "abc", "max_rfc": 1}),
     ("basico", {"nombre": "B", "precio_mensual": 1, "max_rfc": -1}),
     ("basico", {"nombre": "B", "precio_mensual": 1, "max_rfc": 1.5}),
+    ("basico", {"nombre": 5, "precio_mensual": 1, "max_rfc": 1}),
+    ("basico", {"nombre": ["B"], "precio_mensual": 1, "max_rfc": 1}),
+    ("basico", {"nombre": "B", "precio_mensual": 1, "max_rfc": 1, "activo": "false"}),
+    ("basico", {"nombre": "B", "precio_mensual": 1, "max_rfc": 1, "activo": 0}),
 ])
 def test_validar_plan_rechaza(clave, cuerpo):
     with pytest.raises(s.DatoInvalido):

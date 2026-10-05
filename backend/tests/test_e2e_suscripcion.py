@@ -52,6 +52,14 @@ def _vincular(db, email, rfc, rol="contador", created_at="2026-01-01"):
                (_id(db, email), empresa["id"], rol, created_at))
 
 
+def _verificar(db, email, de_tercero=False):
+    """Como lo usa un alta real: dentro de la transacción que crearía el vínculo."""
+    from backend import suscripcion_datos
+
+    with db.get_conn() as conn, conn.cursor() as cur:
+        suscripcion_datos.verificar_alta_rfc(cur, _id(db, email), de_tercero)
+
+
 def _mia(client, h):
     r = client.get("/api/v1/suscripcion", headers=h)
     assert r.status_code == 200, r.text
@@ -64,14 +72,14 @@ def test_plan_por_defecto_y_limite(entorno):
     db, client, h_titular, _h_admin, _h_otro = entorno
     mia = _mia(client, h_titular)
     assert (mia["plan"]["clave"], mia["motivo"], mia["uso_rfc"], mia["puede_agregar_rfc"]) == ("prueba", "sin_suscripcion", 0, True)
-    suscripcion_datos.verificar_alta_rfc(_id(db, TITULAR))
+    _verificar(db, TITULAR)
 
     # Una empresa que administra (primer vinculado) agota el plan de prueba.
     _vincular(db, TITULAR, RFCS[0])
     mia = _mia(client, h_titular)
     assert (mia["uso_rfc"], mia["puede_agregar_rfc"]) == (1, False)
     with pytest.raises(suscripcion_datos.LimiteRfcAlcanzado, match="Prueba permite 1 RFC"):
-        suscripcion_datos.verificar_alta_rfc(_id(db, TITULAR))
+        _verificar(db, TITULAR)
 
     # Donde solo es contador (otro la creó antes) no cuenta.
     _vincular(db, OTRO, RFCS[1], created_at="2026-01-01")
@@ -97,6 +105,9 @@ def test_asignacion_manual_vigencia_y_edicion_de_planes(entorno):
     # La lista del admin la muestra con su uso.
     cuentas = client.get("/api/v1/suscripcion/admin/cuentas", headers=h_admin, params={"q": "m7-titular"}).json()
     assert [(c["email"], c["plan_clave"], c["uso_rfc"]) for c in cuentas] == [(TITULAR, "despacho", 1)]
+    # % y _ en la búsqueda son literales.
+    assert client.get("/api/v1/suscripcion/admin/cuentas", headers=h_admin, params={"q": "m7_titular"}).json() == []
+    assert client.get("/api/v1/suscripcion/admin/cuentas", headers=h_admin, params={"q": "m7%titular"}).json() == []
 
     # Vencida o suspendida vuelve al plan por defecto.
     ayer = (date.today() - timedelta(days=2)).isoformat()
@@ -127,7 +138,7 @@ def test_admin_de_plataforma_no_tiene_limite(entorno):
         _vincular(db, ADMIN, rfc)
     mia = _mia(client, h_admin)
     assert (mia["uso_rfc"], mia["puede_agregar_rfc"], mia["es_admin_plataforma"]) == (3, True, True)
-    suscripcion_datos.verificar_alta_rfc(_id(db, ADMIN))
+    _verificar(db, ADMIN)
 
 
 def test_planes_activos(entorno):
@@ -136,3 +147,40 @@ def test_planes_activos(entorno):
     claves = [p["clave"] for p in planes]
     assert claves[:1] == ["prueba"] and "ilimitado" in claves
     assert next(p for p in planes if p["clave"] == "ilimitado")["max_rfc"] is None
+
+
+def test_dos_altas_simultaneas_no_pasan_el_limite(entorno):
+    """Con el plan de prueba (1 RFC), dos altas concurrentes de la misma cuenta: el
+    candado por cuenta hace que la segunda cuente después del commit de la primera."""
+    import threading
+    import time
+
+    from backend import suscripcion_datos
+
+    db, client, h_titular, _h_admin, _h_otro = entorno
+    titular = _id(db, TITULAR)
+    barrera = threading.Barrier(2)
+    resultados = []
+
+    def alta(rfc):
+        barrera.wait()
+        try:
+            with db.get_conn() as conn, conn.cursor() as cur:
+                suscripcion_datos.verificar_alta_rfc(cur, titular)
+                time.sleep(0.3)  # sin el candado, la otra alta contaría aquí y también pasaría
+                cur.execute("INSERT INTO empresas (rfc, razon_social) VALUES (%s, 'Concurrente') RETURNING id", (rfc,))
+                empresa_id = cur.fetchone()[0]
+                cur.execute("INSERT INTO usuario_empresas (usuario_id, empresa_id, rol) VALUES (%s, %s, 'administrador')",
+                            (titular, empresa_id))
+            resultados.append("ok")
+        except suscripcion_datos.LimiteRfcAlcanzado:
+            resultados.append("limite")
+
+    hilos = [threading.Thread(target=alta, args=(rfc,)) for rfc in RFCS[:2]]
+    for h in hilos:
+        h.start()
+    for h in hilos:
+        h.join()
+
+    assert sorted(resultados) == ["limite", "ok"]
+    assert _mia(client, h_titular)["uso_rfc"] == 1

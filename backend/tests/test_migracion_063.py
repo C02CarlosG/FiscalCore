@@ -32,3 +32,24 @@ def test_063_siembra_planes_sin_pisar_los_editados():
     columnas = {f["column_name"] for f in db.query_all(
         "SELECT column_name FROM information_schema.columns WHERE table_name = 'suscripciones'")}
     assert columnas == {"usuario_id", "plan_clave", "estado", "vigente_hasta", "notas", "asignada_por", "updated_at"}
+
+
+def test_063_reinsertar_prueba_no_choca_con_otro_plan_por_defecto():
+    from backend import db
+
+    db.init_db()
+    prueba = db.query_one("SELECT * FROM planes WHERE clave = 'prueba'")
+    if db.query_one("SELECT 1 AS x FROM suscripciones WHERE plan_clave = 'prueba'"):
+        pytest.skip("hay suscripciones al plan de prueba en esta base")
+    try:
+        db.execute("UPDATE planes SET por_defecto = FALSE WHERE clave = 'prueba'")
+        db.execute("UPDATE planes SET por_defecto = TRUE WHERE clave = 'basico'")
+        db.execute("DELETE FROM planes WHERE clave = 'prueba'")
+        db.init_db()  # antes: UniqueViolation en uq_planes_por_defecto
+        assert db.query_one("SELECT por_defecto FROM planes WHERE clave = 'prueba'")["por_defecto"] is False
+        assert [f["clave"] for f in db.query_all("SELECT clave FROM planes WHERE por_defecto")] == ["basico"]
+    finally:
+        db.execute("UPDATE planes SET por_defecto = FALSE WHERE clave = 'basico'")
+        db.execute("UPDATE planes SET nombre = %s, precio_mensual = %s, max_rfc = %s, por_defecto = TRUE, "
+                   "activo = %s, orden = %s WHERE clave = 'prueba'",
+                   (prueba["nombre"], prueba["precio_mensual"], prueba["max_rfc"], prueba["activo"], prueba["orden"]))

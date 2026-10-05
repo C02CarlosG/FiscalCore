@@ -413,7 +413,7 @@ pausa.
 | 2026-10-04 | D → B | Lo mismo para la pantalla de V1: `"validaciones": "Validaciones de CFDI"` en el breadcrumb de `Header.tsx` y `"validaciones"` en `SUB_RUTAS` de `EmpresaSwitcher.tsx` | Pendiente |
 | 2026-10-04 | D → B | Requisito de U1: normalizar correos a minúsculas al registrar e iniciar sesión, e índice único sobre `lower(email)`; la migración detecta duplicados y falla con mensaje claro, sin borrar cuentas | Autorizado por Carlos; después de F2.4 |
 | 2026-10-04 | Coordinación → B | Verificación de correo con enlace y recuperación de contraseña (requiere servicio de envío de correo) antes de abrir producción a clientes externos (D9) | Pendiente |
-| 2026-10-04 | D → B | M7.1: en `POST /mis-empresas` (`empresas.py`), antes de crear la empresa, llamar a `suscripcion_datos.verificar_alta_rfc(current_user["user_id"])` y responder 403 con el mensaje de `LimiteRfcAlcanzado`. Mientras no esté, el límite de RFC se muestra pero no bloquea | Pendiente |
+| 2026-10-04 | D → B | M7.1: en `POST /mis-empresas` (`empresas.py`), dentro de la transacción que crea la empresa y su vínculo, y antes de esos INSERT, llamar a `suscripcion_datos.verificar_alta_rfc(cur, current_user["user_id"])` con el cursor de esa transacción (toma un candado por cuenta hasta el commit) y responder 403 con el mensaje de `LimiteRfcAlcanzado`. Contrato completo en la spec de M7.1, "Contrato del límite". Mientras no esté, el límite de RFC no bloquea la creación de empresas | Pendiente |
 
 ## Riesgos
 

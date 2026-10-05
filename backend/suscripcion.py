@@ -60,8 +60,16 @@ def puede_agregar_rfc(plan: dict, uso: int, es_admin: bool) -> bool:
     return uso < plan["max_rfc"]
 
 
-def mensaje_limite(plan: dict) -> str:
+def mensaje_limite(plan: dict, de_tercero: bool = False) -> str:
+    """``de_tercero``: el límite es de otra cuenta (por ejemplo, la persona que se aprueba
+    como administradora de una empresa), así que el mensaje no le habla a quien actúa."""
     n = plan["max_rfc"]
+    if de_tercero:
+        usados = "ya lo usa" if n == 1 else "ya los usa"
+        return (
+            f"El plan {plan['nombre']} de esa persona permite {n} RFC y {usados}. "
+            "Necesita un cambio de plan para administrar otra empresa."
+        )
     usados = "ya lo usaste" if n == 1 else "ya los usaste"
     return (
         f"Tu plan {plan['nombre']} permite {n} RFC y {usados}. "
@@ -71,11 +79,11 @@ def mensaje_limite(plan: dict) -> str:
 
 def validar_asignacion(cuerpo: dict, planes: dict) -> dict:
     clave = cuerpo.get("plan_clave")
-    plan = planes.get(clave)
+    plan = planes.get(clave) if isinstance(clave, str) else None
     if plan is None or not plan["activo"]:
         raise DatoInvalido("plan_clave debe ser un plan activo del catálogo")
     estado = cuerpo.get("estado", "activa")
-    if estado not in ESTADOS:
+    if not isinstance(estado, str) or estado not in ESTADOS:
         raise DatoInvalido("estado debe ser 'activa', 'suspendida' o 'cancelada'")
     hasta = cuerpo.get("vigente_hasta")
     if hasta not in (None, ""):
@@ -85,7 +93,10 @@ def validar_asignacion(cuerpo: dict, planes: dict) -> dict:
             raise DatoInvalido("vigente_hasta debe tener formato AAAA-MM-DD")
     else:
         hasta = None
-    notas = (cuerpo.get("notas") or "").strip()
+    notas = cuerpo.get("notas") or ""
+    if not isinstance(notas, str):
+        raise DatoInvalido("notas debe ser texto")
+    notas = notas.strip()
     if len(notas) > MAX_NOTAS:
         raise DatoInvalido(f"notas no puede pasar de {MAX_NOTAS} caracteres")
     return {"plan_clave": clave, "estado": estado, "vigente_hasta": hasta, "notas": notas or None}
@@ -94,7 +105,8 @@ def validar_asignacion(cuerpo: dict, planes: dict) -> dict:
 def validar_plan(clave: str, cuerpo: dict) -> dict:
     if not isinstance(clave, str) or not _CLAVE_RE.fullmatch(clave):
         raise DatoInvalido("clave: minúsculas, números y guion bajo (2 a 30 caracteres)")
-    nombre = (cuerpo.get("nombre") or "").strip()
+    nombre = cuerpo.get("nombre")
+    nombre = nombre.strip() if isinstance(nombre, str) else ""
     if not nombre or len(nombre) > 80:
         raise DatoInvalido("nombre es obligatorio (hasta 80 caracteres)")
     try:
@@ -106,7 +118,10 @@ def validar_plan(clave: str, cuerpo: dict) -> dict:
     max_rfc: Any = cuerpo.get("max_rfc")
     if max_rfc is not None and (isinstance(max_rfc, bool) or not isinstance(max_rfc, int) or max_rfc < 0):
         raise DatoInvalido("max_rfc debe ser un entero de 0 o más, o null para ilimitado")
+    activo = cuerpo.get("activo", True)
+    if not isinstance(activo, bool):  # bool("false") sería True
+        raise DatoInvalido("activo debe ser true o false")
     return {
         "clave": clave, "nombre": nombre, "precio_mensual": precio.quantize(CENTAVOS),
-        "max_rfc": max_rfc, "activo": bool(cuerpo.get("activo", True)),
+        "max_rfc": max_rfc, "activo": activo,
     }

@@ -22,11 +22,17 @@ CREATE TABLE IF NOT EXISTS planes (
 -- Un solo plan por defecto (el que tiene quien no tiene suscripción vigente).
 CREATE UNIQUE INDEX IF NOT EXISTS uq_planes_por_defecto ON planes (por_defecto) WHERE por_defecto;
 
-INSERT INTO planes (clave, nombre, precio_mensual, max_rfc, por_defecto, orden) VALUES
+-- Si alguien borró «prueba» y marcó otro plan como por defecto, al reinsertarla no se
+-- marca (chocaría con uq_planes_por_defecto y detendría el arranque).
+INSERT INTO planes (clave, nombre, precio_mensual, max_rfc, por_defecto, orden)
+SELECT v.clave, v.nombre, v.precio_mensual, v.max_rfc,
+       v.por_defecto AND NOT EXISTS (SELECT 1 FROM planes p WHERE p.por_defecto), v.orden
+FROM (VALUES
     ('prueba',    'Prueba',    0,    1,    TRUE,  10),
     ('basico',    'Básico',    499,  3,    FALSE, 20),
     ('despacho',  'Despacho',  1499, 15,   FALSE, 30),
     ('ilimitado', 'Ilimitado', 3999, NULL, FALSE, 40)
+) AS v (clave, nombre, precio_mensual, max_rfc, por_defecto, orden)
 ON CONFLICT (clave) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS suscripciones (
