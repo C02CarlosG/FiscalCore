@@ -28,6 +28,7 @@ from .routers import auth, empresas, ingesta, riesgos, scoring, conciliacion, em
 from .routers import inicio
 from .routers import informacion_fiscal
 from .routers import iva_flujo
+from .routers import diot as diot_router
 from .routers import proveedores as proveedores_router
 from .routers import validaciones_cfdi
 
@@ -84,6 +85,7 @@ app.include_router(preferencias.router)
 app.include_router(inicio.router)
 app.include_router(informacion_fiscal.router)
 app.include_router(iva_flujo.router)
+app.include_router(diot_router.router)
 app.include_router(proveedores_router.router)
 app.include_router(validaciones_cfdi.router)
 

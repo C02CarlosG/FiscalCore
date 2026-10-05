@@ -113,6 +113,7 @@ async def crear_proveedor(empresa_id: str, datos: ProveedorIn, current_user: dic
     validar_acceso_empresa(empresa_id, current_user)
     rfc = _rfc_o_422(datos.rfc)
     campos = datos.model_dump(exclude={"rfc"})
+    campos["tipo_tercero"] = campos["tipo_tercero"] or diot_catalogos.tipo_tercero_por_defecto(rfc)   # XEXX → 05: exige ID fiscal y país
     _errores_o_422({"rfc": rfc, **campos})
     campos["tipo_operacion"] = campos["tipo_operacion"] or diot_catalogos.OPERACION_POR_DEFECTO
     try:
@@ -127,13 +128,13 @@ async def editar_proveedor(empresa_id: str, proveedor_id: str, datos: ProveedorP
     validar_acceso_empresa(empresa_id, current_user)
     proveedor_id = _id_o_404(proveedor_id)
     cambios = datos.model_dump(exclude_unset=True)
-    if set(cambios) & {"tipo_tercero", "tipo_operacion", "pais", "id_fiscal"}:
-        resultante = proveedores.estado_para_validar(empresa_id, proveedor_id, cambios)
-        if resultante is None:
-            raise HTTPException(status_code=404, detail="Proveedor no encontrado")
-        _errores_o_422(resultante)
+    revisa = bool(set(cambios) & {"tipo_tercero", "tipo_operacion", "pais", "id_fiscal"})
     try:
-        actualizado = proveedores.actualizar(empresa_id, proveedor_id, cambios, current_user["user_id"])
+        actualizado = proveedores.actualizar(
+            empresa_id, proveedor_id, cambios, current_user["user_id"],
+            validar=diot_catalogos.validar if revisa else None)
+    except proveedores.Invalido as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
     except proveedores.Duplicado:
         raise HTTPException(status_code=409, detail="Ya existe un proveedor extranjero con ese ID fiscal")
     if actualizado is None:
