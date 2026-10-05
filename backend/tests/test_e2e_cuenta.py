@@ -15,7 +15,8 @@ NUEVO = "u1-nuevo@test.local"
 EXISTENTE = "u1-existente@test.local"
 SEGUNDO = "u1-segundo@test.local"
 ATACANTE = "U1-Existente@Test.local"  # mismo correo que EXISTENTE con otras mayúsculas
-CORREOS = (DUENO, NUEVO, EXISTENTE, SEGUNDO, ATACANTE)
+VICTIMA = "u1-victima@test.local"  # invitada sin cuenta; alguien más se registra con su correo
+CORREOS = (DUENO, NUEVO, EXISTENTE, SEGUNDO, ATACANTE, "U1-Victima@Test.local")
 CLAVE = "Clave-Duena-1"
 
 
@@ -72,13 +73,21 @@ def _invitar(client, headers, empresa_id, email, rol="contador"):
     return client.post(f"{_base(empresa_id)}/invitaciones", headers=headers, json={"email": email, "rol": rol})
 
 
-def _unir(client, headers_dueno, empresa_id, email, clave, rol="contador"):
-    """Invita y acepta; devuelve los headers de la persona."""
-    assert _invitar(client, headers_dueno, empresa_id, email, rol).status_code == 201
-    h = _headers(client, email, clave)
+def _aceptar(client, h):
+    """La persona acepta su única invitación; devuelve el id."""
     inv = client.get("/api/v1/cuenta/invitaciones", headers=h).json()
     assert len(inv) == 1, inv
-    assert client.post(f"/api/v1/cuenta/invitaciones/{inv[0]['id']}/aceptar", headers=h).status_code == 200
+    r = client.post(f"/api/v1/cuenta/invitaciones/{inv[0]['id']}/aceptar", headers=h)
+    assert r.status_code == 200 and r.json() == {"estado": "aceptada_pendiente"}, r.text
+    return inv[0]["id"]
+
+
+def _unir(client, headers_dueno, empresa_id, email, clave, rol="contador"):
+    """Invita, la persona acepta y el administrador aprueba; devuelve los headers de la persona."""
+    assert _invitar(client, headers_dueno, empresa_id, email, rol).status_code == 201
+    h = _headers(client, email, clave)
+    inv_id = _aceptar(client, h)
+    assert client.post(f"{_base(empresa_id)}/invitaciones/{inv_id}/aprobar", headers=headers_dueno).status_code == 204
     return h
 
 
@@ -125,7 +134,70 @@ def test_aceptar_rechazar_y_cuenta_nueva(entorno):
     assert client.post(f"/api/v1/cuenta/invitaciones/{inv[0]['id']}/aceptar", headers=h_nuevo).status_code == 404
 
     acciones = {f["accion"] for f in db.query_all("SELECT accion FROM auditoria WHERE empresa_id = %s", (empresa_id,))}
-    assert {"cuenta.invitar", "cuenta.aceptar_invitacion", "cuenta.rechazar_invitacion"} <= acciones
+    assert {"cuenta.invitar", "cuenta.aceptar_invitacion", "cuenta.aprobar_invitacion",
+            "cuenta.rechazar_invitacion"} <= acciones
+
+
+def test_aceptar_no_da_acceso_hasta_que_un_administrador_aprueba(entorno):
+    """Doble confirmación: alguien se registra con el correo de la invitada (sin cuenta) y
+    acepta. Queda por aprobar, sin acceso; el administrador ve su nombre y la fecha de su
+    cuenta, un contador no puede resolverla y, al rechazarla, sigue sin acceso."""
+    from backend.deps import limiter
+
+    db, client, headers, empresa_id = entorno
+    base = _base(empresa_id)
+    h_contador = _unir(client, headers, empresa_id, EXISTENTE, "Clave-Existente-1")
+    assert _invitar(client, headers, empresa_id, VICTIMA, "administrador").status_code == 201
+
+    limiter.reset()
+    r = client.post("/api/v1/auth/register",
+                    json={"email": "U1-Victima@Test.local", "password": "Clave-Atacante-1", "nombre": "Impostor"})
+    assert r.status_code == 201, r.text
+    h_atacante = {"Authorization": f"Bearer {r.json()['access_token']}"}
+    inv_id = _aceptar(client, h_atacante)
+
+    # Aceptada, pero sin acceso: la ve como "esperando aprobación" y no puede volver a responder.
+    assert client.get(f"/api/v1/empresas/{empresa_id}", headers=h_atacante).status_code == 403
+    assert [i["estado"] for i in client.get("/api/v1/cuenta/invitaciones", headers=h_atacante).json()] == ["aceptada_pendiente"]
+    assert client.post(f"/api/v1/cuenta/invitaciones/{inv_id}/aceptar", headers=h_atacante).status_code == 404
+    lista = client.get(f"{base}/usuarios", headers=headers).json()
+    assert lista["invitaciones"] == []
+    [pendiente] = lista["por_aprobar"]
+    assert (pendiente["id"], pendiente["nombre"], pendiente["rol"]) == (inv_id, "Impostor", "administrador")
+    assert pendiente["email"] == "U1-Victima@Test.local"  # el de la cuenta, tal como se registró
+    assert pendiente["cuenta_creada"] and pendiente["aceptada"]
+    assert client.get(f"{base}/usuarios", headers=h_contador).json()["por_aprobar"] == []
+
+    # Ni un contador ni quien aceptó pueden aprobar.
+    assert client.post(f"{base}/invitaciones/{inv_id}/aprobar", headers=h_contador).status_code == 403
+    assert client.post(f"{base}/invitaciones/{inv_id}/aprobar", headers=h_atacante).status_code == 403
+    # Una invitación de esta empresa no se resuelve desde la ruta de otra (404 uniforme).
+    otra = client.post("/api/v1/mis-empresas", headers=headers, json={"rfc": RFC_OTRA, "razon_social": "Otra E2E"})
+    assert otra.status_code == 201, otra.text
+    assert client.post(f"{_base(otra.json()['empresa_id'])}/invitaciones/{inv_id}/aprobar",
+                       headers=headers).status_code == 404
+
+    assert client.post(f"{base}/invitaciones/{inv_id}/rechazar", headers=headers).status_code == 204
+    assert client.get(f"/api/v1/empresas/{empresa_id}", headers=h_atacante).status_code == 403
+    assert client.post(f"{base}/invitaciones/{inv_id}/aprobar", headers=headers).status_code == 404
+    assert client.get("/api/v1/cuenta/invitaciones", headers=h_atacante).json() == []
+    assert client.get(f"{base}/usuarios", headers=headers).json()["por_aprobar"] == []
+    estado = db.query_one("SELECT estado, resuelta_por FROM invitaciones_empresa WHERE id = %s", (inv_id,))
+    assert estado["estado"] == "rechazada_admin" and estado["resuelta_por"] is not None
+    acciones = {f["accion"] for f in db.query_all("SELECT accion FROM auditoria WHERE empresa_id = %s", (empresa_id,))}
+    assert "cuenta.rechazar_aceptacion" in acciones
+
+
+def test_aprobar_da_acceso_con_el_rol_invitado(entorno):
+    _db, client, headers, empresa_id = entorno
+    h = _unir(client, headers, empresa_id, SEGUNDO, "Clave-Segundo-1", rol="administrador")
+    assert client.get(f"/api/v1/empresas/{empresa_id}", headers=h).status_code == 200
+    lista = client.get(f"{_base(empresa_id)}/usuarios", headers=h).json()
+    assert (lista["mi_rol"], lista["puede_administrar"], lista["por_aprobar"]) == ("administrador", True, [])
+    # El creador sigue siendo administrador.
+    roles = {u["email"]: u["rol"] for u in lista["usuarios"]}
+    assert roles == {DUENO: "administrador", SEGUNDO: "administrador"}
+    assert client.get("/api/v1/cuenta/invitaciones", headers=h).json() == []
 
 
 def test_permisos_roles_y_bajas(entorno):
@@ -245,6 +317,20 @@ def test_invitacion_vencida_no_se_lista_ni_se_acepta(entorno):
     assert client.get(f"{_base(empresa_id)}/usuarios", headers=headers).json()["invitaciones"] == []
     assert _invitar(client, headers, empresa_id, EXISTENTE).status_code == 201
     assert len(client.get("/api/v1/cuenta/invitaciones", headers=h).json()) == 1
+
+
+def test_aceptacion_sin_aprobar_vence_a_los_7_dias(entorno):
+    db, client, headers, empresa_id = entorno
+    assert _invitar(client, headers, empresa_id, EXISTENTE).status_code == 201
+    h = _headers(client, EXISTENTE, "Clave-Existente-1")
+    inv_id = _aceptar(client, h)
+    vence = db.query_one("SELECT expires_at - respondida_at AS plazo FROM invitaciones_empresa WHERE id = %s", (inv_id,))
+    assert vence["plazo"].days == 7
+    db.execute("UPDATE invitaciones_empresa SET expires_at = NOW() - INTERVAL '1 minute' WHERE id = %s", (inv_id,))
+    assert client.get(f"{_base(empresa_id)}/usuarios", headers=headers).json()["por_aprobar"] == []
+    assert client.post(f"{_base(empresa_id)}/invitaciones/{inv_id}/aprobar", headers=headers).status_code == 404
+    assert client.get(f"/api/v1/empresas/{empresa_id}", headers=h).status_code == 403
+    assert client.get("/api/v1/cuenta/invitaciones", headers=h).json() == []
 
 
 def test_no_se_acepta_invitacion_de_empresa_inactiva(entorno):

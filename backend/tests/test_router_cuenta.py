@@ -32,7 +32,8 @@ def sesion(monkeypatch):
     main.app.dependency_overrides.clear()
 
 
-def _base_falsa(monkeypatch, miembros, rol_plataforma="contador"):
+def _base_falsa(monkeypatch, miembros, rol_plataforma="contador", aceptada=None):
+    """`aceptada`: la invitación por aprobar que devuelve el SELECT … FOR UPDATE, o None."""
     ejecutado = []
 
     def _one(sql, params=()):
@@ -65,6 +66,8 @@ def _base_falsa(monkeypatch, miembros, rol_plataforma="contador"):
                 from datetime import datetime
                 return {"id": "inv-1", "email": "c@d.mx", "rol": "contador", "estado": "pendiente",
                         "created_at": datetime(2026, 10, 4)}
+            if "estado = 'aceptada_pendiente'" in self.ultimo:
+                return aceptada
             return None
 
     @contextmanager
@@ -180,3 +183,45 @@ def test_el_limite_de_invitar_es_por_usuario_y_no_por_ip(monkeypatch):
     # Misma IP (el TestClient), otro usuario: tiene su propio cupo.
     monkeypatch.setattr(cuenta, "registrar_evento", lambda *a, **k: None)
     assert client.post(url, headers=h_b, json={"email": "c@d.mx", "rol": "contador"}).status_code == 201
+
+
+PENDIENTE = {"id": "inv-1", "rol": "administrador", "respondida_por": OTRO}
+APROBAR = f"/api/v1/cuenta/empresas/{EMPRESA}/invitaciones/{PENDIENTE['id'].replace('inv-1', '44444444-4444-4444-4444-444444444444')}"
+
+
+def _escrituras(ejecutado):
+    return [sql for sql, _ in ejecutado if sql.lstrip().startswith(("INSERT", "UPDATE", "DELETE"))
+            and "auditoria" not in sql]
+
+
+@pytest.mark.parametrize("accion", ["aprobar", "rechazar"])
+def test_contador_no_puede_resolver_una_aceptacion(monkeypatch, accion):
+    ejecutado = _base_falsa(monkeypatch, [_miembro(OTRO, "administrador", 1), _miembro(YO, "contador", 2)],
+                            aceptada=PENDIENTE)
+    assert client.post(f"{APROBAR}/{accion}").status_code == 403
+    assert _escrituras(ejecutado) == []
+
+
+@pytest.mark.parametrize("accion", ["aprobar", "rechazar"])
+def test_resolver_sin_aceptacion_pendiente_responde_404(monkeypatch, accion):
+    ejecutado = _base_falsa(monkeypatch, [_miembro(YO, "administrador", 1)], aceptada=None)
+    assert client.post(f"{APROBAR}/{accion}").status_code == 404
+    assert _escrituras(ejecutado) == []
+
+
+def test_aprobar_vincula_con_el_rol_invitado_y_audita(monkeypatch):
+    ejecutado = _base_falsa(monkeypatch, [_miembro(YO, "administrador", 1)], aceptada=PENDIENTE)
+    assert client.post(f"{APROBAR}/aprobar").status_code == 204
+    alta = [p for sql, p in ejecutado if "INSERT INTO usuario_empresas" in sql]
+    assert alta == [(OTRO, EMPRESA, "administrador")]
+    estado = [p for sql, p in ejecutado if "UPDATE invitaciones_empresa" in sql]
+    assert estado and estado[0][0] == "aprobada"
+    assert any("auditoria" in sql and "cuenta.aprobar_invitacion" in str(p) for sql, p in ejecutado)
+
+
+def test_rechazar_no_vincula_y_audita(monkeypatch):
+    ejecutado = _base_falsa(monkeypatch, [_miembro(YO, "administrador", 1)], aceptada=PENDIENTE)
+    assert client.post(f"{APROBAR}/rechazar").status_code == 204
+    assert not any("INSERT INTO usuario_empresas" in sql for sql, _ in ejecutado)
+    assert [p[0] for sql, p in ejecutado if "UPDATE invitaciones_empresa" in sql] == ["rechazada_admin"]
+    assert any("auditoria" in sql and "cuenta.rechazar_aceptacion" in str(p) for sql, p in ejecutado)

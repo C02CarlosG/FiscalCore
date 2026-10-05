@@ -49,6 +49,16 @@ def test_062_marca_al_creador_como_administrador_y_se_puede_repetir():
         with pytest.raises(psycopg2.errors.CheckViolation):
             db.execute("INSERT INTO invitaciones_empresa (empresa_id, email, rol) VALUES (%s, 'X@test.local', 'contador')",
                        (empresa["id"],))
+        # Una aceptación por aprobar también ocupa el lugar; resuelta, ya no.
+        db.execute("UPDATE invitaciones_empresa SET estado = 'aceptada_pendiente' WHERE empresa_id = %s", (empresa["id"],))
+        with pytest.raises(psycopg2.errors.UniqueViolation):
+            db.execute("INSERT INTO invitaciones_empresa (empresa_id, email, rol) VALUES (%s, 'x@test.local', 'contador')",
+                       (empresa["id"],))
+        db.execute("UPDATE invitaciones_empresa SET estado = 'rechazada_admin' WHERE empresa_id = %s", (empresa["id"],))
+        db.execute("INSERT INTO invitaciones_empresa (empresa_id, email, rol) VALUES (%s, 'x@test.local', 'contador')",
+                   (empresa["id"],))
+        with pytest.raises(psycopg2.errors.CheckViolation):
+            db.execute("UPDATE invitaciones_empresa SET estado = 'aceptada' WHERE empresa_id = %s", (empresa["id"],))
     finally:
         _limpiar(db)
 
