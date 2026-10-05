@@ -23,6 +23,7 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
 from . import db
+from .proxy import instalar_proxy
 from .deps import limiter  # importar deps.py valida JWT_SECRET al arrancar
 from .routers import auth, empresas, ingesta, riesgos, scoring, conciliacion, emitidos, dashboard, sat, admin, reportes, movimientos, cfdi, cfdis, preferencias
 from .routers import inicio
@@ -66,6 +67,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+instalar_proxy(app)          # último en añadirse = más externo: SlowAPI ya ve la IP real del cliente
 
 app.include_router(auth.router)
 app.include_router(empresas.router)

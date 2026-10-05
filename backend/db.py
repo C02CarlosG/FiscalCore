@@ -228,6 +228,9 @@ def init_db() -> None:
         # 031 es idempotente — descarga automática del SAT: sat_solicitudes ampliada, índice de ventana activa y sat_sync_config
         _run_sql_file("031_sat_sync.sql")
 
+        # 032 es idempotente — correos únicos sin distinguir mayúsculas (falla si hay duplicados) y token_version
+        _run_sql_file("032_seguridad_usuarios.sql")
+
         # 040 es idempotente — extracción v2 del XML: Totales e ImpuestosP del REP, ObjetoImpDR,
         # ACuentaTerceros y nómina completa (percepciones por tipo, otros pagos, separación, jubilación)
         _run_sql_file("040_extraccion_v2.sql")

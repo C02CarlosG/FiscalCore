@@ -18,6 +18,8 @@ from backend.deps import crear_token, hash_password, limiter
 
 client = TestClient(main.app)
 
+SESION_VIGENTE = {"activo": True, "token_version": 0}   # respuesta de la validación de sesión en get_current_user
+
 
 @pytest.fixture(autouse=True)
 def _reset_rate_limiter():
@@ -138,10 +140,11 @@ def test_me_sin_token_da_401():
 
 def test_me_con_token_valido(monkeypatch):
     token = crear_token({"user_id": "u1", "email": "ana@test.local"})
-    monkeypatch.setattr(db, "query_one", lambda *a, **k: {
+    perfil = {
         "id": "u1", "email": "ana@test.local", "nombre": "Ana", "telefono": None,
         "rfc": None, "nombre_despacho": None, "cedula_profesional": None,
-    })
+    }
+    monkeypatch.setattr(db, "query_one", lambda sql, *a, **k: SESION_VIGENTE if "token_version" in sql else perfil)
     monkeypatch.setattr(db, "query_all", lambda *a, **k: [])
 
     r = client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"})
@@ -152,7 +155,7 @@ def test_me_con_token_valido(monkeypatch):
 
 def test_me_usuario_no_encontrado_da_404(monkeypatch):
     token = crear_token({"user_id": "u1", "email": "ana@test.local"})
-    monkeypatch.setattr(db, "query_one", lambda *a, **k: None)
+    monkeypatch.setattr(db, "query_one", lambda sql, *a, **k: SESION_VIGENTE if "token_version" in sql else None)
 
     r = client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"})
 

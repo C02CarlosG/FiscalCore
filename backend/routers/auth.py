@@ -6,6 +6,7 @@
 import logging
 from typing import Optional
 
+import psycopg2.errors
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from .. import db
@@ -26,13 +27,17 @@ async def registrar(request: Request, data: RegisterRequest):
         raise HTTPException(status_code=409, detail="El correo ya está registrado")
 
     password_hash = hash_password(data.password)
-    usuario = db.execute(
-        "INSERT INTO usuarios (email, password_hash, nombre) VALUES (%s, %s, %s) RETURNING *",
-        (data.email, password_hash, data.nombre),
-        returning=True,
-    )
+    try:
+        usuario = db.execute(
+            "INSERT INTO usuarios (email, password_hash, nombre) VALUES (%s, %s, %s) RETURNING *",
+            (data.email, password_hash, data.nombre),
+            returning=True,
+        )
+    except psycopg2.errors.UniqueViolation:       # otro registro del mismo correo ganó la carrera
+        raise HTTPException(status_code=409, detail="El correo ya está registrado")
 
-    token = crear_token({"user_id": str(usuario["id"]), "email": data.email})
+    token = crear_token({"user_id": str(usuario["id"]), "email": data.email,
+                         "tv": usuario.get("token_version") or 0})
 
     return {
         "access_token": token,
@@ -69,7 +74,8 @@ async def login(request: Request, data: LoginRequest):
             (str(usuario["id"]),),
         )
 
-        token = crear_token({"user_id": str(usuario["id"]), "email": data.email})
+        token = crear_token({"user_id": str(usuario["id"]), "email": data.email,
+                         "tv": usuario.get("token_version") or 0})
 
         return {
             "access_token": token,

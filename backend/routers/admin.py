@@ -60,6 +60,8 @@ async def actualizar_usuario(
         raise HTTPException(status_code=400, detail="Rol inválido: usa 'admin' o 'contador'")
 
     sets = ", ".join(f"{k} = %s" for k in campos)
+    if "activo" in campos or "rol" in campos:
+        sets += ", token_version = token_version + 1"      # baja o cambio de rol cierran las sesiones abiertas
     valores = list(campos.values()) + [user_id]
     usuario = db.execute(
         f"UPDATE usuarios SET {sets} WHERE id = %s RETURNING id, email, nombre, rol, activo",
