@@ -55,6 +55,13 @@ _REGIMENES_CONOCIDOS = [
     "Ingresos por Intereses",
     "Sin obligaciones fiscales",
     "Incorporación Fiscal",
+    "Régimen de las Actividades Empresariales con ingresos a través de Plataformas Tecnológicas",
+    "Régimen de Enajenación o Adquisición de Bienes",
+    "Régimen de los ingresos por obtención de premios",
+    "Actividades Agrícolas, Ganaderas, Silvícolas y Pesqueras",
+    "Opcional para Grupos de Sociedades",
+    "Coordinados",
+    "Sociedades Cooperativas de Producción",
 ]
 
 # Etiquetas de periodicidad para detectar obligaciones

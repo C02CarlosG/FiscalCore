@@ -242,3 +242,34 @@ def test_analizar_rechaza_opinion_como_constancia_y_al_reves():
 def test_analizar_rechaza_tipo_desconocido():
     with pytest.raises(ValueError):
         inf.analizar_documento("acta", constancia_sintetica(), RFC_PRUEBA)
+
+
+@pytest.mark.parametrize("nombre,codigo", [
+    ("Régimen de las Actividades Empresariales con ingresos a través de Plataformas Tecnológicas", "625"),
+    ("Régimen de las Personas Físicas con Actividades Empresariales y Profesionales", "612"),
+    ("Régimen de Actividades Empresariales y Profesionales", "612"),
+    ("Régimen Simplificado de Confianza", "626"),
+    ("REGIMEN GENERAL DE LEY PERSONAS MORALES", "601"),
+    ("Sueldos y Salarios e Ingresos Asimilados a Salarios", "605"),
+    ("Régimen de Arrendamiento", "606"),
+    ("Régimen de Incorporación Fiscal", "621"),
+    ("612 - Personas Físicas con Actividades Empresariales y Profesionales", "612"),
+    ("Régimen desconocido", None),
+    (None, None),
+])
+def test_codigo_de_regimen(nombre, codigo):
+    assert inf.codigo_regimen(nombre) == codigo
+
+
+def test_regimenes_detectados_y_principal():
+    detectados = inf.regimenes_detectados(["Régimen Simplificado de Confianza", "Régimen Simplificado de Confianza",
+                                           "Sueldos y Salarios", "Otra línea", 5])
+    assert [d["codigo"] for d in detectados] == ["626", "605"]
+    assert detectados[0]["descripcion"] == "Régimen Simplificado de Confianza"
+    assert inf.regimen_principal(["612", "605"]) == "612"
+    assert inf.regimen_principal(["605"]) == "605"
+    assert inf.regimen_principal(["612", "606"]) is None
+    assert inf.regimen_principal([]) is None
+    assert inf.texto_regimen("601") == "601 - General de Ley Personas Morales"
+    with pytest.raises(ValueError):
+        inf.texto_regimen("999")

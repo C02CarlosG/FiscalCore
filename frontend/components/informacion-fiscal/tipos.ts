@@ -60,3 +60,12 @@ export function rutaPdf(empresaId: string, documentoId: string, descargar = fals
   const base = `${rutaInformacionFiscal(empresaId)}/documentos/${documentoId}/pdf`;
   return descargar ? `${base}?descargar=true` : base;
 }
+
+/** Régimen de la empresa y los de la constancia vigente (claves de c_RegimenFiscal). */
+export interface RegimenEmpresa {
+  actual: { codigo: string | null; texto: string } | null;
+  constancia_id: string | null;
+  detectados: { codigo: string; descripcion: string; nombre: string }[];
+  /** Régimen principal de la constancia cuando no coincide con el guardado. */
+  sugerido: string | null;
+}

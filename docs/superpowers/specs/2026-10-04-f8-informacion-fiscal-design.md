@@ -162,6 +162,28 @@ lateral, grupo Fiscal. Componentes en `frontend/components/informacion-fiscal/`:
 Validación previa en el navegador (solo por comodidad, el backend decide): extensión
 `.pdf` y tamaño máximo de 5 MB.
 
+## Régimen fiscal de la empresa desde la constancia (2026-10-06)
+
+Pedido del punto de control de paridad: que los avisos de «régimen no soportado» de ISR
+desaparezcan al cargar la constancia.
+
+- **Nombre → clave.** Cada régimen que lee la constancia se traduce a su clave de
+  `c_RegimenFiscal` (sin acentos ni mayúsculas, del nombre más específico al más
+  general: «…con ingresos a través de Plataformas Tecnológicas» es 625, no 612).
+- **Guardado al subir.** Si la empresa no tiene régimen y la constancia trae uno
+  principal, se guarda solo en `empresas.regimen_fiscal` con el formato que lee ISR
+  («612 - Personas Físicas…»). No cuentan como principales 605, 608, 611, 614, 615 y 616
+  (sueldos, demás ingresos, dividendos, intereses, premios, sin obligaciones). Con dos
+  principales (p. ej. 612 y 606) no se guarda nada y decide una persona.
+- **Nunca sobrescribe** un régimen capturado. Si la constancia vigente trae otro,
+  `GET …/regimen` lo devuelve como `sugerido` y la tarjeta «Régimen fiscal» lo ofrece.
+- **`PUT …/regimen {codigo}`.** Cualquier miembro con acceso a la empresa puede guardar
+  una clave del catálogo (422 si no existe).
+- **Auditoría.** `informacion_fiscal.regimen` con `de`, `a` y `origen`
+  (`constancia` o `manual`).
+- **Carril B.** Se escribe la columna `empresas.regimen_fiscal` desde rutas del carril D,
+  como autorizó la coordinación; anotado en «Pedidos entre carriles».
+
 ## Criterios de aceptación
 
 1. Subir una constancia sintética con RFC `ACM010101AA1` a la empresa de ese RFC
