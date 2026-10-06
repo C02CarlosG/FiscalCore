@@ -61,6 +61,10 @@ app = FastAPI(
 
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+# Catálogo de planes sin plan por defecto → 409 en vez de 500 (M7.1, carril D)
+from .suscripcion import ConfiguracionInvalida  # noqa: E402
+from .routers.suscripcion import configuracion_invalida  # noqa: E402
+app.add_exception_handler(ConfiguracionInvalida, configuracion_invalida)
 app.add_middleware(SlowAPIMiddleware)
 
 app.add_middleware(

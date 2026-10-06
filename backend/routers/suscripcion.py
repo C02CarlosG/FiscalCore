@@ -7,13 +7,21 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
 
 from .. import db
 from .. import suscripcion as s
 from .. import suscripcion_datos as datos
 from ..auditoria import registrar_evento
 from ..deps import get_current_user, require_admin
+
+
+async def configuracion_invalida(_request: Request, exc: s.ConfiguracionInvalida) -> JSONResponse:
+    """Un catálogo sin plan por defecto es un problema de configuración, no un 500.
+    Se registra en `main_api` para todas las rutas (también cuenta.py al aprobar)."""
+    return JSONResponse(status_code=409, content={"detail": f"Configuración de planes inválida: {exc}"})
+
 
 router = APIRouter(prefix="/api/v1/suscripcion", tags=["Suscripción"])
 

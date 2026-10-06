@@ -16,7 +16,8 @@ EXISTENTE = "u1-existente@test.local"
 SEGUNDO = "u1-segundo@test.local"
 ATACANTE = "U1-Existente@Test.local"  # mismo correo que EXISTENTE con otras mayúsculas
 VICTIMA = "u1-victima@test.local"  # invitada sin cuenta; alguien más se registra con su correo
-CORREOS = (DUENO, NUEVO, EXISTENTE, SEGUNDO, ATACANTE, "U1-Victima@Test.local")
+PLATAFORMA = "u1-plataforma@test.local"
+CORREOS = (DUENO, NUEVO, EXISTENTE, SEGUNDO, ATACANTE, "U1-Victima@Test.local", PLATAFORMA)
 CLAVE = "Clave-Duena-1"
 
 
@@ -372,3 +373,98 @@ def test_aprobar_o_promover_a_administrador_respeta_el_plan_de_la_persona(entorn
     assert client.get(f"/api/v1/empresas/{empresa_id}", headers=h).status_code == 200
     r = client.patch(f"{base}/usuarios/{segundo}", headers=headers, json={"rol": "administrador"})
     assert r.status_code == 403 and "de esa persona" in r.json()["detail"], r.text
+
+
+def test_reinvitar_sobre_una_aceptacion_pendiente_responde_409(entorno):
+    db, client, headers, empresa_id = entorno
+    assert _invitar(client, headers, empresa_id, EXISTENTE, "contador").status_code == 201
+    inv_id = _aceptar(client, _headers(client, EXISTENTE, "Clave-Existente-1"))
+    antes = db.query_one("SELECT rol, expires_at FROM invitaciones_empresa WHERE id = %s", (inv_id,))
+    assert _invitar(client, headers, empresa_id, EXISTENTE, "administrador").status_code == 409
+    despues = db.query_one("SELECT rol, estado, expires_at FROM invitaciones_empresa WHERE id = %s", (inv_id,))
+    assert (despues["rol"], despues["estado"], despues["expires_at"]) == ("contador", "aceptada_pendiente",
+                                                                          antes["expires_at"])
+    [pendiente] = client.get(f"{_base(empresa_id)}/usuarios", headers=headers).json()["por_aprobar"]
+    assert (pendiente["email"], pendiente["email_invitado"]) == (EXISTENTE, EXISTENTE)
+
+
+def test_no_se_aprueba_si_el_correo_se_volvio_ambiguo(entorno):
+    """B1 al aprobar: después de aceptar aparece otra cuenta con el mismo correo en
+    otras mayúsculas; la aprobación se niega y nadie entra."""
+    from backend.deps import hash_password
+
+    db, client, headers, empresa_id = entorno
+    assert _invitar(client, headers, empresa_id, EXISTENTE).status_code == 201
+    h = _headers(client, EXISTENTE, "Clave-Existente-1")
+    inv_id = _aceptar(client, h)
+    db.execute("INSERT INTO usuarios (email, password_hash) VALUES (%s, %s)", (ATACANTE, hash_password("Clave-Atacante-1")))
+    assert client.post(f"{_base(empresa_id)}/invitaciones/{inv_id}/aprobar", headers=headers).status_code == 409
+    assert client.get(f"/api/v1/empresas/{empresa_id}", headers=h).status_code == 403
+    assert db.query_one("SELECT estado FROM invitaciones_empresa WHERE id = %s", (inv_id,))["estado"] == "aceptada_pendiente"
+    assert db.query_one("SELECT COUNT(*) AS n FROM auditoria WHERE accion = 'cuenta.correo_ambiguo' "
+                        "AND entidad_id = %s", (inv_id,))["n"] == 1
+
+
+def test_empresa_sin_miembros_el_primer_vinculo_cuenta_para_el_plan(entorno):
+    """El administrador de plataforma da acceso a una empresa sin miembros: quien entra
+    queda como administrador implícito aunque se le invite como contador, así que su
+    plan debe permitir un RFC más."""
+    from backend.deps import hash_password
+
+    db, client, _headers_dueno, _empresa_id = entorno
+    db.execute("INSERT INTO usuarios (email, password_hash, rol) VALUES (%s, %s, 'admin')",
+               (PLATAFORMA, hash_password("Clave-Plataforma-1")))
+    h_plataforma = _headers(client, PLATAFORMA, "Clave-Plataforma-1")
+    huerfana = db.execute("INSERT INTO empresas (rfc, razon_social) VALUES (%s, 'Sin miembros') RETURNING id",
+                          (RFC_OTRA,), returning=True)["id"]
+    base = _base(huerfana)
+
+    # SEGUNDO ya administra una empresa: su plan de prueba (1 RFC) está agotado.
+    segundo = db.query_one("SELECT id FROM usuarios WHERE email = %s", (SEGUNDO,))["id"]
+    propia = db.execute("INSERT INTO empresas (rfc, razon_social) VALUES ('CTZ010101AB1', 'Propia') RETURNING id",
+                        returning=True)["id"]
+    db.execute("INSERT INTO usuario_empresas (usuario_id, empresa_id, rol) VALUES (%s, %s, 'administrador')",
+               (segundo, propia))
+    assert _invitar(client, h_plataforma, huerfana, SEGUNDO, "contador").status_code == 201
+    inv_id = _aceptar(client, _headers(client, SEGUNDO, "Clave-Segundo-1"))
+    r = client.post(f"{base}/invitaciones/{inv_id}/aprobar", headers=h_plataforma)
+    assert r.status_code == 403 and "de esa persona" in r.json()["detail"], r.text
+    assert db.query_one("SELECT COUNT(*) AS n FROM usuario_empresas WHERE empresa_id = %s", (huerfana,))["n"] == 0
+
+    # Sin la otra empresa le alcanza: entra y queda como administrador.
+    db.execute("DELETE FROM empresas WHERE id = %s", (propia,))
+    assert client.post(f"{base}/invitaciones/{inv_id}/aprobar", headers=h_plataforma).status_code == 204
+    lista = client.get(f"{base}/usuarios", headers=h_plataforma).json()
+    assert [(u["email"], u["rol"]) for u in lista["usuarios"]] == [(SEGUNDO, "administrador")]
+
+
+def test_dos_aprobaciones_simultaneas_de_la_misma_invitacion(entorno):
+    from fastapi.testclient import TestClient
+
+    import backend.main_api as main
+
+    db, client, headers, empresa_id = entorno
+    h_segundo = _unir(client, headers, empresa_id, SEGUNDO, "Clave-Segundo-1", rol="administrador")
+    assert _invitar(client, headers, empresa_id, EXISTENTE).status_code == 201
+    inv_id = _aceptar(client, _headers(client, EXISTENTE, "Clave-Existente-1"))
+
+    resultados = []
+    barrera = threading.Barrier(2)
+
+    def aprobar(h):
+        propio = TestClient(main.app)
+        barrera.wait()
+        resultados.append(propio.post(f"{_base(empresa_id)}/invitaciones/{inv_id}/aprobar", headers=h).status_code)
+
+    hilos = [threading.Thread(target=aprobar, args=(h,)) for h in (headers, h_segundo)]
+    for t in hilos:
+        t.start()
+    for t in hilos:
+        t.join()
+
+    assert sorted(resultados) == [204, 404]
+    existente = db.query_one("SELECT id FROM usuarios WHERE email = %s", (EXISTENTE,))["id"]
+    assert db.query_one("SELECT COUNT(*) AS n FROM usuario_empresas WHERE empresa_id = %s AND usuario_id = %s",
+                        (empresa_id, existente))["n"] == 1
+    assert db.query_one("SELECT COUNT(*) AS n FROM auditoria WHERE accion = 'cuenta.aprobar_invitacion' "
+                        "AND entidad_id = %s", (inv_id,))["n"] == 1

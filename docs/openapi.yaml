@@ -3672,7 +3672,7 @@ paths:
               properties:
                 nombre: { type: string, maxLength: 80 }
                 precio_mensual: { type: string, description: MXN sin IVA }
-                max_rfc: { type: integer, nullable: true, description: null = ilimitado }
+                max_rfc: { type: integer, nullable: true, minimum: 0, maximum: 2147483647, description: null = ilimitado }
                 activo: { type: boolean, default: true }
       responses:
         '200':
@@ -3836,7 +3836,7 @@ paths:
         '403':
           $ref: '#/components/responses/ForbiddenError'
         '409':
-          description: Esa persona ya tiene acceso a la empresa
+          description: Esa persona ya tiene acceso a la empresa, o ya aceptó una invitación que espera aprobación (no se cambia su rol ni su plazo)
         '422':
           description: Correo o rol inválido, o el correo es el propio
         '429':
@@ -3881,6 +3881,11 @@ paths:
           $ref: '#/components/responses/ForbiddenError'
         '404':
           description: No hay una aceptación vigente con ese id en esta empresa (no existe, es de otra empresa, ya se resolvió o venció)
+        '409':
+          description: |
+            El correo de la cuenta que aceptó ya no identifica a una sola persona (otra cuenta con
+            el mismo correo en minúsculas, o la cuenta ya no tiene el correo invitado); se audita
+            `cuenta.correo_ambiguo`. También si el catálogo de planes no tiene plan por defecto.
 
   /api/v1/cuenta/empresas/{empresa_id}/invitaciones/{invitacion_id}/rechazar:
     post:
@@ -5065,6 +5070,7 @@ components:
       properties:
         id: { type: string, format: uuid }
         email: { type: string, description: Correo de la cuenta que aceptó, tal como se registró }
+        email_invitado: { type: string, description: Correo al que se envió la invitación (minúsculas) }
         nombre: { type: string, nullable: true }
         rol: { type: string, enum: [administrador, contador] }
         cuenta_creada: { type: string, format: date-time, nullable: true }
