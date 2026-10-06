@@ -13,6 +13,7 @@ from datetime import date, datetime, timedelta
 from typing import Optional
 from zoneinfo import ZoneInfo
 
+from . import catalogos_sat
 from . import constancia_parser as cp
 from .cfdi_parser import validar_rfc
 
@@ -212,3 +213,72 @@ def estado_opinion(fecha_emision: Optional[date], sentido: Optional[str], hoy: d
 
 def antiguedad_dias(fecha_emision: Optional[date], hoy: date) -> Optional[int]:
     return None if fecha_emision is None else (hoy - fecha_emision).days
+
+
+# ── Régimen fiscal de la empresa desde la constancia ──────────────────────────
+# Fragmento del nombre (sin acentos, en mayúsculas) → clave de c_RegimenFiscal. Los más
+# específicos van primero: "Actividades Empresariales con ingresos a través de
+# Plataformas Tecnológicas" es 625, no 612.
+_REGIMEN_POR_NOMBRE = (
+    ("PLATAFORMAS TECNOLOGICAS", "625"),
+    ("SIMPLIFICADO DE CONFIANZA", "626"),
+    ("ACTIVIDADES EMPRESARIALES", "612"),
+    ("INCORPORACION FISCAL", "621"),
+    ("GENERAL DE LEY", "601"),
+    ("FINES NO LUCRATIVOS", "603"),
+    ("SUELDOS Y SALARIOS", "605"),
+    ("ARRENDAMIENTO", "606"),
+    ("ENAJENACION O ADQUISICION DE BIENES", "607"),
+    ("DEMAS INGRESOS", "608"),
+    ("RESIDENTES EN EL EXTRANJERO", "610"),
+    ("DIVIDENDOS", "611"),
+    ("INTERESES", "614"),
+    ("PREMIOS", "615"),
+    ("SIN OBLIGACIONES FISCALES", "616"),
+    ("COOPERATIVAS DE PRODUCCION", "620"),
+    ("AGRICOLAS", "622"),
+    ("GRUPOS DE SOCIEDADES", "623"),
+    ("COORDINADOS", "624"),
+)
+# Regímenes que acompañan a otro y no definen cómo se calcula el ISR del negocio.
+REGIMENES_SECUNDARIOS = frozenset({"605", "608", "611", "614", "615", "616"})
+
+
+def codigo_regimen(nombre: Optional[str]) -> Optional[str]:
+    """Clave de c_RegimenFiscal del nombre que trae la constancia, o None si no se reconoce."""
+    texto = _normalizar(nombre or "")
+    if re.fullmatch(r"\s*\d{3}\b.*", texto) and texto.strip()[:3] in catalogos_sat.REGIMEN_FISCAL:
+        return texto.strip()[:3]
+    for fragmento, codigo in _REGIMEN_POR_NOMBRE:
+        if fragmento in texto:
+            return codigo
+    return None
+
+
+def regimenes_detectados(nombres: Optional[list]) -> list[dict]:
+    """``[{codigo, descripcion, nombre}]`` sin repetir clave, en el orden de la constancia."""
+    vistos, salida = set(), []
+    for nombre in nombres or []:
+        codigo = codigo_regimen(nombre) if isinstance(nombre, str) else None
+        if codigo and codigo not in vistos:
+            vistos.add(codigo)
+            salida.append({"codigo": codigo, "descripcion": catalogos_sat.REGIMEN_FISCAL[codigo], "nombre": nombre})
+    return salida
+
+
+def regimen_principal(codigos: list[str]) -> Optional[str]:
+    """El régimen que se guarda solo: el único principal (sin contar sueldos, intereses,
+    etc.), o el único que haya. Con dos principales (p. ej. 612 y 606) decide una persona."""
+    principales = [c for c in codigos if c not in REGIMENES_SECUNDARIOS]
+    if len(principales) == 1:
+        return principales[0]
+    if not principales and len(codigos) == 1:
+        return codigos[0]
+    return None
+
+
+def texto_regimen(codigo: str) -> str:
+    """Formato de ``empresas.regimen_fiscal`` que lee ISR: "612 - Personas Físicas…"."""
+    if codigo not in catalogos_sat.REGIMEN_FISCAL:
+        raise ValueError("régimen fuera del catálogo c_RegimenFiscal")
+    return f"{codigo} - {catalogos_sat.REGIMEN_FISCAL[codigo]}"

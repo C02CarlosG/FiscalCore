@@ -3376,6 +3376,79 @@ paths:
         '404':
           $ref: '#/components/responses/NotFoundError'
 
+  /api/v1/informacion-fiscal/empresas/{empresa_id}/regimen:
+    get:
+      operationId: regimenEmpresa
+      tags: [Información fiscal]
+      summary: Régimen guardado en la empresa y los que trae la constancia vigente
+      description: |
+        `sugerido` es el régimen principal de la constancia (sin contar 605, 608, 611, 614,
+        615 y 616) cuando no coincide con el guardado; null si coincide o si la constancia
+        trae dos principales (decide una persona).
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+      responses:
+        '200':
+          description: Régimen
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  actual:
+                    type: object
+                    nullable: true
+                    properties:
+                      codigo: { type: string, nullable: true }
+                      texto: { type: string }
+                  constancia_id: { type: string, format: uuid, nullable: true }
+                  detectados:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        codigo: { type: string }
+                        descripcion: { type: string }
+                        nombre: { type: string, description: Como lo escribe la constancia }
+                  sugerido: { type: string, nullable: true }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+    put:
+      operationId: guardarRegimenEmpresa
+      tags: [Información fiscal]
+      summary: Guarda el régimen de la empresa (clave de c_RegimenFiscal), p. ej. el de la constancia
+      description: |
+        Se guarda como "612 - Personas Físicas con Actividades Empresariales y Profesionales",
+        el formato que lee ISR. Al subir una constancia, si la empresa no tiene régimen y la
+        constancia trae uno principal, se guarda solo (`regimen_guardado` en la respuesta de la
+        subida). Se audita `informacion_fiscal.regimen`.
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [codigo]
+              properties:
+                codigo: { type: string, example: '612' }
+      responses:
+        '200':
+          description: Guardado
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '422':
+          description: Clave fuera del catálogo
+
   /api/v1/informacion-fiscal/empresas/{empresa_id}/documentos:
     get:
       operationId: historialDocumentosFiscales

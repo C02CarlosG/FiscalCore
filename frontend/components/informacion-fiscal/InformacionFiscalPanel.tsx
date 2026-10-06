@@ -5,6 +5,7 @@ import { LoadingState } from "@/components/shared/LoadingState";
 import { useResumenInformacionFiscal } from "@/hooks/useInformacionFiscal";
 import { DocumentoFiscalCard } from "./DocumentoFiscalCard";
 import { HistorialDocumentos } from "./HistorialDocumentos";
+import { RegimenEmpresaCard } from "./RegimenEmpresaCard";
 
 export function InformacionFiscalPanel({ empresaId }: { empresaId: string }) {
   const resumen = useResumenInformacionFiscal(empresaId);
@@ -25,6 +26,7 @@ export function InformacionFiscalPanel({ empresaId }: { empresaId: string }) {
         <DocumentoFiscalCard empresaId={empresaId} tipo="opinion" documento={resumen.data.opinion} />
         <DocumentoFiscalCard empresaId={empresaId} tipo="constancia" documento={resumen.data.constancia} />
       </div>
+      <RegimenEmpresaCard empresaId={empresaId} />
       <HistorialDocumentos empresaId={empresaId} />
     </div>
   );

@@ -17,7 +17,7 @@ from urllib.parse import quote
 
 import psycopg2
 import psycopg2.extras
-from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile
+from fastapi import APIRouter, Body, Depends, File, HTTPException, Request, Response, UploadFile
 from fastapi.concurrency import run_in_threadpool
 
 from .. import db
@@ -47,7 +47,7 @@ def _tipo(tipo: str) -> str:
 
 def _empresa(empresa_id: uuid.UUID, current_user: dict) -> dict:
     validar_acceso_empresa(str(empresa_id), current_user)
-    empresa = db.query_one("SELECT id, rfc FROM empresas WHERE id = %s", (str(empresa_id),))
+    empresa = db.query_one("SELECT id, rfc, regimen_fiscal FROM empresas WHERE id = %s", (str(empresa_id),))
     if not empresa:
         raise HTTPException(status_code=404, detail="Empresa no encontrada")
     return empresa
@@ -170,7 +170,87 @@ async def subir(
         entidad="documento_fiscal", entidad_id=str(fila["id"]),
         metadata={"tipo": tipo, "fecha_emision": leido["fecha_emision"]},
     )
-    return _documento(fila)
+    respuesta = _documento(fila)
+    if tipo == "constancia":
+        respuesta["regimen_guardado"] = _guardar_regimen_detectado(str(empresa_id), leido["datos"], current_user)
+    return respuesta
+
+
+def _guardar_regimen_detectado(empresa_id: str, datos: dict, current_user: dict) -> Optional[str]:
+    """Si la empresa no tiene régimen y la constancia trae uno principal, lo guarda (así ISR
+    deja de avisar «régimen no soportado»). Nunca sobrescribe uno capturado: si difieren,
+    la pantalla lo muestra y una persona decide."""
+    codigo = inf.regimen_principal([r["codigo"] for r in inf.regimenes_detectados(datos.get("regimenes"))])
+    if codigo is None:
+        return None
+    fila = db.execute(
+        "UPDATE empresas SET regimen_fiscal = %s WHERE id = %s AND COALESCE(btrim(regimen_fiscal), '') = '' "
+        "RETURNING id",
+        (inf.texto_regimen(codigo), empresa_id), returning=True,
+    )
+    if not fila:
+        return None
+    registrar_evento(current_user["user_id"], "informacion_fiscal.regimen", empresa_id=empresa_id, entidad="empresa",
+                     entidad_id=empresa_id, metadata={"de": None, "a": codigo, "origen": "constancia"})
+    return codigo
+
+
+def _regimen_constancia(empresa_id: str) -> tuple[Optional[str], list]:
+    """Regímenes de la constancia vigente (la de fecha de emisión más reciente)."""
+    fila = db.query_one(
+        "SELECT id, datos FROM documentos_fiscales WHERE empresa_id = %s AND tipo = 'constancia' "
+        "ORDER BY fecha_emision DESC NULLS LAST, created_at DESC LIMIT 1",
+        (empresa_id,),
+    )
+    if not fila:
+        return None, []
+    return str(fila["id"]), inf.regimenes_detectados((fila["datos"] or {}).get("regimenes"))
+
+
+def _regimen_actual(texto: Optional[str]) -> Optional[dict]:
+    if not texto or not texto.strip():
+        return None
+    codigo = inf.codigo_regimen(texto)
+    return {"codigo": codigo, "texto": texto}
+
+
+@router.get("/regimen")
+async def regimen(empresa_id: uuid.UUID, current_user: dict = Depends(get_current_user)):
+    """Régimen guardado en la empresa y los que trae la constancia vigente, con su clave y
+    la sugerencia (el principal) cuando no coinciden."""
+    empresa = _empresa(empresa_id, current_user)
+    constancia_id, detectados = _regimen_constancia(str(empresa_id))
+    actual = _regimen_actual(empresa.get("regimen_fiscal"))
+    sugerido = inf.regimen_principal([r["codigo"] for r in detectados])
+    return {
+        "actual": actual,
+        "constancia_id": constancia_id,
+        "detectados": detectados,
+        "sugerido": sugerido if sugerido and (not actual or actual["codigo"] != sugerido) else None,
+    }
+
+
+@router.put("/regimen")
+async def guardar_regimen(
+    empresa_id: uuid.UUID,
+    cuerpo: dict = Body(...),
+    current_user: dict = Depends(get_current_user),
+):
+    """Guarda el régimen de la empresa (clave de c_RegimenFiscal), p. ej. el de la constancia."""
+    empresa = _empresa(empresa_id, current_user)
+    codigo = cuerpo.get("codigo")
+    if not isinstance(codigo, str):
+        raise HTTPException(status_code=422, detail="codigo debe ser una clave de c_RegimenFiscal")
+    try:
+        texto = inf.texto_regimen(codigo.strip())
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    db.execute("UPDATE empresas SET regimen_fiscal = %s WHERE id = %s", (texto, str(empresa_id)))
+    anterior = _regimen_actual(empresa.get("regimen_fiscal"))
+    registrar_evento(current_user["user_id"], "informacion_fiscal.regimen", empresa_id=str(empresa_id),
+                     entidad="empresa", entidad_id=str(empresa_id),
+                     metadata={"de": anterior["codigo"] if anterior else None, "a": codigo.strip(), "origen": "manual"})
+    return {"actual": _regimen_actual(texto)}
 
 
 @router.get("/documentos/{documento_id}/pdf")
