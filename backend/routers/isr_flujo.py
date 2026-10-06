@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import re
 from decimal import Decimal
+from io import BytesIO
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 
-from .. import db, isr_flujo, isr_flujo_datos
+from .. import db, isr_flujo, isr_flujo_datos, isr_flujo_exportacion
 from ..auditoria import registrar_evento
 from ..deps import empresa_or_404, get_current_user, validar_acceso_empresa
 
@@ -18,6 +20,7 @@ router = APIRouter(tags=["ISR por flujo"])
 _BASE = "/api/v1/empresas/{empresa_id}/isr-flujo"
 _PERIODO_RE = re.compile(r"20[0-9]{2}-(0[1-9]|1[0-2])")
 _UUID_MAX = 36
+MAX_FILAS_EXPORTACION = 50_000
 
 
 class AjusteIn(BaseModel):
@@ -161,3 +164,32 @@ async def detalle_isr_flujo(
     ajustes = isr_flujo_datos.cargar_ajustes(empresa_id)
     eventos = isr_flujo_datos.cargar_eventos(empresa_id, empresa["rfc"], periodo)
     return _json(isr_flujo.detalle(eventos, periodo, lado, bloque, ajustes, pagina, por_pagina, acumulado))
+
+
+@router.get(_BASE + "/{periodo}/exportar")
+async def exportar_isr_flujo(
+    empresa_id: str,
+    periodo: str,
+    lado: Literal["ingreso", "deduccion"] = Query(...),
+    bloque: Literal["contado", "credito", "devoluciones", "nomina", "inversiones", "no_considerados"] = Query(...),
+    acumulado: bool = Query(False),
+    current_user: dict = Depends(get_current_user),
+):
+    """Excel con todos los renglones de una cifra y el resumen del mes y del acumulado. Queda en la auditoría."""
+    validar_acceso_empresa(empresa_id, current_user)
+    _periodo_o_422(periodo)
+    empresa = empresa_or_404(empresa_id)
+    ajustes = isr_flujo_datos.cargar_ajustes(empresa_id)
+    pct = isr_flujo_datos.porcentaje_nomina_exenta(empresa_id, int(periodo[:4]))
+    eventos = isr_flujo_datos.cargar_eventos(empresa_id, empresa["rfc"], periodo)
+    filas = isr_flujo.renglones(eventos, periodo, lado, bloque, ajustes, acumulado)
+    if len(filas) > MAX_FILAS_EXPORTACION:
+        raise HTTPException(status_code=422, detail=f"son {len(filas)} renglones; el máximo es {MAX_FILAS_EXPORTACION}")
+    contenido = isr_flujo_exportacion.construir(periodo, lado, bloque, filas, isr_flujo.resumen(eventos, periodo, ajustes, pct))
+    registrar_evento(current_user["user_id"], "isr_flujo_exportado", empresa_id=empresa_id,
+                     metadata={"periodo": periodo, "lado": lado, "bloque": bloque, "acumulado": acumulado, "filas": len(filas)})
+    return StreamingResponse(
+        BytesIO(contenido),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="isr_{lado}_{bloque}_{periodo}.xlsx"'},
+    )
