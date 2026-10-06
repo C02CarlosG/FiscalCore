@@ -14,6 +14,10 @@ from backend.tests.conftest import db_disponible
 pytestmark = [pytest.mark.db, pytest.mark.skipif(not db_disponible(), reason="Postgres no disponible (docker compose up -d db)")]
 
 
+ENCABEZADO_METADATA = ("Uuid~RfcEmisor~NombreEmisor~RfcReceptor~NombreReceptor~RfcPac~FechaEmision~"
+                       "FechaCertificacionSat~Monto~EfectoComprobante~Estatus~FechaCancelacion")
+
+
 def _xml_ingreso(uuid_cfdi: str, rfc_emisor: str) -> bytes:
     return f'''<?xml version="1.0" encoding="UTF-8"?>
 <cfdi:Comprobante xmlns:cfdi="http://www.sat.gob.mx/cfd/4" xmlns:tfd="http://www.sat.gob.mx/TimbreFiscalDigital"
@@ -49,6 +53,7 @@ def worker(monkeypatch):
             self.solicitudes = 0
             self.descargas = []                  # id de paquete en cada descarga
             self.falla_en = {}                   # id de paquete -> excepción (una sola vez)
+            self.cancelar = set()                # UUID que los paquetes de metadatos reportan cancelados
             self.antes_de_solicitar = None       # gancho para simular lentitud / concurrencia
             self.pipeline = []
             self.lock = threading.Lock()
@@ -65,11 +70,15 @@ def worker(monkeypatch):
     def _verificar(creds, id_sat):
         return {"estado": 3, "num_cfdi": 2, "id_paquetes": [f"{id_sat}-p1", f"{id_sat}-p2"]}
 
-    def _descargar(creds, id_paquete):
+    def _descargar(creds, id_paquete, extensiones=(".xml",)):
         with sat.lock:
             sat.descargas.append(id_paquete)
         if id_paquete in sat.falla_en:
             raise sat.falla_en.pop(id_paquete)
+        if ".txt" in extensiones:                        # paquete de metadatos
+            filas = [f"{u}~AAA010101AAA~Emisora~XAXX010101000~Cliente~PAC010101AAA~2026-10-02T10:00:00~"
+                     f"2026-10-02T10:01:00~1160.00~I~0~2026-10-03T08:00:00" for u in sorted(sat.cancelar)]
+            return [("\n".join([ENCABEZADO_METADATA, *filas]) + "\n").encode()]
         # un CFDI distinto por paquete, estable entre descargas del mismo paquete
         uuid_cfdi = str(uuid.uuid5(uuid.NAMESPACE_URL, id_paquete)).upper()
         return [_xml_ingreso(uuid_cfdi, rfc)]
@@ -106,9 +115,9 @@ def test_corrida_completa_importa_los_cfdi_y_corre_el_pipeline_una_vez_por_perio
 
     assert _correr(empresa, ahora) == "al_dia"
 
-    solicitudes = db.query_all("SELECT estado, cfdi_importados FROM sat_solicitudes WHERE empresa_id=%s", (empresa,))
+    solicitudes = db.query_all("SELECT estado, cfdi_importados, tipo_solicitud FROM sat_solicitudes WHERE empresa_id=%s", (empresa,))
     assert {s["estado"] for s in solicitudes} == {"descargado"}
-    assert _num_cfdi(db, empresa) == 2 * len(solicitudes)
+    assert _num_cfdi(db, empresa) == 2 * sum(1 for s in solicitudes if s["tipo_solicitud"] == "CFDI")
     periodos = {p for _, p in sat.pipeline}
     assert len(sat.pipeline) == len(periodos)             # nunca dos veces el mismo periodo
     assert {(e) for e, _ in sat.pipeline} == {empresa}
@@ -135,9 +144,9 @@ def test_un_reinicio_a_mitad_de_la_importacion_retoma_sin_duplicar(worker):
                "WHERE empresa_id=%s AND estado='terminado'", (empresa,))
     assert _correr(empresa, ahora) == "al_dia"
 
-    solicitudes = db.query_all("SELECT estado FROM sat_solicitudes WHERE empresa_id=%s", (empresa,))
+    solicitudes = db.query_all("SELECT estado, tipo_solicitud FROM sat_solicitudes WHERE empresa_id=%s", (empresa,))
     assert {s["estado"] for s in solicitudes} == {"descargado"}
-    assert _num_cfdi(db, empresa) == 2 * len(solicitudes)                    # sin duplicados
+    assert _num_cfdi(db, empresa) == 2 * sum(1 for s in solicitudes if s["tipo_solicitud"] == "CFDI")   # sin duplicados
     assert sat.descargas.count(f"{empresa}-SAT-1-p1") == 1                   # el paquete 1 no se bajó otra vez
 
 
@@ -174,8 +183,10 @@ def test_dos_workers_a_la_vez_sobre_la_misma_empresa_no_se_pisan(worker):
     assert resultados["primero"] == "al_dia"
 
     solicitudes = db.query_one("SELECT COUNT(*) AS n FROM sat_solicitudes WHERE empresa_id=%s", (empresa,))["n"]
+    de_xml = db.query_one("SELECT COUNT(*) AS n FROM sat_solicitudes WHERE empresa_id=%s AND tipo_solicitud='CFDI'",
+                          (empresa,))["n"]
     assert len(sat.descargas) == len(set(sat.descargas)) == 2 * solicitudes   # cada paquete, una sola vez
-    assert _num_cfdi(db, empresa) == 2 * solicitudes
+    assert _num_cfdi(db, empresa) == 2 * de_xml
 
 
 def test_repetir_la_corrida_con_los_mismos_paquetes_no_duplica(worker):
@@ -193,3 +204,54 @@ def test_repetir_la_corrida_con_los_mismos_paquetes_no_duplica(worker):
     assert _num_cfdi(db, empresa) == primera
     assert db.query_one(
         "SELECT COUNT(*) AS n, COUNT(DISTINCT uuid) AS u FROM cfdi WHERE empresa_id=%s", (empresa,)) == {"n": primera, "u": primera}
+
+
+def test_un_cfdi_cancelado_despues_de_descargarse_queda_cancelado_en_la_siguiente_corrida(worker):
+    db, empresa, sat, ahora = worker
+
+    assert _correr(empresa, ahora) == "al_dia"
+    uuid_cfdi = db.query_one("SELECT uuid FROM cfdi WHERE empresa_id=%s ORDER BY uuid LIMIT 1", (empresa,))["uuid"]
+    assert db.query_one("SELECT estado FROM cfdi WHERE uuid=%s", (uuid_cfdi,))["estado"] == "vigente"
+    pipeline_antes = len(sat.pipeline)
+
+    # al día siguiente el SAT reporta ese CFDI como cancelado
+    sat.cancelar = {uuid_cfdi}
+    db.execute("UPDATE sat_sync_config SET proxima_corrida = NOW() - INTERVAL '1 minute' WHERE empresa_id=%s", (empresa,))
+    db.execute("DELETE FROM sat_solicitudes WHERE empresa_id=%s", (empresa,))
+    sat.solicitudes = 0
+
+    assert _correr(empresa, ahora) == "al_dia"
+
+    assert db.query_one("SELECT estado FROM cfdi WHERE uuid=%s", (uuid_cfdi,))["estado"] == "cancelado"
+    evento = db.query_all("SELECT * FROM auditoria WHERE empresa_id=%s AND accion='cfdi_cancelado_posterior'", (empresa,))
+    assert [e["entidad_id"] for e in evento] == [uuid_cfdi]
+    fin = db.query_all("SELECT metadata FROM auditoria WHERE empresa_id=%s AND accion='sync_corrida_fin' "
+                       "ORDER BY creado_en DESC LIMIT 1", (empresa,))[0]["metadata"]
+    assert fin["cancelados_marcados"] == 1 and fin["cancelados_fallidas"] == 0
+    assert len(sat.pipeline) == pipeline_antes + len({p for _, p in sat.pipeline[pipeline_antes:]})  # sin pipeline por cancelar
+    assert db.query_one("SELECT COUNT(*) AS n FROM cfdi WHERE empresa_id=%s AND estado='vigente'",
+                        (empresa,))["n"] == _num_cfdi(db, empresa) - 1
+
+
+def test_una_falla_en_los_metadatos_de_cancelados_no_frena_la_descarga(worker, monkeypatch):
+    from backend import sat_sync
+
+    db, empresa, sat, ahora = worker
+    original = sat_sync.descargar_paquete
+
+    def _metadatos_ilegibles(creds, id_paquete, extensiones=(".xml",)):
+        if ".txt" in extensiones:
+            return [b"esto no es un archivo de metadatos del SAT"]
+        return original(creds, id_paquete, extensiones)
+    monkeypatch.setattr(sat_sync, "descargar_paquete", _metadatos_ilegibles)
+
+    assert _correr(empresa, ahora) == "al_dia"
+
+    cfg = db.query_one("SELECT estado, ultima_exitosa FROM sat_sync_config WHERE empresa_id=%s", (empresa,))
+    assert cfg["estado"] == "al_dia" and cfg["ultima_exitosa"] is not None
+    fallos = db.query_all("SELECT error_msg FROM sat_solicitudes WHERE empresa_id=%s AND estado='fallo'", (empresa,))
+    assert fallos and all("Metadatos ilegibles" in f["error_msg"] for f in fallos)
+    assert _num_cfdi(db, empresa) > 0                                       # los XML sí se importaron
+    fin = db.query_one("SELECT metadata FROM auditoria WHERE empresa_id=%s AND accion='sync_corrida_fin' "
+                       "ORDER BY creado_en DESC LIMIT 1", (empresa,))["metadata"]
+    assert fin["cancelados_fallidas"] == len(fallos) and fin["fallidas"] == 0

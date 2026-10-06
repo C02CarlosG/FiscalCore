@@ -74,6 +74,8 @@ def test_resumen_con_tarjeta_inactiva_en_null(monkeypatch, config):
 @pytest.mark.parametrize("params", [
     {"periodo": "2026-13"},
     {"periodo": "marzo"},
+    {"periodo": "0000-01"},
+    {"periodo": "9999-12"},
 ])
 def test_resumen_periodo_invalido(params, config):
     assert client.get(BASE, params=params).status_code == 422
@@ -122,6 +124,8 @@ def test_guarda_configuracion_y_audita(monkeypatch):
     {"umbral_efectivo": -5},
     {"umbral_efectivo": "mucho"},
     {"umbral_efectivo": 2500},
+    {"inactivas": [{}]},
+    {"inactivas": [[1]]},
 ])
 def test_configuracion_invalida_responde_422(monkeypatch, cuerpo):
     monkeypatch.setattr(datos, "guardar_configuracion", lambda *a: pytest.fail("no debe guardar"))

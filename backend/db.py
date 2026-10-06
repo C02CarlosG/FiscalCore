@@ -238,6 +238,9 @@ def init_db() -> None:
         # 051 es idempotente — catálogo de proveedores de la empresa (F6.1)
         _run_sql_file("051_proveedores.sql")
 
+        # 054 es idempotente — DIOT por flujo: tipo de tercero/operación por periodo y por CFDI (F6.2)
+        _run_sql_file("054_diot.sql")
+
         # 060 es idempotente — documentos_fiscales: constancia y opinión de cumplimiento en PDF (F8, carril D)
         _run_sql_file("060_documentos_fiscales.sql")
 
@@ -246,6 +249,12 @@ def init_db() -> None:
 
         # 062 es idempotente — roles por empresa: administrador (el creador) y contador (U1, carril D)
         _run_sql_file("062_roles_usuario_empresa.sql")
+
+        # 063 es idempotente — planes (con valores de ejemplo) y suscripciones por cuenta (M7.1, carril D)
+        _run_sql_file("063_suscripciones.sql")
+
+        # 064 es idempotente — CHECK de objeto en validaciones_cfdi_config para bases donde la tabla ya existía (V1)
+        _run_sql_file("064_validaciones_config_check.sql")
 
         # Seed inicial: usuario admin si la base aún no tiene usuarios
         _seed_admin()

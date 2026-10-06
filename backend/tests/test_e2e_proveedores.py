@@ -150,6 +150,9 @@ def test_la_base_rechaza_codigos_fuera_del_catalogo(entorno):
             db.execute(f"INSERT INTO proveedores (empresa_id, rfc, {columna}) VALUES (%s, 'AAA010101AAA', %s)", (entorno[3], valor))
     with pytest.raises(psycopg2.errors.CheckViolation):
         db.execute("INSERT INTO proveedores (empresa_id, rfc) VALUES (%s, 'aaa010101aaa')", (entorno[3],))
+    for pais in ("usa", "US", "USAA"):                                                       # ISO 3166-1 alfa-3 en mayúsculas
+        with pytest.raises((psycopg2.errors.CheckViolation, psycopg2.errors.StringDataRightTruncation)):
+            db.execute("INSERT INTO proveedores (empresa_id, rfc, pais) VALUES (%s, 'BBB010101AAA', %s)", (entorno[3], pais))
 
 
 def test_otra_empresa_recibe_403(entorno):
