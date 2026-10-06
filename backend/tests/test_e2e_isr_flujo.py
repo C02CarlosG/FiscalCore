@@ -196,3 +196,41 @@ def test_otra_empresa_recibe_403(entorno):
     assert client.get(_url(entorno, "2026-09"), headers=ajeno).status_code == 403
     assert client.put(_url(entorno, "config/2026"), headers=ajeno, json={"pct_nomina_exenta": 0.53}).status_code == 403
     assert client.put(_url(entorno, "ajustes"), headers=ajeno, json={"uuid": _uuid(1), "lado": "ingreso", "motivo": "x"}).status_code == 403
+
+
+def test_pago_provisional_con_ptu_y_perdidas_de_la_configuracion(entorno):
+    db, client, headers = entorno[0], entorno[1], entorno[2]
+    try:
+        r = client.put(_url(entorno, "config/2026"), headers=headers,
+                       json={"pct_nomina_exenta": 0.47, "ptu_pagada": "100.50", "perdidas_pendientes": "200", "ptu_mes_pago": 3})
+        assert r.status_code == 200 and r.json()["ptu_pagada"] == 100.5 and r.json()["ptu_mes_pago"] == 3, r.text
+        # omitir ptu/pérdidas conserva lo guardado
+        assert client.put(_url(entorno, "config/2026"), headers=headers, json={"pct_nomina_exenta": 0.47}).json()["perdidas_pendientes"] == 200.0
+
+        d = client.get(_url(entorno, "2026-09/pago-provisional"), headers=headers).json()
+
+        assert d["calculado"] is True and d["ptu_pagada"] == 100.5 and d["perdidas_pendientes"] == 200.0
+        assert d["ingresos_acumulados"] == 2300.0 and d["deducciones_acumuladas"] == 1394.0
+        assert d["utilidad_antes_de_ajustes"] == 906.0 and d["base_gravable"] == 605.5            # 906 − 100.50 − 200
+        assert d["tarifa"]["porcentaje"] == 1.92 and d["impuesto_causado"] == 11.63               # 605.49 × 1.92 %
+        assert d["pagos_provisionales_anteriores"] == 5.76 and d["isr_retenido_acumulado"] == 40.0   # solo enero causa: (500 − 200) × 1.92 %; la PTU resta desde marzo
+        assert d["pago_del_mes"] == 0.0 and d["exceso_de_pagos_y_retenciones"] == 34.13   # 11.63 − 5.76 − 40
+        assert d["meses_con_pago_estimado"] == [1, 2, 3, 4, 5, 6, 7, 8] and d["fuente"]["url"].startswith("https://www.sat.gob.mx/")
+    finally:
+        client.put(_url(entorno, "config/2026"), headers=headers, json={"pct_nomina_exenta": 0.47, "ptu_pagada": 0, "perdidas_pendientes": 0})
+
+
+def test_config_de_arrendamiento_se_guarda_y_conserva(entorno):
+    client, headers = entorno[1], entorno[2]
+    try:
+        r = client.put(_url(entorno, "config/2026"), headers=headers,
+                       json={"pct_nomina_exenta": 0.47, "arrendamiento_periodicidad": "trimestral", "deduccion_opcional_35": True})
+        assert r.status_code == 200 and r.json()["arrendamiento_periodicidad"] == "trimestral" and r.json()["deduccion_opcional_35"] is True
+        # omitir los campos conserva lo guardado
+        conservado = client.put(_url(entorno, "config/2026"), headers=headers, json={"pct_nomina_exenta": 0.47}).json()
+        assert conservado["arrendamiento_periodicidad"] == "trimestral" and conservado["deduccion_opcional_35"] is True
+        assert client.put(_url(entorno, "config/2026"), headers=headers,
+                          json={"pct_nomina_exenta": 0.47, "deduccion_opcional_35": False}).json()["deduccion_opcional_35"] is False
+    finally:
+        client.put(_url(entorno, "config/2026"), headers=headers,
+                   json={"pct_nomina_exenta": 0.47, "arrendamiento_periodicidad": "mensual", "deduccion_opcional_35": False})

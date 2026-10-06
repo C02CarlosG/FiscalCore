@@ -7,7 +7,7 @@
 - **Vigencia:** el listado del SAT del 2026-10-06 no muestra una versión posterior del Anexo 8 (las modificaciones recientes
   de la RMF 2026 listan otros anexos). Revisar de nuevo antes de usar en un ejercicio distinto o tras una modificación.
 - **No incluye subsidio al empleo:** el Anexo 8 de 2026 no trae tabla de subsidio; no se inventa.
-- Los importes de cada mes del Art. 106 son acumulados del ejercicio hasta ese mes: de enero a noviembre el mes *n* es *n* veces la tarifa de enero (verificado, diferencia máxima de $0.02). **Diciembre difiere** de 12 × enero en los límites y cuotas (p. ej. 10,135.11 contra 10,135.08): son las cifras tal como las publica el SAT y es lo que debe usarse.
+- Los importes de cada mes del Art. 106 son acumulados del ejercicio hasta ese mes: de enero a noviembre el mes *n* es *n* veces la tarifa de enero (verificado, diferencia máxima de $0.10, en noviembre). **Diciembre difiere** de 12 × enero en los límites y cuotas (p. ej. 10,135.11 contra 10,135.08): son las cifras tal como las publica el SAT y es lo que debe usarse.
 - Datos para código: `docs/referencias/anexo-8-rmf-2026-tarifas.json` (cadenas decimales; `null` = «En adelante»).
 
 ## Art. 96 LISR — pagos provisionales mensuales (fracción V del Anexo 8)
@@ -219,3 +219,39 @@
 | 1,276,925.99 | 1,702,567.97 | 307,910.81 | 32.00 |
 | 1,702,567.98 | 5,107,703.92 | 444,116.23 | 34.00 |
 | 5,107,703.93 | En adelante | 1,601,862.46 | 35.00 |
+
+## Art. 116 LISR — arrendamiento, pagos provisionales mensuales (Anexo 8, 2026)
+
+Idéntica a la tarifa mensual del Art. 96.
+
+| Límite inferior | Límite superior | Cuota fija | % sobre el excedente |
+|---:|---:|---:|---:|
+| 0.01 | 844.59 | 0.00 | 1.92 |
+| 844.60 | 7,168.51 | 16.22 | 6.40 |
+| 7,168.52 | 12,598.02 | 420.95 | 10.88 |
+| 12,598.03 | 14,644.64 | 1,011.68 | 16.00 |
+| 14,644.65 | 17,533.64 | 1,339.14 | 17.92 |
+| 17,533.65 | 35,362.83 | 1,856.84 | 21.36 |
+| 35,362.84 | 55,736.68 | 5,665.16 | 23.52 |
+| 55,736.69 | 106,410.50 | 10,457.09 | 30.00 |
+| 106,410.51 | 141,880.66 | 25,659.23 | 32.00 |
+| 141,880.67 | 425,641.99 | 37,009.69 | 34.00 |
+| 425,642.00 | En adelante | 133,488.54 | 35.00 |
+
+## Art. 116 LISR — arrendamiento, pagos provisionales trimestrales (Anexo 8, 2026)
+
+Son 3 veces los límites y cuotas de la mensual (transcrita del PDF; diferencia máxima de unos centavos por redondeo oficial).
+
+| Límite inferior | Límite superior | Cuota fija | % sobre el excedente |
+|---:|---:|---:|---:|
+| 0.01 | 2,533.77 | 0.00 | 1.92 |
+| 2,533.78 | 21,505.53 | 48.66 | 6.40 |
+| 21,505.54 | 37,794.06 | 1,262.85 | 10.88 |
+| 37,794.07 | 43,933.92 | 3,035.04 | 16.00 |
+| 43,933.93 | 52,600.92 | 4,017.42 | 17.92 |
+| 52,600.93 | 106,088.49 | 5,570.52 | 21.36 |
+| 106,088.50 | 167,210.04 | 16,995.48 | 23.52 |
+| 167,210.05 | 319,231.50 | 31,371.27 | 30.00 |
+| 319,231.51 | 425,641.98 | 76,977.69 | 32.00 |
+| 425,641.99 | 1,276,925.97 | 111,029.07 | 34.00 |
+| 1,276,925.98 | En adelante | 400,465.62 | 35.00 |

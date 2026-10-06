@@ -51,7 +51,7 @@ Un régimen vacío o desconocido muestra el aviso y deja ver el flujo sin conclu
 |---|---|
 | **F7.1** | Motor puro, carga SQL, migraciones 052 (ajustes) y 053 (porcentaje), endpoints de resumen y ajustes con auditoría, E2E |
 | **F7.2** | Pantalla ISR base flujo (dos pestañas: ingresos y deducciones) y exportación a Excel |
-| **F7.3** | Pago provisional por régimen con la tarifa del Art. 96 y tablas vigentes. **Se hace solo con las tarifas verificadas contra el Anexo 8 de la RMF del ejercicio** (hoy el entorno no puede consultar `sat.gob.mx`); no se asumen |
+| **F7.3** | Pago provisional del 612 (Art. 106) con las tarifas del Anexo 8 de la RMF 2026 (`docs/referencias/anexo-8-rmf-2026-tarifas.*`, verificadas contra el PDF oficial); migración 057 (PTU pagada y pérdidas pendientes); `GET …/isr-flujo/{periodo}/pago-provisional`. 601 remite al cálculo por coeficiente existente; 606 se calcula con el Art. 116; ejercicios sin tarifa cargada no se calculan |
 
 ## Endpoints (F7.1)
 
@@ -69,3 +69,21 @@ Un régimen vacío o desconocido muestra el aviso y deja ver el flujo sin conclu
 | D-F7-3 | Las inversiones se identifican y no deducen | Depreciar en F7 | Decidida: fuera de alcance |
 | D-F7-4 | El pago provisional espera tarifas verificadas | Cargar tarifas de memoria | Decidida |
 | D-F7-5 | Régimen no soportado ⇒ aviso, sin cálculo de pago | Calcular con el régimen general | Decidida |
+
+## Pago provisional (F7.3)
+
+`utilidad_k = máx(0, ingresos acumulados − deducciones acumuladas − PTU pagada − pérdidas pendientes)`; `causado_k` = cuota fija +
+(utilidad − límite inferior) × % de la tarifa acumulada del mes *k*; `pago_k = máx(0, causado_k − Σ pagos anteriores − ISR retenido a
+favor **acumulado** hasta el mes k)` (Art. 106, último párrafo: las retenciones se acreditan acumuladas; los pagos anteriores ya salieron netos de la retención de su mes, así que no basta restar la del mes). La PTU resta solo desde el mes en que se pagó (`ptu_mes_pago`, migración 057); las pérdidas pendientes se restan sin actualizar (Art. 57 LISR) y se avisa. El mismo criterio de retenciones acumuladas aplica a `isr.py` (601, Art. 14). Si no se conoce lo realmente enterado
+se estima con la misma fórmula y se avisa (`meses_con_pago_estimado`); M5 podrá aportar los pagos reales. Se muestran el renglón de la
+tarifa, la fuente y la fecha de consulta. **Fuera de alcance:** estímulos y subsidio.
+
+### Arrendamiento, 606 (Art. 116 y Art. 115 LISR)
+
+- **Tarifa:** la del Anexo 8 para pagos provisionales mensuales del Art. 116 (idéntica a la mensual del Art. 96) o, si el pago es
+  trimestral (ingresos de hasta 10 UMA mensuales), la trimestral (3 × límites y cuotas), ambas transcritas del PDF oficial.
+- **Base del periodo, no acumulada:** ingresos del mes (o del trimestre) − deducciones del mes (o trimestre). No resta pagos anteriores.
+- **Deducción opcional del 35 % (Art. 115, último párrafo):** configuración por empresa y ejercicio (`deduccion_opcional_35`).
+  Sustituye a las deducciones reales (sin comprobantes); el predial se suma (parámetro `predial` del endpoint, no se guarda).
+- **Retención:** al resultado se le acredita el ISR retenido por personas morales (10 %, Art. 116, párrafo 3).
+- **Periodicidad** (`arrendamiento_periodicidad`): mensual o trimestral; el trimestral solo se calcula en marzo, junio, septiembre y diciembre.

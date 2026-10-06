@@ -24,6 +24,18 @@ def porcentaje_nomina_exenta(empresa_id: str, ejercicio: int) -> Decimal:
     return Decimal(str(fila["pct_nomina_exenta"])) if fila else isr_flujo.PORCENTAJE_NOMINA_EXENTA
 
 
+def parametros_provisional(empresa_id: str, ejercicio: int) -> dict:
+    """Parámetros del pago provisional del ejercicio (valores por defecto si no se capturaron)."""
+    fila = db.query_one(
+        """SELECT ptu_pagada, ptu_mes_pago, perdidas_pendientes, arrendamiento_periodicidad, deduccion_opcional_35
+           FROM isr_config_flujo WHERE empresa_id = %s AND ejercicio = %s""", (empresa_id, ejercicio))
+    return {"ptu_pagada": Decimal(str(fila["ptu_pagada"])) if fila else Decimal("0"),
+            "ptu_mes_pago": fila["ptu_mes_pago"] if fila else None,
+            "perdidas_pendientes": Decimal(str(fila["perdidas_pendientes"])) if fila else Decimal("0"),
+            "arrendamiento_periodicidad": fila["arrendamiento_periodicidad"] if fila else "mensual",
+            "deduccion_opcional_35": bool(fila["deduccion_opcional_35"]) if fila else False}
+
+
 def _siguiente_mes(periodo: str) -> str:
     anio, mes = int(periodo[:4]), int(periodo[5:])
     return f"{anio + (mes == 12):04d}-{mes % 12 + 1:02d}"
@@ -151,15 +163,32 @@ def quitar_ajuste(empresa_id: str, uuid: str, lado: str, usuario_id: str) -> boo
             return True
 
 
-def guardar_porcentaje(empresa_id: str, ejercicio: int, porcentaje: Decimal, usuario_id: str) -> None:
+def guardar_porcentaje(empresa_id: str, ejercicio: int, porcentaje: Decimal, usuario_id: str,
+                       ptu_pagada: Optional[Decimal] = None, perdidas_pendientes: Optional[Decimal] = None,
+                       arrendamiento_periodicidad: Optional[str] = None, deduccion_opcional_35: Optional[bool] = None,
+                       ptu_mes_pago: Optional[int] = None) -> None:
+    """Guarda el % de nómina exenta y, si se mandan, el resto de la configuración del ejercicio (lo omitido se conserva)."""
     with db.get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """INSERT INTO isr_config_flujo (empresa_id, ejercicio, pct_nomina_exenta, usuario_id)
-                   VALUES (%s, %s, %s, %s)
+                """INSERT INTO isr_config_flujo (empresa_id, ejercicio, pct_nomina_exenta, ptu_pagada, perdidas_pendientes,
+                                                 arrendamiento_periodicidad, deduccion_opcional_35, ptu_mes_pago, usuario_id)
+                   VALUES (%s, %s, %s, COALESCE(%s, 0), COALESCE(%s, 0), COALESCE(%s, 'mensual'), COALESCE(%s, FALSE), %s, %s)
                    ON CONFLICT (empresa_id, ejercicio) DO UPDATE
-                   SET pct_nomina_exenta = EXCLUDED.pct_nomina_exenta, usuario_id = EXCLUDED.usuario_id, updated_at = NOW()""",
-                (empresa_id, ejercicio, porcentaje, usuario_id),
+                   SET pct_nomina_exenta = EXCLUDED.pct_nomina_exenta,
+                       ptu_pagada = COALESCE(%s, isr_config_flujo.ptu_pagada),
+                       perdidas_pendientes = COALESCE(%s, isr_config_flujo.perdidas_pendientes),
+                       arrendamiento_periodicidad = COALESCE(%s, isr_config_flujo.arrendamiento_periodicidad),
+                       deduccion_opcional_35 = COALESCE(%s, isr_config_flujo.deduccion_opcional_35),
+                       ptu_mes_pago = COALESCE(%s, isr_config_flujo.ptu_mes_pago),
+                       usuario_id = EXCLUDED.usuario_id, updated_at = NOW()""",
+                (empresa_id, ejercicio, porcentaje, ptu_pagada, perdidas_pendientes, arrendamiento_periodicidad,
+                 deduccion_opcional_35, ptu_mes_pago, usuario_id, ptu_pagada, perdidas_pendientes, arrendamiento_periodicidad,
+                 deduccion_opcional_35, ptu_mes_pago),
             )
             _auditar(cur, usuario_id, "isr_config_flujo", empresa_id, "empresa", empresa_id,
-                     {"ejercicio": ejercicio, "pct_nomina_exenta": str(porcentaje)})
+                     {"ejercicio": ejercicio, "pct_nomina_exenta": str(porcentaje),
+                      "ptu_pagada": None if ptu_pagada is None else str(ptu_pagada),
+                      "perdidas_pendientes": None if perdidas_pendientes is None else str(perdidas_pendientes),
+                      "arrendamiento_periodicidad": arrendamiento_periodicidad, "deduccion_opcional_35": deduccion_opcional_35,
+                      "ptu_mes_pago": ptu_mes_pago})
