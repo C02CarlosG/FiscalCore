@@ -344,3 +344,31 @@ def test_no_se_acepta_invitacion_de_empresa_inactiva(entorno):
         assert client.post(f"/api/v1/cuenta/invitaciones/{inv_id}/aceptar", headers=h).status_code == 404
     finally:
         db.execute("UPDATE empresas SET activo = TRUE WHERE id = %s", (empresa_id,))
+
+
+def test_aprobar_o_promover_a_administrador_respeta_el_plan_de_la_persona(entorno):
+    """M7.1: administrar la empresa suma un RFC al plan de la persona. Con el plan de
+    prueba (1 RFC) ya usado en otra empresa, no se le aprueba ni se le promueve como
+    administradora; como contadora, sí."""
+    db, client, headers, empresa_id = entorno
+    base = _base(empresa_id)
+    segundo = db.query_one("SELECT id FROM usuarios WHERE email = %s", (SEGUNDO,))["id"]
+    otra = db.execute("INSERT INTO empresas (rfc, razon_social) VALUES (%s, 'Propia') RETURNING id", (RFC_OTRA,),
+                      returning=True)
+    db.execute("INSERT INTO usuario_empresas (usuario_id, empresa_id, rol) VALUES (%s, %s, 'administrador')",
+               (segundo, otra["id"]))
+
+    assert _invitar(client, headers, empresa_id, SEGUNDO, "administrador").status_code == 201
+    h = _headers(client, SEGUNDO, "Clave-Segundo-1")
+    inv_id = _aceptar(client, h)
+    r = client.post(f"{base}/invitaciones/{inv_id}/aprobar", headers=headers)
+    assert r.status_code == 403 and "de esa persona" in r.json()["detail"], r.text
+    assert client.get(f"/api/v1/empresas/{empresa_id}", headers=h).status_code == 403
+    assert client.get(f"{base}/usuarios", headers=headers).json()["por_aprobar"][0]["id"] == inv_id
+
+    # Se rechaza esa aceptación y se le invita como contadora: entra.
+    assert client.post(f"{base}/invitaciones/{inv_id}/rechazar", headers=headers).status_code == 204
+    _unir(client, headers, empresa_id, SEGUNDO, "Clave-Segundo-1", rol="contador")
+    assert client.get(f"/api/v1/empresas/{empresa_id}", headers=h).status_code == 200
+    r = client.patch(f"{base}/usuarios/{segundo}", headers=headers, json={"rol": "administrador"})
+    assert r.status_code == 403 and "de esa persona" in r.json()["detail"], r.text

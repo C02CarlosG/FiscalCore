@@ -75,6 +75,9 @@ def _base_falsa(monkeypatch, miembros, rol_plataforma="contador", aceptada=None)
         yield _Cursor(), miembros, ue.roles_efectivos(miembros)
 
     monkeypatch.setattr(cuenta, "_miembros_bloqueados", _bloqueados)
+    # El límite de RFC (M7.1) se prueba en E2E; aquí solo se registra a quién se revisa.
+    monkeypatch.setattr(cuenta.suscripcion_datos, "verificar_alta_rfc",
+                        lambda cur, uid, de_tercero=False: ejecutado.append(("verificar_alta_rfc", (uid, de_tercero))))
     return ejecutado
 
 
@@ -225,3 +228,38 @@ def test_rechazar_no_vincula_y_audita(monkeypatch):
     assert not any("INSERT INTO usuario_empresas" in sql for sql, _ in ejecutado)
     assert [p[0] for sql, p in ejecutado if "UPDATE invitaciones_empresa" in sql] == ["rechazada_admin"]
     assert any("auditoria" in sql and "cuenta.rechazar_aceptacion" in str(p) for sql, p in ejecutado)
+
+
+
+def test_aprobar_como_administrador_revisa_el_plan_de_la_persona(monkeypatch):
+    ejecutado = _base_falsa(monkeypatch, [_miembro(YO, "administrador", 1)], aceptada=PENDIENTE)
+    assert client.post(f"{APROBAR}/aprobar").status_code == 204
+    assert ("verificar_alta_rfc", (OTRO, True)) in ejecutado
+
+
+def test_aprobar_como_contador_no_revisa_el_plan(monkeypatch):
+    ejecutado = _base_falsa(monkeypatch, [_miembro(YO, "administrador", 1)], aceptada={**PENDIENTE, "rol": "contador"})
+    assert client.post(f"{APROBAR}/aprobar").status_code == 204
+    assert not any(sql == "verificar_alta_rfc" for sql, _ in ejecutado)
+
+
+def test_limite_de_rfc_al_aprobar_responde_403_sin_vincular(monkeypatch):
+    from backend import suscripcion_datos
+
+    ejecutado = _base_falsa(monkeypatch, [_miembro(YO, "administrador", 1)], aceptada=PENDIENTE)
+
+    def _limite(cur, uid, de_tercero=False):
+        raise suscripcion_datos.LimiteRfcAlcanzado("El plan Prueba de esa persona permite 1 RFC y ya lo usa.")
+
+    monkeypatch.setattr(cuenta.suscripcion_datos, "verificar_alta_rfc", _limite)
+    r = client.post(f"{APROBAR}/aprobar")
+    assert r.status_code == 403 and "de esa persona" in r.json()["detail"]
+    assert _escrituras(ejecutado) == []
+
+
+def test_promover_a_administrador_revisa_el_plan(monkeypatch):
+    ejecutado = _base_falsa(monkeypatch, [_miembro(YO, "administrador", 1), _miembro(OTRO, "contador", 2)])
+    monkeypatch.setattr(db, "query_all", lambda sql, params=(): [] if "invitaciones_empresa" in sql else
+                        [_miembro(YO, "administrador", 1), _miembro(OTRO, "administrador", 2)])
+    assert client.patch(f"{BASE}/{OTRO}", json={"rol": "administrador"}).status_code == 200
+    assert ("verificar_alta_rfc", (OTRO, True)) in ejecutado

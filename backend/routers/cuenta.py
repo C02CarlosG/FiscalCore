@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field
 
 from .. import db
 from .. import usuarios_empresa as ue
+from .. import suscripcion_datos
 from ..auditoria import registrar_evento
 from ..deps import get_current_user, hash_password, limiter, validar_acceso_empresa, verificar_token, verify_password
 
@@ -160,6 +161,15 @@ def _fijar_administradores(cur, eid: str, miembros: list, roles: dict) -> list:
     return promovidos
 
 
+def _verificar_plan(cur, usuario_id: str, current_user: dict) -> None:
+    """Quien pasa a administrar la empresa la suma a su uso de RFC (M7.1): se revisa su
+    plan con el candado por cuenta, en la misma transacción que crea o cambia el vínculo."""
+    try:
+        suscripcion_datos.verificar_alta_rfc(cur, usuario_id, de_tercero=str(usuario_id) != str(current_user["user_id"]))
+    except suscripcion_datos.LimiteRfcAlcanzado as e:
+        raise HTTPException(status_code=403, detail=str(e))
+
+
 def _exigir_administrador(current_user: dict, roles: dict, rol_plataforma: str) -> None:
     if not ue.puede_administrar(current_user["user_id"], roles, rol_plataforma):
         raise HTTPException(status_code=403, detail="Solo un administrador de la empresa puede gestionar usuarios")
@@ -248,6 +258,8 @@ async def cambiar_rol(
             raise _404_miembro()
         except ue.UltimoAdministrador as e:
             raise HTTPException(status_code=409, detail=str(e))
+        if rol == "administrador" and roles.get(str(usuario_id)) != "administrador":
+            _verificar_plan(cur, str(usuario_id), current_user)
         promovidos = _fijar_administradores(cur, eid, miembros, roles)
         cur.execute("UPDATE usuario_empresas SET rol = %s WHERE empresa_id = %s AND usuario_id = %s",
                     (rol, eid, str(usuario_id)))
@@ -383,6 +395,8 @@ def _resolver(empresa_id: uuid.UUID, invitacion_id: uuid.UUID, current_user: dic
             raise HTTPException(status_code=404, detail="Invitación no encontrada")
         promovidos = []
         if aprobar:
+            if inv["rol"] == "administrador":
+                _verificar_plan(cur, str(inv["respondida_por"]), current_user)
             promovidos = _fijar_administradores(cur, eid, miembros, roles)
             cur.execute(
                 "INSERT INTO usuario_empresas (usuario_id, empresa_id, rol) VALUES (%s, %s, %s) "
