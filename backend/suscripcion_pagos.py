@@ -37,6 +37,8 @@ USOS_CFDI = {
     "S01", "CP01", "CN01",
 }
 _CP_RE = re.compile(r"^\d{5}$")
+# Público en general y residentes en el extranjero: no identifican al cliente.
+RFC_GENERICOS = frozenset({"XAXX010101000", "XEXX010101000"})
 
 
 def _texto(cuerpo: dict, campo: str, maximo: int, obligatorio: bool) -> Optional[str]:
@@ -60,6 +62,8 @@ def validar_datos_fiscales(cuerpo: dict) -> dict:
     rfc = (_texto(cuerpo, "rfc", 13, True) or "").upper()
     if not validar_rfc(rfc):
         raise DatoInvalido("rfc inválido")
+    if rfc in RFC_GENERICOS:
+        raise DatoInvalido("rfc genérico: el CFDI de la suscripción se emite al RFC del cliente")
     razon = _texto(cuerpo, "razon_social", MAX_RAZON_SOCIAL, True)
     regimen = _texto(cuerpo, "regimen_fiscal", 3, True)
     persona_moral = len(rfc) == 12

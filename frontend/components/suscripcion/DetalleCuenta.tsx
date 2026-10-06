@@ -13,6 +13,7 @@ import {
   useRegistrarPago,
 } from "@/hooks/useSuscripcion";
 import { ApiError } from "@/lib/api-client";
+import { formatearFecha } from "@/lib/formato";
 import { DatosFiscalesForm } from "./DatosFiscalesForm";
 import { HistorialPlan } from "./MiSuscripcion";
 import { PagosTabla } from "./PagosTabla";
@@ -25,6 +26,9 @@ function RegistrarPagoForm({ cuenta }: { cuenta: CuentaSuscripcion }) {
   const registrar = useRegistrarPago(cuenta.usuario_id);
   const [valores, setValores] = useState(PAGO_VACIO);
   const [mensaje, setMensaje] = useState<{ ok: boolean; texto: string } | null>(null);
+  // Una suscripción asignada sin vencimiento deja de ser indefinida al registrar un pago.
+  const sinVencimiento = Boolean(cuenta.plan_clave) && !cuenta.vigente_hasta;
+  const [aceptaVencimiento, setAceptaVencimiento] = useState(false);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -40,6 +44,7 @@ function RegistrarPagoForm({ cuenta }: { cuenta: CuentaSuscripcion }) {
       });
       setMensaje({ ok: true, texto: `Pago registrado. Vigente hasta ${pago.vigente_hasta_nueva}.` });
       setValores(PAGO_VACIO);
+      setAceptaVencimiento(false);
     } catch (err) {
       setMensaje({ ok: false, texto: mensajeDe(err, "No se pudo registrar el pago") });
     }
@@ -70,12 +75,25 @@ function RegistrarPagoForm({ cuenta }: { cuenta: CuentaSuscripcion }) {
         {campo("folio_cfdi", "Folio del CFDI")}
         {campo("uuid_cfdi", "UUID del CFDI")}
       </div>
+      {sinVencimiento && (
+        <div role="note" className="space-y-2 rounded-md border border-status-pendiente/30 bg-status-pendiente-soft p-3 text-sm text-status-pendiente">
+          <p>
+            Esta suscripción no tiene vencimiento. Al registrar el pago quedará vigente solo por los meses pagados,
+            contados desde la fecha del pago.
+          </p>
+          <label className="flex items-center gap-2">
+            <input type="checkbox" checked={aceptaVencimiento} onChange={(e) => setAceptaVencimiento(e.target.checked)} />
+            Entiendo que la suscripción tendrá vencimiento
+          </label>
+        </div>
+      )}
       {mensaje && (
         <p role={mensaje.ok ? "status" : "alert"} className={`text-sm ${mensaje.ok ? "text-status-ok" : "text-destructive"}`}>
           {mensaje.texto}
         </p>
       )}
-      <Button type="submit" size="sm" disabled={registrar.isPending || !valores.fecha || !valores.monto.trim()}>
+      <Button type="submit" size="sm"
+              disabled={registrar.isPending || !valores.fecha || !valores.monto.trim() || (sinVencimiento && !aceptaVencimiento)}>
         Registrar pago
       </Button>
     </form>
@@ -94,11 +112,11 @@ export function DetalleCuenta({ cuenta }: { cuenta: CuentaSuscripcion }) {
   async function handleAnular(pagoId: string, motivo: string) {
     setAviso(null);
     try {
-      const { vigencia_revertida } = await anular.mutateAsync({ pagoId, motivo });
+      const { vigencia_revertida, vigente_hasta } = await anular.mutateAsync({ pagoId, motivo });
       setAviso({
         ok: true,
         texto: vigencia_revertida
-          ? "Pago anulado; la vigencia volvió a la anterior a ese pago."
+          ? `Pago anulado; la vigencia volvió a ${vigente_hasta ? formatearFecha(vigente_hasta) : "sin vencimiento"}, la que había antes de los pagos anulados.`
           : "Pago anulado. La vigencia no cambió porque otro pago o una asignación la movió después: ajústala a mano si hace falta.",
       });
     } catch (err) {

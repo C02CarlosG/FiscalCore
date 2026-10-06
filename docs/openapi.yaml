@@ -3867,7 +3867,7 @@ paths:
     get:
       operationId: misPagosSuscripcion
       tags: [Suscripción]
-      summary: Pagos de mi suscripción registrados a mano, del más reciente al más antiguo (hasta 100)
+      summary: Pagos de mi suscripción registrados a mano, también los anulados (con su estado), del más reciente al más antiguo (hasta 100)
       responses:
         '200':
           description: Pagos
@@ -4114,7 +4114,7 @@ paths:
     post:
       operationId: anularPagoDeCuenta
       tags: [Suscripción]
-      summary: Anula un pago (no se borra) y revierte la vigencia si nada la cambió después
+      summary: Anula un pago (no se borra) y revierte la vigencia si nada la cambió después (en cadena sobre pagos ya anulados)
       parameters:
         - { name: usuario_id, in: path, required: true, schema: { type: string, format: uuid } }
         - { name: pago_id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -4136,6 +4136,7 @@ paths:
                 type: object
                 properties:
                   vigencia_revertida: { type: boolean }
+                  vigente_hasta: { type: string, format: date, nullable: true, description: Vigencia resultante }
         '401':
           $ref: '#/components/responses/UnauthorizedError'
         '403':

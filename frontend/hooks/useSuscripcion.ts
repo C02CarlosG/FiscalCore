@@ -136,7 +136,7 @@ export function useAnularPago(usuarioId: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ pagoId, motivo }: { pagoId: string; motivo: string }) =>
-      apiFetch<{ vigencia_revertida: boolean }>(`${BASE}/admin/cuentas/${usuarioId}/pagos/${pagoId}/anular`, {
+      apiFetch<{ vigencia_revertida: boolean; vigente_hasta: string | null }>(`${BASE}/admin/cuentas/${usuarioId}/pagos/${pagoId}/anular`, {
         method: "POST",
         body: JSON.stringify({ motivo }),
       }),

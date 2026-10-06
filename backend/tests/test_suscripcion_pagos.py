@@ -36,6 +36,8 @@ def test_datos_fiscales_se_normalizan():
     {"codigo_postal": "68A00"},
     {"uso_cfdi": "P01"},                   # ya no existe en CFDI 4.0
     {"correo": "no-es-correo"},
+    {"rfc": "XAXX010101000", "regimen_fiscal": "616"},   # público en general
+    {"rfc": "xexx010101000", "regimen_fiscal": "616"},   # extranjero genérico
     {"correo": 5},
 ])
 def test_datos_fiscales_invalidos(cambio):
