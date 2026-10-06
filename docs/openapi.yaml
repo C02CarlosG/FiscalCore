@@ -23,8 +23,12 @@ servers:
 tags:
   - name: Información fiscal
     description: Constancia de situación fiscal y opinión de cumplimiento por empresa (F8)
+  - name: Cuenta
+    description: Contraseña del usuario y usuarios de cada empresa con su rol (U1)
   - name: Validaciones de CFDI
     description: CFDI con posibles situaciones incorrectas, por periodo y acumulado (V1)
+  - name: Suscripción
+    description: Planes, límite de RFC y asignación manual (M7.1)
   - name: Preferencias
     description: Orden y visibilidad de columnas de las tablas, por usuario
   - name: Sistema
@@ -3484,14 +3488,27 @@ paths:
       summary: Conteo del periodo y del acumulado por validación, en emitidos y recibidos
       description: |
         Solo CFDI vigentes. Validaciones: pue_forma_99, pue_con_rep, egreso_sin_relacion
-        (emitidos y recibidos) y no_bancarizado (solo recibidos). Una validación
-        inactiva trae conteos null. V1, carril D.
+        (emitidos y recibidos), no_bancarizado y gas_efectivo (solo recibidos; esta es
+        una advertencia, `tipo: advertencia`). Una validación inactiva trae conteos null.
+        V1, carril D.
       parameters:
         - $ref: '#/components/parameters/EmpresaId'
         - { name: periodo, in: query, required: true, schema: { type: string, pattern: '^\d{4}-(0[1-9]|1[0-2])$' } }
       responses:
         '200':
           description: Tarjetas por dirección
+  /api/v1/suscripcion:
+    get:
+      operationId: miSuscripcion
+      tags: [Suscripción]
+      summary: Plan efectivo de la cuenta, uso de RFC y si puede agregar otro
+      description: |
+        Sin suscripción vigente (no asignada, suspendida, cancelada o vencida) aplica el plan
+        por defecto; `motivo` dice por qué. El uso cuenta las empresas activas que la cuenta
+        administra. El administrador de la plataforma no tiene límite. M7.1, carril D.
+      responses:
+        '200':
+          description: Suscripción de la cuenta
           content:
             application/json:
               schema:
@@ -3517,7 +3534,7 @@ paths:
         - $ref: '#/components/parameters/EmpresaId'
         - { name: periodo, in: query, required: true, schema: { type: string } }
         - { name: direccion, in: query, required: true, schema: { type: string, enum: [emitidos, recibidos] } }
-        - { name: validacion, in: query, required: true, schema: { type: string, enum: [pue_forma_99, pue_con_rep, egreso_sin_relacion, no_bancarizado] } }
+        - { name: validacion, in: query, required: true, schema: { type: string, enum: [pue_forma_99, pue_con_rep, egreso_sin_relacion, no_bancarizado, gas_efectivo] } }
         - { name: alcance, in: query, required: false, schema: { type: string, enum: [periodo, acumulado], default: periodo } }
       responses:
         '200':
@@ -3544,6 +3561,73 @@ paths:
                         forma_pago: { type: string, nullable: true }
                         metodo_pago: { type: string, nullable: true }
                         tipo_comprobante: { type: string }
+                  plan: { $ref: '#/components/schemas/Plan' }
+                  estado: { type: string, nullable: true, enum: [activa, suspendida, cancelada, null] }
+                  vigente_hasta: { type: string, format: date, nullable: true }
+                  motivo: { type: string, nullable: true, enum: [sin_suscripcion, suspendida, cancelada, vencida, plan_no_disponible, null] }
+                  uso_rfc: { type: integer }
+                  puede_agregar_rfc: { type: boolean }
+                  es_admin_plataforma: { type: boolean }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /api/v1/suscripcion/historial:
+    get:
+      operationId: miHistorialSuscripcion
+      tags: [Suscripción]
+      summary: Mis asignaciones de plan, de la más reciente a la más antigua (M7.2)
+      description: Sin las notas internas ni quién asignó.
+      responses:
+        '200':
+          description: Historial (hasta 50)
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/AsignacionPlan' }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /api/v1/suscripcion/planes:
+    get:
+      operationId: planesActivos
+      tags: [Suscripción]
+      summary: Planes activos del catálogo
+      responses:
+        '200':
+          description: Planes
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/Plan' } }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /api/v1/suscripcion/admin/cuentas:
+    get:
+      operationId: cuentasConSuscripcion
+      tags: [Suscripción]
+      summary: Cuentas con su plan y uso (solo administrador de la plataforma)
+      parameters:
+        - { name: q, in: query, required: false, schema: { type: string, maxLength: 100 }, description: Busca en correo o nombre }
+      responses:
+        '200':
+          description: Hasta 200 cuentas
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    usuario_id: { type: string, format: uuid }
+                    email: { type: string }
+                    nombre: { type: string, nullable: true }
+                    es_admin_plataforma: { type: boolean }
+                    plan_clave: { type: string, nullable: true }
+                    estado: { type: string, nullable: true }
+                    vigente_hasta: { type: string, format: date, nullable: true }
+                    notas: { type: string, nullable: true }
+                    uso_rfc: { type: integer }
         '401':
           $ref: '#/components/responses/UnauthorizedError'
         '403':
@@ -3585,12 +3669,384 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ConfiguracionValidacionesCfdi' }
+
+  /api/v1/suscripcion/admin/cuentas/{usuario_id}/historial:
+    get:
+      operationId: historialSuscripcionCuenta
+      tags: [Suscripción]
+      summary: Historial de asignaciones de una cuenta, con notas y quién asignó (solo admin de la plataforma)
+      parameters:
+        - { name: usuario_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Historial (hasta 50)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  allOf:
+                    - $ref: '#/components/schemas/AsignacionPlan'
+                    - type: object
+                      properties:
+                        notas: { type: string, nullable: true }
+                        asignada_por: { type: string, nullable: true, description: Correo de quien asignó }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/v1/suscripcion/admin/cuentas/{usuario_id}:
+    put:
+      operationId: asignarSuscripcion
+      tags: [Suscripción]
+      summary: Asignar plan a una cuenta (pago registrado aparte)
+      parameters:
+        - { name: usuario_id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [plan_clave]
+              properties:
+                plan_clave: { type: string }
+                estado: { type: string, enum: [activa, suspendida, cancelada], default: activa }
+                vigente_hasta: { type: string, format: date, nullable: true }
+                notas: { type: string, nullable: true, maxLength: 1000 }
+      responses:
+        '200':
+          description: Suscripción resultante de la cuenta (mismo formato que GET /suscripcion)
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '422':
+          $ref: '#/components/responses/UnprocessableError'
+
+  /api/v1/suscripcion/admin/planes/{clave}:
+    put:
+      operationId: editarPlan
+      tags: [Suscripción]
+      summary: Editar un plan (o crearlo si la clave no existe)
+      parameters:
+        - { name: clave, in: path, required: true, schema: { type: string, pattern: '^[a-z][a-z0-9_]{1,29}$' } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [nombre, precio_mensual]
+              properties:
+                nombre: { type: string, maxLength: 80 }
+                precio_mensual: { type: string, description: MXN sin IVA }
+                max_rfc: { type: integer, nullable: true, minimum: 0, maximum: 2147483647, description: null = ilimitado }
+                activo: { type: boolean, default: true }
+      responses:
+        '200':
+          description: Plan guardado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Plan' }
         '401':
           $ref: '#/components/responses/UnauthorizedError'
         '403':
           $ref: '#/components/responses/ForbiddenError'
         '422':
           description: Clave de validación desconocida o umbral fuera de 0 a 2,000
+          $ref: '#/components/responses/UnprocessableError'
+
+  /api/v1/cuenta/contrasena:
+    post:
+      operationId: cambiarContrasena
+      tags: [Cuenta]
+      summary: Cambiar la contraseña del usuario autenticado
+      description: Exige la contraseña actual. Límite de 5 intentos por minuto. U1, carril D.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [actual, nueva]
+              properties:
+                actual: { type: string }
+                nueva: { type: string, minLength: 8, maxLength: 128 }
+      responses:
+        '204':
+          description: Contraseña cambiada
+        '400':
+          description: La contraseña actual no es correcta
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '422':
+          description: Contraseña nueva inválida o igual a la actual
+        '429':
+          description: Demasiados intentos
+
+  /api/v1/cuenta/empresas/{empresa_id}/usuarios:
+    get:
+      operationId: listarUsuariosEmpresa
+      tags: [Cuenta]
+      summary: Usuarios con acceso a la empresa y su rol
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+      responses:
+        '200':
+          description: Usuarios de la empresa
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  mi_rol: { type: string, nullable: true, enum: [administrador, contador, null] }
+                  puede_administrar: { type: boolean }
+                  usuarios: { type: array, items: { $ref: '#/components/schemas/UsuarioEmpresa' } }
+                  invitaciones:
+                    type: array
+                    description: Pendientes; vacía si quien consulta no administra la empresa.
+                    items: { $ref: '#/components/schemas/InvitacionEmpresa' }
+                  por_aprobar:
+                    type: array
+                    description: |
+                      Aceptaciones que esperan la aprobación de un administrador (doble
+                      confirmación); vacía si quien consulta no administra la empresa.
+                    items: { $ref: '#/components/schemas/AceptacionPorAprobar' }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/v1/cuenta/empresas/{empresa_id}/usuarios/{usuario_id}:
+    patch:
+      operationId: cambiarRolUsuarioEmpresa
+      tags: [Cuenta]
+      summary: Cambiar el rol de un usuario en la empresa
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - { name: usuario_id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [rol]
+              properties:
+                rol: { type: string, enum: [administrador, contador] }
+      responses:
+        '200':
+          description: Rol cambiado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UsuarioEmpresa' }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '409':
+          description: La empresa se quedaría sin administrador
+        '422':
+          $ref: '#/components/responses/UnprocessableError'
+    delete:
+      operationId: quitarUsuarioEmpresa
+      tags: [Cuenta]
+      summary: Quitar el acceso a la empresa (no borra la cuenta)
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - { name: usuario_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '204':
+          description: Acceso retirado
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '409':
+          description: La empresa se quedaría sin administrador
+
+  /api/v1/cuenta/empresas/{empresa_id}/invitaciones:
+    post:
+      operationId: invitarAEmpresa
+      tags: [Cuenta]
+      summary: Invitar un correo a la empresa
+      description: |
+        Solo un administrador de la empresa (o de la plataforma). La respuesta es la misma
+        exista o no una cuenta con ese correo; la persona acepta desde su perfil (o al
+        registrarse con ese correo). La invitación vence a los 7 días; re-invitar la renueva.
+        Límite: 20 por hora por usuario.
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, rol]
+              properties:
+                email: { type: string }
+                rol: { type: string, enum: [administrador, contador] }
+      responses:
+        '201':
+          description: Invitación pendiente
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InvitacionEmpresa' }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '409':
+          description: Esa persona ya tiene acceso a la empresa, o ya aceptó una invitación que espera aprobación (no se cambia su rol ni su plazo)
+        '422':
+          description: Correo o rol inválido, o el correo es el propio
+        '429':
+          description: Demasiadas invitaciones
+
+  /api/v1/cuenta/empresas/{empresa_id}/invitaciones/{invitacion_id}:
+    delete:
+      operationId: cancelarInvitacion
+      tags: [Cuenta]
+      summary: Cancelar una invitación pendiente
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - { name: invitacion_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '204':
+          description: Cancelada
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/v1/cuenta/empresas/{empresa_id}/invitaciones/{invitacion_id}/aprobar:
+    post:
+      operationId: aprobarAceptacion
+      tags: [Cuenta]
+      summary: Aprobar a quien aceptó una invitación (le da acceso con el rol invitado)
+      description: |
+        Solo administradores de la empresa (o de la plataforma). El vínculo se crea en la
+        misma transacción que bloquea los vínculos de la empresa. Se audita
+        (`cuenta.aprobar_invitacion`).
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - { name: invitacion_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '204':
+          description: Aprobada; la persona ya tiene acceso
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          description: No hay una aceptación vigente con ese id en esta empresa (no existe, es de otra empresa, ya se resolvió o venció)
+        '409':
+          description: |
+            El correo de la cuenta que aceptó ya no identifica a una sola persona (otra cuenta con
+            el mismo correo en minúsculas, o la cuenta ya no tiene el correo invitado); se audita
+            `cuenta.correo_ambiguo`. También si el catálogo de planes no tiene plan por defecto.
+
+  /api/v1/cuenta/empresas/{empresa_id}/invitaciones/{invitacion_id}/rechazar:
+    post:
+      operationId: rechazarAceptacion
+      tags: [Cuenta]
+      summary: Rechazar a quien aceptó una invitación (no le da acceso)
+      description: Solo administradores. Se audita (`cuenta.rechazar_aceptacion`).
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - { name: invitacion_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '204':
+          description: Rechazada
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          description: No hay una aceptación vigente con ese id en esta empresa
+
+  /api/v1/cuenta/invitaciones:
+    get:
+      operationId: misInvitaciones
+      tags: [Cuenta]
+      summary: Invitaciones pendientes y vigentes (7 días) al correo de la cuenta
+      description: |
+        Incluye las que esta cuenta ya aceptó y esperan aprobación (`aceptada_pendiente`).
+        Vacía si hay más de una cuenta con el mismo correo en minúsculas (se audita) o si la
+        empresa está inactiva.
+      responses:
+        '200':
+          description: Invitaciones pendientes
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id: { type: string, format: uuid }
+                    rol: { type: string, enum: [administrador, contador] }
+                    estado: { type: string, enum: [pendiente, aceptada_pendiente] }
+                    creada: { type: string, format: date-time }
+                    rfc: { type: string }
+                    razon_social: { type: string }
+                    invitada_por: { type: string, nullable: true }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /api/v1/cuenta/invitaciones/{invitacion_id}/aceptar:
+    post:
+      operationId: aceptarInvitacion
+      tags: [Cuenta]
+      summary: Aceptar una invitación (queda por aprobar; todavía no da acceso)
+      description: |
+        Doble confirmación: la invitación pasa a `aceptada_pendiente` y un administrador de
+        la empresa debe aprobarla en los siguientes 7 días para que se cree el acceso.
+      parameters:
+        - { name: invitacion_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Aceptada, por aprobar
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  estado: { type: string, enum: [aceptada_pendiente] }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          description: No existe, no es de este correo o ya se respondió
+
+  /api/v1/cuenta/invitaciones/{invitacion_id}/rechazar:
+    post:
+      operationId: rechazarInvitacion
+      tags: [Cuenta]
+      summary: Rechazar una invitación
+      parameters:
+        - { name: invitacion_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '204':
+          description: Rechazada
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          description: No existe, no es de este correo o ya se respondió
 
 # ============================================================
 # COMPONENTS
@@ -4649,7 +5105,7 @@ components:
       properties:
         inactivas:
           type: array
-          items: { type: string, enum: [pue_forma_99, pue_con_rep, egreso_sin_relacion, no_bancarizado] }
+          items: { type: string, enum: [pue_forma_99, pue_con_rep, egreso_sin_relacion, no_bancarizado, gas_efectivo] }
         umbral_efectivo:
           type: string
           description: Importe en pesos con dos decimales, de 0 a 2,000; por defecto "2000.00" (art. 27-III LISR fija $2,000, solo se puede bajar).
@@ -4660,6 +5116,59 @@ components:
         clave: { type: string }
         titulo: { type: string }
         descripcion: { type: string }
+        tipo:
+          type: string
+          enum: [exclusion, advertencia]
+          description: advertencia = depende de un dato que el CFDI no trae (revisar, no excluir)
         activa: { type: boolean }
         periodo: { type: integer, nullable: true }
         acumulado: { type: integer, nullable: true }
+
+    UsuarioEmpresa:
+      type: object
+      properties:
+        usuario_id: { type: string, format: uuid }
+        email: { type: string }
+        nombre: { type: string, nullable: true }
+        rol: { type: string, enum: [administrador, contador] }
+        desde: { type: string, format: date-time, nullable: true }
+        soy_yo: { type: boolean }
+
+    InvitacionEmpresa:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string }
+        rol: { type: string, enum: [administrador, contador] }
+        estado: { type: string, enum: [pendiente] }
+        creada: { type: string, format: date-time }
+
+    AceptacionPorAprobar:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string, description: Correo de la cuenta que aceptó, tal como se registró }
+        email_invitado: { type: string, description: Correo al que se envió la invitación (minúsculas) }
+        nombre: { type: string, nullable: true }
+        rol: { type: string, enum: [administrador, contador] }
+        cuenta_creada: { type: string, format: date-time, nullable: true }
+        aceptada: { type: string, format: date-time, nullable: true }
+
+    AsignacionPlan:
+      type: object
+      properties:
+        fecha: { type: string, format: date-time }
+        plan_clave: { type: string }
+        plan_nombre: { type: string }
+        estado: { type: string, enum: [activa, suspendida, cancelada] }
+        vigente_hasta: { type: string, format: date, nullable: true }
+
+    Plan:
+      type: object
+      properties:
+        clave: { type: string }
+        nombre: { type: string }
+        precio_mensual: { type: string, description: MXN sin IVA, dos decimales }
+        max_rfc: { type: integer, nullable: true, description: null = ilimitado }
+        activo: { type: boolean }
+        por_defecto: { type: boolean }

@@ -5,6 +5,7 @@ import { useRouter, usePathname } from "next/navigation";
 import { useState } from "react";
 import {
   ChevronDown,
+  CreditCard,
   Building2,
   Calculator,
   CloudDownload,
@@ -18,6 +19,8 @@ import {
   LogOut,
   Receipt,
   Upload,
+  UserRound,
+  Users,
 } from "lucide-react";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { EmpresaSwitcher } from "@/components/layout/EmpresaSwitcher";
@@ -36,6 +39,7 @@ const NAV_ITEMS = [
   { slug: "sat", label: "Conexión SAT", icon: CloudDownload },
   { slug: "informacion-fiscal", label: "Información fiscal", icon: FileCheck2 },
   { slug: "validaciones", label: "Validaciones", icon: ListChecks },
+  { slug: "usuarios", label: "Usuarios", icon: Users },
 ] as const;
 
 const CFDI_GROUP = {
@@ -197,6 +201,30 @@ function SidebarBody() {
         >
           <Building2 className="h-4 w-4" />
           Empresas
+        </Link>
+        <Link
+          href="/perfil"
+          aria-current={pathname === "/perfil" ? "page" : undefined}
+          className={`flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm transition-colors ${
+            pathname === "/perfil"
+              ? "bg-accent font-semibold text-accent-foreground shadow-sm"
+              : "font-medium text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+          }`}
+        >
+          <UserRound className="h-4 w-4" />
+          Mi perfil
+        </Link>
+        <Link
+          href="/suscripcion"
+          aria-current={pathname === "/suscripcion" ? "page" : undefined}
+          className={`flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm transition-colors ${
+            pathname === "/suscripcion"
+              ? "bg-accent font-semibold text-accent-foreground shadow-sm"
+              : "font-medium text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+          }`}
+        >
+          <CreditCard className="h-4 w-4" />
+          Suscripción
         </Link>
 
         <span className="px-2.5 pb-1 pt-4 text-[10px] font-bold uppercase text-muted-foreground">

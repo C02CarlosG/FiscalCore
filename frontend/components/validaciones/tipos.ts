@@ -1,11 +1,13 @@
 export type DireccionValidacion = "emitidos" | "recibidos";
 export type AlcanceValidacion = "periodo" | "acumulado";
-export type ClaveValidacion = "pue_forma_99" | "pue_con_rep" | "egreso_sin_relacion" | "no_bancarizado";
+export type ClaveValidacion = "pue_forma_99" | "pue_con_rep" | "egreso_sin_relacion" | "no_bancarizado" | "gas_efectivo";
 
 export interface TarjetaValidacion {
   clave: ClaveValidacion;
   titulo: string;
   descripcion: string;
+  /** "advertencia": depende de un dato que el CFDI no trae; revisar, no excluir. */
+  tipo: "exclusion" | "advertencia";
   activa: boolean;
   periodo: number | null;
   acumulado: number | null;

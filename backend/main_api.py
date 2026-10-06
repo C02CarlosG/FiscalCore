@@ -32,6 +32,8 @@ from .routers import isr_flujo as isr_flujo_router
 from .routers import diot as diot_router
 from .routers import proveedores as proveedores_router
 from .routers import validaciones_cfdi
+from .routers import cuenta
+from .routers import suscripcion
 
 logging.basicConfig(
     level=logging.INFO,
@@ -59,6 +61,10 @@ app = FastAPI(
 
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+# Catálogo de planes sin plan por defecto → 409 en vez de 500 (M7.1, carril D)
+from .suscripcion import ConfiguracionInvalida  # noqa: E402
+from .routers.suscripcion import configuracion_invalida  # noqa: E402
+app.add_exception_handler(ConfiguracionInvalida, configuracion_invalida)
 app.add_middleware(SlowAPIMiddleware)
 
 app.add_middleware(
@@ -88,6 +94,8 @@ app.include_router(isr_flujo_router.router)
 app.include_router(diot_router.router)
 app.include_router(proveedores_router.router)
 app.include_router(validaciones_cfdi.router)
+app.include_router(cuenta.router)
+app.include_router(suscripcion.router)
 
 
 @app.on_event("startup")

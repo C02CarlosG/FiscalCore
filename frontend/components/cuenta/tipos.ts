@@ -1,0 +1,75 @@
+export type RolEmpresa = "administrador" | "contador";
+
+export interface Perfil {
+  id: string;
+  email: string;
+  nombre: string | null;
+  telefono: string | null;
+  rfc: string | null;
+  nombre_despacho: string | null;
+  cedula_profesional: string | null;
+}
+
+export type CambiosPerfil = Partial<Pick<Perfil, "nombre" | "telefono" | "rfc" | "nombre_despacho" | "cedula_profesional">>;
+
+export interface UsuarioEmpresa {
+  usuario_id: string;
+  email: string;
+  nombre: string | null;
+  rol: RolEmpresa;
+  desde: string | null;
+  soy_yo: boolean;
+}
+
+export interface InvitacionEmpresa {
+  id: string;
+  email: string;
+  rol: RolEmpresa;
+  estado: "pendiente";
+  creada: string | null;
+}
+
+/** Alguien aceptó una invitación y espera que un administrador le dé acceso. */
+export interface AceptacionPorAprobar {
+  id: string;
+  /** Correo y nombre de la cuenta que aceptó, tal como se registró. */
+  email: string;
+  /** Correo al que se mandó la invitación (en minúsculas). */
+  email_invitado: string;
+  nombre: string | null;
+  rol: RolEmpresa;
+  cuenta_creada: string | null;
+  aceptada: string | null;
+}
+
+export interface UsuariosDeEmpresa {
+  mi_rol: RolEmpresa | null;
+  puede_administrar: boolean;
+  usuarios: UsuarioEmpresa[];
+  invitaciones: InvitacionEmpresa[];
+  por_aprobar: AceptacionPorAprobar[];
+}
+
+export interface InvitacionInput {
+  email: string;
+  rol: RolEmpresa;
+}
+
+export interface MiInvitacion {
+  id: string;
+  rol: RolEmpresa;
+  /** aceptada_pendiente: ya la aceptó y espera la aprobación de un administrador. */
+  estado: "pendiente" | "aceptada_pendiente";
+  creada: string;
+  rfc: string;
+  razon_social: string;
+  invitada_por: string | null;
+}
+
+export const ETIQUETA_ROL_EMPRESA: Record<RolEmpresa, string> = {
+  administrador: "Administrador",
+  contador: "Contador",
+};
+
+export const rutaUsuarios = (empresaId: string) => `/api/v1/cuenta/empresas/${empresaId}/usuarios`;
+export const rutaInvitaciones = (empresaId: string) => `/api/v1/cuenta/empresas/${empresaId}/invitaciones`;
