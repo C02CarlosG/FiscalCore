@@ -80,14 +80,16 @@ def _renglon(clave: str, etiqueta: str, declarado: Any, calculado: Any) -> dict:
 def comparar(impuesto: str, cadena: list[dict], calculado: dict) -> dict:
     """Compara la declaración vigente (la última de ``cadena``: normal y complementarias en orden) con lo calculado.
 
-    En IVA el saldo a favor de periodos anteriores aplicado resta de lo calculado a cargo; lo calculado se redondea a
+    En IVA el saldo a favor de periodos anteriores aplicado resta de máx(0, lo calculado a cargo); lo calculado se redondea a
     peso. El pendiente de pago usa el a cargo de la vigente y suma lo pagado de toda la cadena."""
     if impuesto not in IMPUESTOS:
         raise ValueError("impuesto inválido")
     vigente = cadena[-1] if cadena else None
     calc = dict(calculado)
     if impuesto == "iva" and vigente is not None and calc.get("impuesto_a_cargo") is not None:
-        calc["impuesto_a_cargo"] = Decimal(str(calc["impuesto_a_cargo"])) - Decimal(str(vigente.get("saldo_a_favor_aplicado") or 0))
+        # el saldo a favor se aplica contra el impuesto a cargo (nunca contra un saldo a favor del mes)
+        a_cargo = max(CERO, Decimal(str(calc["impuesto_a_cargo"])))
+        calc["impuesto_a_cargo"] = a_cargo - Decimal(str(vigente.get("saldo_a_favor_aplicado") or 0))
     renglones = [_renglon(k, e, (vigente or {}).get(k), calc.get(k)) for k, e in RENGLONES[impuesto]]
     if vigente is None:
         return {"impuesto": impuesto, "estado": "sin_declaracion", "declaracion": None, "declaraciones": 0,

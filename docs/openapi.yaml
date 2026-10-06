@@ -3265,7 +3265,7 @@ paths:
       tags: [Declaraciones]
       summary: Lo declarado contra lo calculado de IVA e ISR del periodo
       description: |
-        Por impuesto: `estado` (`sin_declaracion`, `cuadra`, `con_diferencias`, `sin_captura`), los renglones con
+        Por impuesto: `estado` (`sin_declaracion`, `cuadra`, `con_diferencias`, `sin_comparar`), los renglones con
         declarado, calculado (a peso) y diferencia (hasta $1.00 es `cuadra`: las declaraciones van en pesos) y `pendiente_de_pago`
         (a cargo de la vigente menos lo pagado de toda la cadena). `sin_comparar` = no hay nada capturado contra nada calculado.
         En IVA el saldo a favor aplicado resta de lo calculado a cargo; en ISR son cifras del mes.

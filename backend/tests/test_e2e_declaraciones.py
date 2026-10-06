@@ -95,6 +95,8 @@ def test_captura_compara_complementarias_borra_y_audita(entorno):
     assert [f["accion"] for f in filas] == ["declaracion_guardada"] * 3 + ["declaracion_eliminada"] * 2
     ultima = filas[2]["metadata"]
     assert ultima["secuencia"] == 2 and ultima["monto_pagado"] == "60" and ultima["saldo_a_favor_aplicado"] is None
+    borrada = filas[3]["metadata"]                                            # el borrado conserva los importes
+    assert borrada["secuencia"] == 2 and borrada["impuesto_a_cargo"] == "160.00" and borrada["monto_pagado"] == "60.00"
 
 
 def test_otra_empresa_recibe_403(entorno):

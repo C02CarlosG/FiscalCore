@@ -49,6 +49,13 @@ def test_saldo_a_favor_aplicado_resta_de_lo_calculado_a_cargo():
     assert r["estado"] == "cuadra"
 
 
+def test_el_saldo_a_favor_se_aplica_sobre_el_a_cargo_calculado_nunca_negativo():
+    calc = {**IVA_CALC, "impuesto_a_cargo": D("-500.00")}                    # el mes sale a favor
+    r = d.comparar("iva", [{"impuesto_a_cargo": D("-3000"), "saldo_a_favor_aplicado": D("3000")}], calc)
+
+    assert por_clave(r)["impuesto_a_cargo"]["calculado"] == D("-3000.00")     # max(0, −500) − 3,000
+
+
 def test_iva_retenido_a_terceros_se_compara_contra_lo_que_se_debe_enterar():
     calc = {**IVA_CALC, "retenciones_a_terceros": D("320.00")}
     r = d.comparar("iva", [{"retenciones_a_terceros": D("200")}], calc)

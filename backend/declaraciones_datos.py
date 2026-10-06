@@ -102,13 +102,15 @@ def eliminar_ultima(empresa_id: str, periodo: str, impuesto: str, usuario_id: st
         with conn.cursor() as cur:
             cur.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (f"declaracion:{empresa_id}:{periodo}:{impuesto}",))
             cur.execute(
-                """DELETE FROM declaraciones WHERE id = (
+                f"""DELETE FROM declaraciones WHERE id = (
                        SELECT id FROM declaraciones WHERE empresa_id = %s AND periodo = %s AND impuesto = %s
-                       ORDER BY secuencia DESC LIMIT 1) RETURNING secuencia, tipo""",
+                       ORDER BY secuencia DESC LIMIT 1) RETURNING secuencia, tipo, {", ".join(CAMPOS)}""",
                 (empresa_id, periodo, impuesto))
             fila = cur.fetchone()
             if fila is None:
                 return False
+            # la auditoría conserva lo que se borró: importes y datos de la presentación
             _auditar(cur, usuario_id, "declaracion_eliminada", empresa_id,
-                     {"periodo": periodo, "impuesto": impuesto, "secuencia": fila[0], "tipo": fila[1]})
+                     {"periodo": periodo, "impuesto": impuesto, "secuencia": fila[0], "tipo": fila[1],
+                      **dict(zip(CAMPOS, fila[2:]))})
             return True
