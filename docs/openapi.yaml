@@ -3543,6 +3543,23 @@ paths:
         '401':
           $ref: '#/components/responses/UnauthorizedError'
 
+  /api/v1/suscripcion/historial:
+    get:
+      operationId: miHistorialSuscripcion
+      tags: [Suscripción]
+      summary: Mis asignaciones de plan, de la más reciente a la más antigua (M7.2)
+      description: Sin las notas internas ni quién asignó.
+      responses:
+        '200':
+          description: Historial (hasta 50)
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/AsignacionPlan' }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
   /api/v1/suscripcion/planes:
     get:
       operationId: planesActivos
@@ -3624,6 +3641,34 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ConfiguracionValidacionesCfdi' }
+
+  /api/v1/suscripcion/admin/cuentas/{usuario_id}/historial:
+    get:
+      operationId: historialSuscripcionCuenta
+      tags: [Suscripción]
+      summary: Historial de asignaciones de una cuenta, con notas y quién asignó (solo admin de la plataforma)
+      parameters:
+        - { name: usuario_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Historial (hasta 50)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  allOf:
+                    - $ref: '#/components/schemas/AsignacionPlan'
+                    - type: object
+                      properties:
+                        notas: { type: string, nullable: true }
+                        asignada_por: { type: string, nullable: true, description: Correo de quien asignó }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
 
   /api/v1/suscripcion/admin/cuentas/{usuario_id}:
     put:
@@ -5080,6 +5125,15 @@ components:
         rol: { type: string, enum: [administrador, contador] }
         cuenta_creada: { type: string, format: date-time, nullable: true }
         aceptada: { type: string, format: date-time, nullable: true }
+
+    AsignacionPlan:
+      type: object
+      properties:
+        fecha: { type: string, format: date-time }
+        plan_clave: { type: string }
+        plan_nombre: { type: string }
+        estado: { type: string, enum: [activa, suspendida, cancelada] }
+        vigente_hasta: { type: string, format: date, nullable: true }
 
     Plan:
       type: object

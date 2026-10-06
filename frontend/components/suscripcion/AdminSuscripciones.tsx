@@ -6,8 +6,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ErrorState } from "@/components/shared/ErrorState";
-import { useAsignarPlan, useCuentas, useEditarPlan, usePlanes } from "@/hooks/useSuscripcion";
+import { useAsignarPlan, useCuentas, useEditarPlan, useHistorialCuenta, usePlanes } from "@/hooks/useSuscripcion";
 import { ApiError } from "@/lib/api-client";
+import { HistorialPlan } from "./MiSuscripcion";
 import type { CuentaSuscripcion, EstadoSuscripcion, Plan } from "./tipos";
 
 const CAMPO = "h-9 rounded-md border border-input bg-background px-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring";
@@ -19,6 +20,8 @@ function FilaCuenta({ cuenta, planes, onError }: { cuenta: CuentaSuscripcion; pl
   const [estado, setEstado] = useState<EstadoSuscripcion>(cuenta.estado ?? "activa");
   const [hasta, setHasta] = useState(cuenta.vigente_hasta ?? "");
   const [notas, setNotas] = useState(cuenta.notas ?? "");
+  const [verHistorial, setVerHistorial] = useState(false);
+  const historial = useHistorialCuenta(cuenta.usuario_id, verHistorial);
 
   async function guardar() {
     onError(null);
@@ -33,6 +36,7 @@ function FilaCuenta({ cuenta, planes, onError }: { cuenta: CuentaSuscripcion; pl
   }
 
   return (
+    <>
     <tr className="align-top">
       <td className="px-3 py-2">
         <span className="block">{cuenta.email}</span>
@@ -68,8 +72,26 @@ function FilaCuenta({ cuenta, planes, onError }: { cuenta: CuentaSuscripcion; pl
                 aria-label={`Guardar plan de ${cuenta.email}`} onClick={guardar}>
           Guardar
         </Button>
+        <Button type="button" size="sm" variant="ghost" aria-expanded={verHistorial}
+                aria-label={`Historial de ${cuenta.email}`} onClick={() => setVerHistorial(!verHistorial)}>
+          Historial
+        </Button>
       </td>
     </tr>
+    {verHistorial && (
+      <tr>
+        <td colSpan={6} className="px-3 pb-3">
+          {historial.isError ? (
+            <p role="alert" className="text-sm text-destructive">No se pudo consultar el historial.</p>
+          ) : historial.data ? (
+            <HistorialPlan filas={historial.data} conNotas />
+          ) : (
+            <p className="text-sm text-muted-foreground">Consultando historial…</p>
+          )}
+        </td>
+      </tr>
+    )}
+    </>
   );
 }
 

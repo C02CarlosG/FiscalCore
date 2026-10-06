@@ -263,6 +263,9 @@ def init_db() -> None:
         # 064 es idempotente — CHECK de objeto en validaciones_cfdi_config para bases donde la tabla ya existía (V1)
         _run_sql_file("064_validaciones_config_check.sql")
 
+        # 065 es idempotente — historial de asignaciones de plan por cuenta (M7.2, carril D)
+        _run_sql_file("065_suscripciones_historial.sql")
+
         # Seed inicial: usuario admin si la base aún no tiene usuarios
         _seed_admin()
 
