@@ -3238,7 +3238,9 @@ paths:
       summary: Lo declarado contra lo calculado de IVA e ISR del periodo
       description: |
         Por impuesto: `estado` (`sin_declaracion`, `cuadra`, `con_diferencias`, `sin_captura`), los renglones con
-        declarado, calculado y diferencia (hasta $1.00 es `cuadra`: las declaraciones van en pesos) y `pendiente_de_pago`.
+        declarado, calculado (a peso) y diferencia (hasta $1.00 es `cuadra`: las declaraciones van en pesos) y `pendiente_de_pago`
+        (a cargo de la vigente menos lo pagado de toda la cadena). `sin_comparar` = no hay nada capturado contra nada calculado.
+        En IVA el saldo a favor aplicado resta de lo calculado a cargo; en ISR son cifras del mes.
         El pago provisional del ISR no se calcula (F7.3): se muestra solo lo declarado (`sin_calculo`).
       parameters:
         - $ref: '#/components/parameters/EmpresaId'
@@ -3262,7 +3264,10 @@ paths:
       operationId: guardarDeclaracion
       tags: [Declaraciones]
       summary: Captura o reemplaza la declaracion del periodo e impuesto
-      description: Todos los importes son opcionales; solo se compara lo capturado. Queda en la auditoria (`declaracion_guardada`).
+      description: |
+        Todos los importes son opcionales; solo se compara lo capturado. `tipo: normal` captura (o corrige mientras no haya
+        complementarias) la normal; `tipo: complementaria` agrega una nueva al historial y la vigente es la ultima. 409 si
+        llega una normal con complementarias o una complementaria sin normal. Queda en la auditoria (`declaracion_guardada`).
       parameters:
         - $ref: '#/components/parameters/EmpresaId'
         - { name: periodo, in: path, required: true, schema: { type: string, pattern: '^20[0-9]{2}-(0[1-9]|1[0-2])$' } }
@@ -3277,12 +3282,14 @@ paths:
                 tipo: { type: string, enum: [normal, complementaria], default: normal }
                 fecha_presentacion: { type: string, format: date, nullable: true }
                 numero_operacion: { type: string, maxLength: 40, nullable: true }
-                ingresos: { type: number, nullable: true }
-                deducciones: { type: number, nullable: true }
-                impuesto_trasladado: { type: number, nullable: true }
-                impuesto_acreditable: { type: number, nullable: true }
-                retenciones: { type: number, nullable: true }
-                impuesto_a_cargo: { type: number, nullable: true, description: "A cargo (+) o a favor (-)" }
+                ingresos: { type: number, minimum: 0, nullable: true }
+                deducciones: { type: number, minimum: 0, nullable: true }
+                impuesto_trasladado: { type: number, minimum: 0, nullable: true }
+                impuesto_acreditable: { type: number, minimum: 0, nullable: true }
+                retenciones: { type: number, minimum: 0, nullable: true }
+                retenciones_a_terceros: { type: number, minimum: 0, nullable: true, description: "Impuesto retenido a terceros por enterar" }
+                saldo_a_favor_aplicado: { type: number, minimum: 0, nullable: true, description: "Solo IVA: saldo a favor de periodos anteriores aplicado" }
+                impuesto_a_cargo: { type: number, nullable: true, description: "A cargo (+) o a favor (-); el unico importe con signo" }
                 monto_pagado: { type: number, minimum: 0, nullable: true }
                 notas: { type: string, maxLength: 500 }
       responses:
@@ -3295,13 +3302,15 @@ paths:
           $ref: '#/components/responses/UnauthorizedError'
         '403':
           $ref: '#/components/responses/ForbiddenError'
+        '409':
+          description: La captura contradice el historial (normal sobre una complementaria, o complementaria sin normal)
         '422':
           description: Periodo, impuesto o importes invalidos
     delete:
       operationId: eliminarDeclaracion
       tags: [Declaraciones]
-      summary: Elimina la declaracion capturada
-      description: Queda en la auditoria (`declaracion_eliminada`).
+      summary: Elimina la declaracion vigente (la ultima del historial)
+      description: La anterior, si existe, vuelve a ser la vigente. Queda en la auditoria (`declaracion_eliminada`).
       parameters:
         - $ref: '#/components/parameters/EmpresaId'
         - { name: periodo, in: path, required: true, schema: { type: string, pattern: '^20[0-9]{2}-(0[1-9]|1[0-2])$' } }
@@ -4238,6 +4247,8 @@ components:
       properties:
         periodo: { type: string }
         impuesto: { type: string, enum: [iva, isr] }
+        secuencia: { type: integer, description: "1 = normal; 2, 3... = complementarias" }
+        declaraciones: { type: integer, description: "Solo en el listado del ejercicio: cuantas lleva el historial" }
         tipo: { type: string, enum: [normal, complementaria] }
         fecha_presentacion: { type: string, format: date, nullable: true }
         numero_operacion: { type: string, nullable: true }
@@ -4246,6 +4257,8 @@ components:
         impuesto_trasladado: { type: number, nullable: true }
         impuesto_acreditable: { type: number, nullable: true }
         retenciones: { type: number, nullable: true }
+        retenciones_a_terceros: { type: number, nullable: true }
+        saldo_a_favor_aplicado: { type: number, nullable: true }
         impuesto_a_cargo: { type: number, nullable: true }
         monto_pagado: { type: number, nullable: true }
         notas: { type: string }

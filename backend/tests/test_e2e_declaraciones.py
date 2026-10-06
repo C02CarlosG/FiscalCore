@@ -48,12 +48,15 @@ def _url(ent, ruta=""):
     return f"/api/v1/empresas/{ent[3]}/declaraciones{ruta}"
 
 
-def test_captura_compara_reemplaza_y_borra_con_auditoria(entorno):
+def test_captura_compara_complementarias_borra_y_audita(entorno):
     db, client, headers = entorno[0], entorno[1], entorno[2]
 
     sin = client.get(_url(entorno, "/2026-09"), headers=headers).json()
     assert sin["iva"]["estado"] == "sin_declaracion" and sin["isr"]["estado"] == "sin_declaracion"
     assert {r["clave"]: r for r in sin["iva"]["renglones"]}["impuesto_trasladado"]["calculado"] == 160.0
+
+    # complementaria sin normal: 409
+    assert client.put(_url(entorno, "/2026-09/iva"), headers=headers, json={"tipo": "complementaria"}).status_code == 409
 
     r = client.put(_url(entorno, "/2026-09/iva"), headers=headers,
                    json={"impuesto_trasladado": "160", "impuesto_a_cargo": "150", "monto_pagado": "100"})
@@ -64,19 +67,34 @@ def test_captura_compara_reemplaza_y_borra_con_auditoria(entorno):
     assert renglones["impuesto_a_cargo"]["estado"] == "diferencia" and renglones["impuesto_a_cargo"]["diferencia"] == -10.0
     assert d["estado"] == "con_diferencias" and d["pendiente_de_pago"] == 50.0
 
-    # una complementaria reemplaza a la anterior
-    r = client.put(_url(entorno, "/2026-09/iva"), headers=headers,
-                   json={"tipo": "complementaria", "impuesto_trasladado": "160", "impuesto_a_cargo": "160"})
-    assert r.status_code == 200 and r.json()["tipo"] == "complementaria"
-    assert client.get(_url(entorno, "/2026-09"), headers=headers).json()["iva"]["estado"] == "cuadra"
-    assert [i["impuesto"] for i in client.get(_url(entorno), headers=headers, params={"ejercicio": 2026}).json()["items"]] == ["iva"]
+    # la normal se puede corregir mientras no haya complementarias
+    assert client.put(_url(entorno, "/2026-09/iva"), headers=headers,
+                      json={"impuesto_trasladado": "160", "impuesto_a_cargo": "150", "monto_pagado": "100"}).status_code == 200
 
+    # una complementaria se agrega, no pisa: lo pagado suma toda la cadena
+    r = client.put(_url(entorno, "/2026-09/iva"), headers=headers,
+                   json={"tipo": "complementaria", "impuesto_trasladado": "160", "impuesto_a_cargo": "160", "monto_pagado": "60"})
+    assert r.status_code == 200 and r.json()["tipo"] == "complementaria" and r.json()["secuencia"] == 2
+    d = client.get(_url(entorno, "/2026-09"), headers=headers).json()["iva"]
+    assert d["estado"] == "cuadra" and d["declaraciones"] == 2 and d["pendiente_de_pago"] == 0.0
+
+    # ya no se acepta otra normal
+    assert client.put(_url(entorno, "/2026-09/iva"), headers=headers, json={}).status_code == 409
+    items = client.get(_url(entorno), headers=headers, params={"ejercicio": 2026}).json()["items"]
+    assert [(i["impuesto"], i["secuencia"], i["declaraciones"]) for i in items] == [("iva", 2, 2)]
+
+    # borrar quita la vigente y la normal vuelve a serlo
+    assert client.delete(_url(entorno, "/2026-09/iva"), headers=headers).status_code == 204
+    assert client.get(_url(entorno, "/2026-09"), headers=headers).json()["iva"]["declaracion"]["secuencia"] == 1
     assert client.delete(_url(entorno, "/2026-09/iva"), headers=headers).status_code == 204
     assert client.delete(_url(entorno, "/2026-09/iva"), headers=headers).status_code == 404
 
-    acciones = [f["accion"] for f in db.query_all(
-        "SELECT accion FROM auditoria WHERE empresa_id = %s AND accion LIKE 'declaracion_%%' ORDER BY creado_en", (entorno[3],))]
-    assert acciones == ["declaracion_guardada", "declaracion_guardada", "declaracion_eliminada"]
+    filas = db.query_all(
+        "SELECT accion, metadata FROM auditoria WHERE empresa_id = %s AND accion LIKE 'declaracion_%%' ORDER BY creado_en",
+        (entorno[3],))
+    assert [f["accion"] for f in filas] == ["declaracion_guardada"] * 3 + ["declaracion_eliminada"] * 2
+    ultima = filas[2]["metadata"]
+    assert ultima["secuencia"] == 2 and ultima["monto_pagado"] == "60" and ultima["saldo_a_favor_aplicado"] is None
 
 
 def test_otra_empresa_recibe_403(entorno):
