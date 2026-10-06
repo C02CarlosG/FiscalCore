@@ -23,6 +23,13 @@ vi.mock("@/hooks/useCfdis", () => ({
   useCfdiResumen: vi.fn(),
 }));
 
+vi.mock("@/hooks/useNotasCfdi", () => ({
+  useEtiquetas: () => ({ data: [] }),
+  useEtiquetarLote: () => ({ mutate: vi.fn(), isPending: false, isError: false, isSuccess: false }),
+  useCrearEtiqueta: () => ({ mutate: vi.fn(), isPending: false, isError: false }),
+}));
+vi.mock("@/components/cfdi/CfdiNotas", () => ({ CfdiNotas: () => null }));
+
 const preferencias: Record<string, unknown> = {};
 const guardarMutate = vi.fn();
 const restablecerMutate = vi.fn();

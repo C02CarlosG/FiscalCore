@@ -20,6 +20,7 @@ export type CfdiEstadoUrl = {
   metodo: MetodoPago;
   pago: PagoPpd;
   q: string;
+  etiqueta: string;
   filtros: string;
   orden: string;
   dir: "asc" | "desc";
@@ -33,6 +34,7 @@ export const POR_DEFECTO: Omit<CfdiEstadoUrl, "periodo"> = {
   metodo: "todos",
   pago: "todos",
   q: "",
+  etiqueta: "",
   filtros: "",
   orden: "fecha_emision",
   dir: "asc",
@@ -48,6 +50,7 @@ const NOMBRE: Record<keyof CfdiEstadoUrl, string> = {
   metodo: "metodo",
   pago: "pago",
   q: "q",
+  etiqueta: "etiqueta",
   filtros: "filtros",
   orden: "orden",
   dir: "dir",
@@ -56,6 +59,7 @@ const NOMBRE: Record<keyof CfdiEstadoUrl, string> = {
 };
 
 const MAX_PAGINA = 100_000;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const CLAVE_RE = /^[a-z][a-z0-9_]*$/;
 
 function unoDe<T extends string>(opciones: readonly T[], valor: string | null, defecto: T): T {
@@ -77,6 +81,7 @@ export function leerEstado(params: URLSearchParams, periodo: string): CfdiEstado
     metodo: unoDe(METODOS, params.get(NOMBRE.metodo), POR_DEFECTO.metodo),
     pago: unoDe(PAGOS, params.get(NOMBRE.pago), POR_DEFECTO.pago),
     q: params.get(NOMBRE.q) ?? POR_DEFECTO.q,
+    etiqueta: UUID_RE.test(params.get(NOMBRE.etiqueta) ?? "") ? params.get(NOMBRE.etiqueta)! : POR_DEFECTO.etiqueta,
     filtros: params.get(NOMBRE.filtros) ?? POR_DEFECTO.filtros,
     // El catálogo del servidor decide qué columnas se pueden ordenar; aquí solo se
     // descarta lo que ni siquiera tiene forma de clave de columna.
@@ -133,6 +138,7 @@ export function consultaApi(estado: CfdiEstadoUrl, direccion: "emitidos" | "reci
     por_pagina: String(estado.porPagina),
   });
   if (estado.q) consulta.set("q", estado.q);
+  if (estado.etiqueta) consulta.set("etiqueta", estado.etiqueta);
   if (estado.filtros) consulta.set("filtros", estado.filtros);
   return consulta;
 }

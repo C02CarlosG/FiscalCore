@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import { EditorColumnas } from "@/components/cfdi/EditorColumnas";
 import { FiltroAvanzado } from "@/components/cfdi/FiltroAvanzado";
 import { CfdiTabla } from "@/components/cfdi/CfdiTabla";
+import { CfdiLoteBarra } from "@/components/cfdi/CfdiLoteBarra";
 import { CfdiVisor } from "@/components/cfdi/CfdiVisor";
 import { CfdiTabs } from "@/components/cfdi/CfdiTabs";
 import { CfdiToolbar } from "@/components/cfdi/CfdiToolbar";
@@ -49,6 +50,8 @@ export function CfdiPantalla({ direccion }: { direccion: "emitidos" | "recibidos
   const { params, actualizar } = useUrlParams();
   const estado = leerEstado(params, periodo);
   const [uuidVisor, setUuidVisor] = useState<string | null>(null);
+  // CFDI marcados para una acción en lote; se conserva al paginar y se vacía al cambiar la consulta.
+  const [seleccion, setSeleccion] = useState<ReadonlySet<string>>(new Set());
 
   const periodos = usePeriodos(empresaId);
   const columnas = useCfdiColumnas(empresaId, direccion, estado.tipo);
@@ -58,6 +61,8 @@ export function CfdiPantalla({ direccion }: { direccion: "emitidos" | "recibidos
   // El periodo se recuerda por empresa; el resto de los cambios solo van a la URL.
   const cambiar = useCallback(
     (parche: Partial<CfdiEstadoUrl>) => {
+      const cambiaLaConsulta = Object.keys(parche).some((k) => !["pagina", "orden", "dir", "porPagina"].includes(k));
+      if (cambiaLaConsulta) setSeleccion(new Set());
       if (parche.periodo !== undefined) cambiarPeriodo(parche.periodo);
       else actualizar(parche);
     },
@@ -94,7 +99,7 @@ export function CfdiPantalla({ direccion }: { direccion: "emitidos" | "recibidos
     <main className="space-y-6">
       <PageHeader eyebrow="Administración CFDI" title={texto.titulo} description={texto.descripcion} />
 
-      <CfdiToolbar estado={estado} periodosConDatos={periodos.data?.periodos ?? []} onCambio={cambiar} />
+      <CfdiToolbar empresaId={empresaId} estado={estado} periodosConDatos={periodos.data?.periodos ?? []} onCambio={cambiar} />
 
       <div className="flex flex-wrap items-center justify-end gap-2" role="toolbar" aria-label="Acciones del listado">
         <Button type="button" variant="outline" size="sm" disabled={!catalogo} onClick={() => setDialogo("filtro")}>
@@ -177,7 +182,11 @@ export function CfdiPantalla({ direccion }: { direccion: "emitidos" | "recibidos
         />
       )}
 
+      <CfdiLoteBarra empresaId={empresaId} uuids={Array.from(seleccion)} onLimpiar={() => setSeleccion(new Set())} />
+
       <CfdiTabla
+        seleccion={seleccion}
+        onSeleccion={setSeleccion}
         empresaId={empresaId}
         columnas={columnas.data?.encabezado}
         preferencia={preferenciaTabla.data}
@@ -197,6 +206,7 @@ export function CfdiPantalla({ direccion }: { direccion: "emitidos" | "recibidos
         onLimpiar={() =>
           cambiar({
             q: POR_DEFECTO.q,
+            etiqueta: POR_DEFECTO.etiqueta,
             filtros: POR_DEFECTO.filtros,
             estado: POR_DEFECTO.estado,
             metodo: POR_DEFECTO.metodo,

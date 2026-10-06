@@ -247,7 +247,41 @@ export interface CfdiColumnasResponse {
   concepto: CfdiColumna[];
 }
 
-export type CfdiValor = string | number | boolean | null | string[];
+export interface EtiquetaCfdi {
+  id: string;
+  nombre: string;
+  color: string;
+}
+
+export interface Etiqueta extends EtiquetaCfdi {
+  cfdis: number;
+}
+
+export interface ComentarioCfdi {
+  id: string;
+  texto: string;
+  creado: string;
+  autor: string | null;
+  puede_borrar: boolean;
+}
+
+export interface EvidenciaCfdi {
+  id: string;
+  nombre: string;
+  tipo: string;
+  tamano: number;
+  creado: string;
+  autor: string | null;
+  puede_borrar: boolean;
+}
+
+export interface EtiquetadoLoteResponse {
+  cfdis: number;
+  agregados: number;
+  quitados: number;
+}
+
+export type CfdiValor = string | number | boolean | null | string[] | EtiquetaCfdi[];
 
 /** Una fila del listado: trae todas las columnas del catálogo, no solo las visibles. */
 export type CfdiFila = Record<string, CfdiValor>;

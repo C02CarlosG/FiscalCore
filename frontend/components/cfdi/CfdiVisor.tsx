@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { CfdiNotas } from "@/components/cfdi/CfdiNotas";
 import { ETIQUETA_TIPO } from "@/components/cfdi/CfdiTabs";
 import { ErrorState } from "@/components/shared/ErrorState";
 import { StatusBadge } from "@/components/shared/StatusBadge";
@@ -233,6 +234,7 @@ export function CfdiVisor({
         ) : (
           <>
             <Contenido detalle={detalle} />
+            {uuid && <CfdiNotas empresaId={empresaId} uuid={uuid} />}
             {errorXml && (
               <p role="alert" className="text-sm text-destructive">
                 No se pudo descargar el XML.

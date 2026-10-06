@@ -810,3 +810,34 @@ test("la navegación móvil abre el menú y conserva sus rutas", async ({ page }
   await page.getByRole("link", { name: "Ingesta" }).click();
   await expect(page).toHaveURL(new RegExp(`/empresas/${empresaId}/ingesta$`));
 });
+test("etiquetar en lote manda los CFDI marcados y el visor muestra etiquetas, comentarios y evidencias", async ({ page }) => {
+  const etiqueta = { id: "11111111-1111-4111-8111-111111111111", nombre: "Revisar", color: "#ef4444", cfdis: 0 };
+  let lote: unknown = null;
+  const json = (body: unknown, status = 200) => ({ status, contentType: "application/json", body: JSON.stringify(body) });
+  await page.route("**/api/v1/empresas/*/etiquetas", (route) => route.fulfill(json({ items: [etiqueta] })));
+  await page.route("**/api/v1/empresas/*/cfdis/etiquetas/lote", async (route) => {
+    lote = route.request().postDataJSON();
+    await route.fulfill(json({ cfdis: 1, agregados: 1, quitados: 0 }));
+  });
+  await page.route("**/api/v1/empresas/*/cfdis/*/etiquetas", (route) => route.fulfill(json({ items: [] })));
+  await page.route("**/api/v1/empresas/*/cfdis/*/comentarios", (route) =>
+    route.fulfill(json({ items: [{ id: "c1", texto: "Falta el comprobante", creado: "2026-09-05T10:00:00", autor: "ana@x.mx", puede_borrar: true }] })));
+  await page.route("**/api/v1/empresas/*/cfdis/*/evidencias", (route) =>
+    route.fulfill(json({ items: [{ id: "v1", nombre: "factura.pdf", tipo: "application/pdf", tamano: 2048, creado: "2026-09-05T10:00:00", autor: "ana@x.mx", puede_borrar: true }] })));
+
+  await page.goto(`/empresas/${empresaId}/cfdi/emitidos?periodo=2026-09`);
+  await page.getByRole("checkbox", { name: /Seleccionar CFDI cfdi-demo-001/ }).check();
+  const barra = page.getByRole("region", { name: "Acciones en lote" });
+  await expect(barra).toContainText("1 CFDI seleccionado");
+
+  await barra.getByRole("combobox", { name: "Etiqueta del lote" }).click();
+  await page.getByRole("option", { name: "Revisar" }).click();
+  await barra.getByRole("button", { name: "Agregar etiqueta" }).click();
+  await expect.poll(() => lote).toEqual({ uuids: ["cfdi-demo-001"], agregar: [etiqueta.id] });
+
+  await page.getByRole("button", { name: "Abrir visor del CFDI" }).first().click();
+  const visor = page.getByRole("dialog");
+  await expect(visor.getByRole("button", { name: "Agregar etiqueta Revisar" })).toBeVisible();
+  await expect(visor.getByText("Falta el comprobante")).toBeVisible();
+  await expect(visor.getByRole("button", { name: "Descargar factura.pdf" })).toBeVisible();
+});

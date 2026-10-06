@@ -7,6 +7,7 @@ import { apiDescargar } from "@/lib/api-client";
 import { guardarArchivo } from "@/lib/descarga";
 import type { CfdiDetalle } from "@/types/api";
 
+vi.mock("@/components/cfdi/CfdiNotas", () => ({ CfdiNotas: () => <div data-testid="notas" /> }));
 vi.mock("@/hooks/useCfdis", () => ({ useCfdiDetalle: vi.fn() }));
 vi.mock("@/lib/api-client", async () => {
   const actual = await vi.importActual<typeof import("@/lib/api-client")>("@/lib/api-client");
