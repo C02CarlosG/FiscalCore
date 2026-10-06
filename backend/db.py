@@ -25,7 +25,7 @@ DATABASE_URL = os.getenv("DATABASE_URL", _LOCAL_DEFAULT)
 # ─── Seed admin inicial ───────────────────────────────────────
 # Credenciales del admin que se siembra cuando la base no tiene usuarios.
 # Configurables por entorno; el default solo es apto para desarrollo.
-_SEED_ADMIN_EMAIL = os.getenv("SEED_ADMIN_EMAIL", "admin@fiscalcore.mx")
+_SEED_ADMIN_EMAIL = os.getenv("SEED_ADMIN_EMAIL", "admin@fiscalcore.mx").strip().lower()
 _SEED_ADMIN_DEFAULT_PASSWORD = "Admin2024!"
 _SEED_ADMIN_PASSWORD = os.getenv("SEED_ADMIN_PASSWORD", _SEED_ADMIN_DEFAULT_PASSWORD)
 

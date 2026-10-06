@@ -12,6 +12,8 @@ Autorizado por Carlos tras F2.4. Alcance: correos únicos sin distinguir mayúsc
 4. **Proxy** (`backend/proxy.py`): `TRUSTED_PROXY_IPS` (IPs separadas por comas) activa `ProxyHeadersMiddleware`; sin ella no se confía en `X-Forwarded-*`. uvicorn 0.29 no admite CIDR, solo IPs exactas. `*` solo para pruebas (la IP se puede falsear). Mientras no se configure, los límites de tasa siguen contando por IP del proxy.
 5. **Rol**: `POST /mis-empresas` vincula al creador con `usuario_empresas.rol = 'administrador'` (antes quedaba el default `contador`).
 
+6. **Endurecimiento del login** (revisión de seguridad): bcrypt contra un hash ficticio cuando el correo no existe o la cuenta está inactiva (sin enumeración por tiempo); el correo ya no se registra en INFO; los 500 no devuelven `str(e)`; `SEED_ADMIN_EMAIL` en minúsculas; `--no-proxy-headers` en `Procfile` y `dev.sh` para que solo `TRUSTED_PROXY_IPS` decida la confianza.
+
 ## Pendiente de operación
 
 - Variable `TRUSTED_PROXY_IPS` en el hosting (`.env.example` no se pudo editar desde esta sesión).

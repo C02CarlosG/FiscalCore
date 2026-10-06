@@ -160,3 +160,32 @@ def test_me_usuario_no_encontrado_da_404(monkeypatch):
     r = client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"})
 
     assert r.status_code == 404
+
+
+def test_login_usuario_inexistente_igual_ejecuta_bcrypt_contra_hash_ficticio(monkeypatch):
+    """Sin esto el 401 de un correo inexistente sería 100-300 ms más rápido y permitiría enumerar usuarios."""
+    from backend.routers import auth as auth_router
+
+    llamadas = []
+
+    def _verify(plain, hashed):
+        llamadas.append(hashed)
+        return False
+
+    monkeypatch.setattr(db, "query_one", lambda *a, **k: None)
+    monkeypatch.setattr(auth_router, "verify_password", _verify)
+
+    r = client.post("/api/v1/auth/login", json={"email": "no-existe@test.local", "password": "x"})
+
+    assert r.status_code == 401
+    assert llamadas == [auth_router._HASH_FICTICIO]
+
+
+def test_login_error_inesperado_no_filtra_el_detalle(monkeypatch):
+    def _truena(*a, **k):
+        raise RuntimeError("password=secreto host=db-interna")
+
+    monkeypatch.setattr(db, "query_one", _truena)
+    r = client.post("/api/v1/auth/login", json={"email": "a@test.local", "password": "x"})
+    assert r.status_code == 500
+    assert "secreto" not in r.text and "db-interna" not in r.text

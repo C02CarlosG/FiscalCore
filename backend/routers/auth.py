@@ -17,6 +17,8 @@ _log = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Auth"])
 
+_HASH_FICTICIO = hash_password("contrasena-ficticia-para-igualar-tiempos")
+
 
 @router.post("/api/v1/auth/register", status_code=status.HTTP_201_CREATED)
 @limiter.limit("10/hour")  # límite conservador contra registro masivo automatizado
@@ -55,12 +57,14 @@ async def registrar(request: Request, data: RegisterRequest):
 async def login(request: Request, data: LoginRequest):
     """Autentica un contador y retorna JWT + lista de empresas que administra."""
     try:
-        _log.info(f"Login attempt for {data.email}")
         usuario = db.query_one(
             "SELECT * FROM usuarios WHERE email = %s AND activo = TRUE",
             (data.email,),
         )
-        if not usuario or not verify_password(data.password, usuario["password_hash"]):
+        # Siempre se ejecuta bcrypt (contra un hash ficticio si no hay cuenta) para que
+        # el tiempo de respuesta no revele si el correo existe.
+        hash_a_verificar = usuario["password_hash"] if usuario else _HASH_FICTICIO
+        if not verify_password(data.password, hash_a_verificar) or not usuario:
             raise HTTPException(status_code=401, detail="Credenciales incorrectas")
 
         empresas = db.query_all(
@@ -89,7 +93,7 @@ async def login(request: Request, data: LoginRequest):
         raise
     except Exception as e:
         _log.error(f"Login error: {type(e).__name__}: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Error interno al iniciar sesión")
 
 
 @router.get("/api/v1/auth/me")
