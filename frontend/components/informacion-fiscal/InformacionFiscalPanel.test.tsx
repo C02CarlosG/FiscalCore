@@ -30,6 +30,7 @@ describe("InformacionFiscalPanel", () => {
     vi.mocked(apiFetch).mockImplementation(async (ruta: string) => {
       if (ruta === BASE) return { constancia: null, opinion: null };
       if (ruta === `${BASE}/documentos`) return [];
+      if (ruta === `${BASE}/regimen`) return { actual: null, constancia_id: null, detectados: [], sugerido: null };
       throw new Error(`llamada inesperada: ${ruta}`);
     });
     renderPanel();
@@ -37,6 +38,7 @@ describe("InformacionFiscalPanel", () => {
     expect(await screen.findByText("Opinión de cumplimiento")).toBeInTheDocument();
     expect(screen.getByText("Constancia de situación fiscal")).toBeInTheDocument();
     expect(screen.getByText("Historial")).toBeInTheDocument();
+    expect(await screen.findByText("Régimen fiscal")).toBeInTheDocument();
   });
 
   it("si la consulta falla ofrece reintentar", async () => {

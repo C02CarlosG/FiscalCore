@@ -49,6 +49,9 @@ class _Db:
             return {"id": DOC} if self.documento else None
         if "INSERT INTO auditoria" in sql:
             return None
+        if sql.lstrip().startswith("UPDATE empresas SET regimen_fiscal"):
+            # La empresa del fake no tiene régimen: la constancia lo guarda.
+            return {"id": EMPRESA}
         raise AssertionError(f"execute inesperado: {sql}")
 
     def instalar(self, monkeypatch):
@@ -181,6 +184,10 @@ def test_sube_constancia_valida(monkeypatch):
     assert contenido == pdf and tamano == len(pdf) and len(sha) == 64
     assert datos.adapted["cp_fiscal"] == "68000"
     assert any("INSERT INTO auditoria" in sql for sql, _ in base.ejecutado)
+    # La constancia sintética es de régimen 601: se guarda en la empresa (que no tenía).
+    assert r.json()["regimen_guardado"] == "601"
+    [regimen] = [p for sql, p in base.ejecutado if sql.lstrip().startswith("UPDATE empresas SET regimen_fiscal")]
+    assert regimen == ("601 - General de Ley Personas Morales", EMPRESA)
 
 
 def test_rechaza_tipo_de_ruta_desconocido(monkeypatch):
