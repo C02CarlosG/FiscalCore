@@ -36,6 +36,7 @@ from .routers import proveedores as proveedores_router
 from .routers import validaciones_cfdi
 from .routers import cuenta
 from .routers import suscripcion
+from .routers import reinicio
 
 logging.basicConfig(
     level=logging.INFO,
@@ -101,6 +102,7 @@ app.include_router(proveedores_router.router)
 app.include_router(validaciones_cfdi.router)
 app.include_router(cuenta.router)
 app.include_router(suscripcion.router)
+app.include_router(reinicio.router)
 
 
 @app.on_event("startup")
