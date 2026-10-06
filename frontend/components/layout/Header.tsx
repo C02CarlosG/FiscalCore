@@ -27,6 +27,7 @@ const LABELS: Record<string, string> = {
   "iva-flujo": "IVA base flujo",
   "isr-flujo": "ISR base flujo",
   diot: "DIOT por flujo",
+  declaraciones: "Declaraciones",
   sat: "Conexión SAT",
   "informacion-fiscal": "Información fiscal",
 };

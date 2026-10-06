@@ -420,6 +420,7 @@ pausa.
 | 2026-10-04 | Coordinación → B | Verificación de correo con enlace y recuperación de contraseña (requiere servicio de envío de correo) antes de abrir producción a clientes externos (D9) | Pendiente |
 | 2026-10-05 | D → B | U1 (m5): `registrar_evento` (`auditoria.py`) acepta un cursor opcional para escribir la auditoría en la misma transacción que el cambio; hoy abre su propia conexión y U1 audita justo después del commit | Pendiente |
 | 2026-10-06 | C → B | F7.2: agregué `"isr-flujo": "ISR base flujo"` al mapa del breadcrumb de `layout/Header.tsx` y el enlace "ISR base flujo" a `Sidebar.tsx` (solo líneas); falta `"isr-flujo"` en `SUB_RUTAS` de `layout/EmpresaSwitcher.tsx` para conservar la pantalla al cambiar de empresa | Pendiente (lo hace B) |
+| 2026-10-06 | C → B | M5.2: agregué `"declaraciones": "Declaraciones"` al breadcrumb de `layout/Header.tsx` y el enlace a `Sidebar.tsx` (solo líneas); falta `"declaraciones"` en `SUB_RUTAS` de `layout/EmpresaSwitcher.tsx` | Pendiente (lo hace B) |
 | 2026-10-04 | D → B | M7.1: en `POST /mis-empresas` (`empresas.py`), dentro de la transacción que crea la empresa y su vínculo, y antes de esos INSERT, llamar a `suscripcion_datos.verificar_alta_rfc(cur, current_user["user_id"])` con el cursor de esa transacción (toma un candado por cuenta hasta el commit) y responder 403 con el mensaje de `LimiteRfcAlcanzado`. Contrato completo en la spec de M7.1, "Contrato del límite". Mientras no esté, el límite de RFC no bloquea la creación de empresas | Pendiente |
 
 ## Riesgos
@@ -455,7 +456,7 @@ pausa.
 | U1, M7 | D | U1 (usuarios y perfil, PR #36) en revisión: invitaciones con doble confirmación (D9); depende del índice único sobre `lower(email)` del carril B. M7.1 (planes, límite de RFC, PR #40) integrada. M7.2 (D10: historial, pagos manuales, datos fiscales y avisos de vencimiento, PR #51) en revisión |
 | F3.6 | A | Pendiente (después de F3.5b) | — | — |
 | Punto de control de paridad | Coordinación | Pendiente: al terminar F5–F7 se recorre FiscalCore con Playwright contra las capturas y se cuadran las cifras de control | — | — |
-| M5 | C | M5.1 (API de captura y comparativo, migración 056) en revisión; M5.2 (pantalla) pendiente | `docs/superpowers/specs/2026-10-06-m5-comparativo-declarado-design.md` | un plan por entrega |
+| M5 | C | M5.1 (API y comparativo, migración 056) integrada en #52; M5.2 (pantalla Declaraciones) en revisión | `docs/superpowers/specs/2026-10-06-m5-comparativo-declarado-design.md` | un plan por entrega |
 | M2 | C | Pendiente | — | — |
 
 ### Lista de verificación de F0
