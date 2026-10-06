@@ -451,3 +451,34 @@ def test_dos_aprobaciones_simultaneas_de_la_misma_invitacion(entorno):
                         (empresa_id, existente))["n"] == 1
     assert db.query_one("SELECT COUNT(*) AS n FROM auditoria WHERE accion = 'cuenta.aprobar_invitacion' "
                         "AND entidad_id = %s", (inv_id,))["n"] == 1
+
+
+def test_no_se_aprueba_si_la_cuenta_ya_no_tiene_el_correo_invitado(entorno):
+    db, client, headers, empresa_id = entorno
+    assert _invitar(client, headers, empresa_id, EXISTENTE).status_code == 201
+    h = _headers(client, EXISTENTE, "Clave-Existente-1")
+    inv_id = _aceptar(client, h)
+    # Después de aceptar, la cuenta cambia su correo por otro.
+    db.execute("UPDATE usuarios SET email = %s WHERE email = %s", (NUEVO, EXISTENTE))
+    try:
+        r = client.post(f"{_base(empresa_id)}/invitaciones/{inv_id}/aprobar", headers=headers)
+        assert r.status_code == 409, r.text
+        assert client.get(f"/api/v1/empresas/{empresa_id}", headers=h).status_code == 403
+        [pendiente] = client.get(f"{_base(empresa_id)}/usuarios", headers=headers).json()["por_aprobar"]
+        assert (pendiente["email"], pendiente["email_invitado"]) == (NUEVO, EXISTENTE)
+    finally:
+        db.execute("UPDATE usuarios SET email = %s WHERE email = %s", (EXISTENTE, NUEVO))
+
+
+def test_correo_con_espacios_se_compara_como_btrim(entorno):
+    """El correo de la cuenta guardado con espacios alrededor sigue identificando a la
+    invitada (Python quita solo espacios, como btrim en SQL)."""
+    db, client, headers, empresa_id = entorno
+    assert _invitar(client, headers, empresa_id, EXISTENTE).status_code == 201
+    h = _headers(client, EXISTENTE, "Clave-Existente-1")
+    inv_id = _aceptar(client, h)
+    db.execute("UPDATE usuarios SET email = %s WHERE email = %s", (f" {EXISTENTE} ", EXISTENTE))
+    try:
+        assert client.post(f"{_base(empresa_id)}/invitaciones/{inv_id}/aprobar", headers=headers).status_code == 204
+    finally:
+        db.execute("UPDATE usuarios SET email = %s WHERE email = %s", (EXISTENTE, f" {EXISTENTE} "))

@@ -21,7 +21,7 @@ const planes: Plan[] = [
 
 const mia = (cambios: Partial<MiSuscripcionDatos> = {}): MiSuscripcionDatos => ({
   plan: planes[1], estado: "activa", vigente_hasta: "2026-12-31", motivo: null, uso_rfc: 2,
-  puede_agregar_rfc: true, es_admin_plataforma: false, ...cambios,
+  puede_agregar_rfc: true, es_admin_plataforma: false, dias_para_vencer: null, ...cambios,
 });
 
 function renderCon(ui: React.ReactElement, datos: MiSuscripcionDatos = mia()) {
@@ -32,13 +32,33 @@ function renderCon(ui: React.ReactElement, datos: MiSuscripcionDatos = mia()) {
       return [{ fecha: "2026-10-01T12:00:00+00:00", plan_clave: "basico", plan_nombre: "Básico", estado: "activa",
                 vigente_hasta: null }];
     }
+    if (ruta === "/api/v1/suscripcion/datos-fiscales") {
+      return { rfc: "ACE010101AA1", razon_social: "ACME SA DE CV", regimen_fiscal: "601", codigo_postal: "68000",
+               uso_cfdi: "G03", correo: null };
+    }
+    if (ruta === "/api/v1/suscripcion/pagos") {
+      return [{ id: "p1", fecha: "2026-10-01", monto: "1499.00", referencia: "SPEI 123", folio_cfdi: "A-15",
+                uuid_cfdi: null, meses: 1, vigente_hasta_nueva: "2026-11-01", estado: "activo" }];
+    }
+    if (ruta === "/api/v1/suscripcion/admin/vencimientos") {
+      return [{ usuario_id: "u7", email: "luis@despacho.mx", nombre: "Luis", plan_clave: "basico", plan_nombre: "Básico",
+                vigente_hasta: "2026-10-01", dias_para_vencer: -5 }];
+    }
+    if (ruta === "/api/v1/suscripcion/admin/cuentas/u9/datos-fiscales" && !opciones?.method) return null;
+    if (ruta === "/api/v1/suscripcion/admin/cuentas/u9/pagos" && !opciones?.method) {
+      return [{ id: "p1", fecha: "2026-10-01", monto: "1499.00", referencia: null, folio_cfdi: null,
+                uuid_cfdi: "6F9619FF-8B86-D011-B42D-00C04FC964FF", meses: 1, vigente_hasta_nueva: "2026-11-01",
+                estado: "activo", registrado_por: "admin@despacho.mx", motivo_anulacion: null }];
+    }
+    if (ruta.endsWith("/anular")) return { vigencia_revertida: true };
+    if (opciones?.method === "POST") return { vigente_hasta_nueva: "2026-11-01" };
     if (ruta === "/api/v1/suscripcion/admin/cuentas/u9/historial") {
       return [{ fecha: "2026-10-01T12:00:00+00:00", plan_clave: "basico", plan_nombre: "Básico", estado: "suspendida",
                 vigente_hasta: "2026-12-31", notas: "pago SPEI", asignada_por: "admin@despacho.mx" }];
     }
     if (ruta.startsWith("/api/v1/suscripcion/admin/cuentas?")) {
       return [{ usuario_id: "u9", email: "ana@despacho.mx", nombre: "Ana", es_admin_plataforma: false,
-                plan_clave: null, estado: null, vigente_hasta: null, notas: null, uso_rfc: 1 }];
+                plan_clave: null, estado: null, vigente_hasta: null, notas: null, uso_rfc: 1, dias_para_vencer: 3 }];
     }
     if (opciones?.method === "PUT") return {};
     throw new Error(`llamada inesperada: ${ruta}`);
@@ -89,15 +109,104 @@ describe("AdminSuscripciones", () => {
     expect(within(tabla).queryByText("Notas")).not.toBeInTheDocument();
   });
 
-  it("el administrador abre el historial completo de una cuenta", async () => {
+  it("avisa del vencimiento próximo y del vencido", async () => {
+    renderCon(<MiSuscripcion />, mia({ dias_para_vencer: 3 }));
+    expect(await screen.findByText(/Tu suscripción vence en 3 días/)).toBeInTheDocument();
+  });
+
+  it("avisa cuando ya venció", async () => {
+    renderCon(<MiSuscripcion />, mia({ dias_para_vencer: -1, motivo: "vencida" }));
+    expect(await screen.findByText(/Tu suscripción venció hace 1 día/)).toBeInTheDocument();
+  });
+
+  it("muestra y deja editar mis datos fiscales, y muestra mis pagos", async () => {
+    const user = userEvent.setup();
+    renderCon(<MiSuscripcion />);
+    const form = await screen.findByRole("form", { name: "Mis datos fiscales" });
+    await waitFor(() => expect(within(form).getByLabelText("RFC")).toHaveValue("ACE010101AA1"));
+    await user.type(within(form).getByLabelText("Correo para el CFDI"), "facturas@acme.mx");
+    await user.click(within(form).getByRole("button", { name: "Guardar datos fiscales" }));
+    await waitFor(() =>
+      expect(apiFetch).toHaveBeenCalledWith("/api/v1/suscripcion/datos-fiscales", {
+        method: "PUT",
+        body: JSON.stringify({ rfc: "ACE010101AA1", razon_social: "ACME SA DE CV", regimen_fiscal: "601",
+                               codigo_postal: "68000", uso_cfdi: "G03", correo: "facturas@acme.mx" }),
+      }),
+    );
+    const tabla = await screen.findByRole("table", { name: "Pagos de la suscripción" });
+    expect(within(tabla).getByText("A-15")).toBeInTheDocument();
+    expect(within(tabla).queryByText("Registró")).not.toBeInTheDocument();
+  });
+
+  it("el administrador abre el detalle de una cuenta", async () => {
     const user = userEvent.setup();
     renderCon(<AdminSuscripciones />, mia({ es_admin_plataforma: true }));
-    await user.click(await screen.findByRole("button", { name: "Historial de ana@despacho.mx" }));
+    expect(await screen.findByText("Vence en 3 días")).toBeInTheDocument();
+    // Lista de vencimientos del administrador.
+    const lista = await screen.findByRole("list", { name: "Cuentas por vencer o vencidas" });
+    expect(within(lista).getByText("luis@despacho.mx")).toBeInTheDocument();
+    expect(within(lista).getByText("Venció hace 5 días")).toBeInTheDocument();
+    await user.click(await screen.findByRole("button", { name: "Detalle de ana@despacho.mx" }));
     const tabla = await screen.findByRole("table", { name: "Historial de plan" });
     expect(within(tabla).getByText("pago SPEI")).toBeInTheDocument();
     expect(within(tabla).getByText("admin@despacho.mx")).toBeInTheDocument();
     expect(within(tabla).getByText("Suspendida")).toBeInTheDocument();
     expect(apiFetch).toHaveBeenCalledWith("/api/v1/suscripcion/admin/cuentas/u9/historial");
+  });
+
+  it("el administrador registra un pago y guarda los datos fiscales", async () => {
+    const user = userEvent.setup();
+    renderCon(<AdminSuscripciones />, mia({ es_admin_plataforma: true }));
+    await user.click(await screen.findByRole("button", { name: "Detalle de ana@despacho.mx" }));
+    const pago = await screen.findByRole("form", { name: "Registrar pago de ana@despacho.mx" });
+    expect(within(pago).getByRole("button", { name: "Registrar pago" })).toBeDisabled();
+    await user.type(within(pago).getByLabelText("Fecha"), "2026-10-01");
+    await user.type(within(pago).getByLabelText("Monto (MXN)"), "1499.50");
+    await user.type(within(pago).getByLabelText("Folio del CFDI"), "A-16");
+    await user.click(within(pago).getByRole("button", { name: "Registrar pago" }));
+    await waitFor(() =>
+      expect(apiFetch).toHaveBeenCalledWith("/api/v1/suscripcion/admin/cuentas/u9/pagos", {
+        method: "POST",
+        body: JSON.stringify({ fecha: "2026-10-01", monto: "1499.50", meses: 1, referencia: null, folio_cfdi: "A-16",
+                               uuid_cfdi: null }),
+      }),
+    );
+    expect(await within(pago).findByText(/Pago registrado\. Vigente hasta 2026-11-01/)).toBeInTheDocument();
+
+    const fiscales = screen.getByRole("form", { name: "Datos fiscales de ana@despacho.mx" });
+    await user.type(within(fiscales).getByLabelText("RFC"), "ACE010101AA1");
+    await user.type(within(fiscales).getByLabelText("Razón social"), "ACME");
+    await user.type(within(fiscales).getByLabelText("Régimen fiscal"), "601");
+    await user.type(within(fiscales).getByLabelText("Código postal"), "68000");
+    await user.type(within(fiscales).getByLabelText("Uso del CFDI"), "G03");
+    await user.click(within(fiscales).getByRole("button", { name: "Guardar datos fiscales" }));
+    await waitFor(() =>
+      expect(apiFetch).toHaveBeenCalledWith("/api/v1/suscripcion/admin/cuentas/u9/datos-fiscales", {
+        method: "PUT",
+        body: JSON.stringify({ rfc: "ACE010101AA1", razon_social: "ACME", regimen_fiscal: "601",
+                               codigo_postal: "68000", uso_cfdi: "G03", correo: null }),
+      }),
+    );
+  });
+
+  it("el administrador anula un pago con motivo", async () => {
+    const user = userEvent.setup();
+    renderCon(<AdminSuscripciones />, mia({ es_admin_plataforma: true }));
+    await user.click(await screen.findByRole("button", { name: "Detalle de ana@despacho.mx" }));
+    const tabla = await screen.findByRole("table", { name: "Pagos de la suscripción" });
+    expect(within(tabla).getByText("6F9619FF-8B86-D011-B42D-00C04FC964FF")).toBeInTheDocument();
+    await user.click(within(tabla).getByRole("button", { name: "Anular pago del 01/10/2026" }));
+    const confirmar = within(tabla).getByRole("button", { name: "Confirmar" });
+    expect(confirmar).toBeDisabled();
+    await user.type(within(tabla).getByLabelText("Motivo de la anulación"), "duplicado");
+    await user.click(confirmar);
+    await waitFor(() =>
+      expect(apiFetch).toHaveBeenCalledWith("/api/v1/suscripcion/admin/cuentas/u9/pagos/p1/anular", {
+        method: "POST",
+        body: JSON.stringify({ motivo: "duplicado" }),
+      }),
+    );
+    expect(await screen.findByText(/la vigencia volvió a la anterior/)).toBeInTheDocument();
   });
 
   it("asigna un plan a una cuenta", async () => {

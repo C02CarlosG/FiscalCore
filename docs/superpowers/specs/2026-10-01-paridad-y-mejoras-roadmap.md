@@ -32,6 +32,7 @@ el sistema visual propio de FiscalCore; no se copian marca, logotipo ni textos.
 | D7 | Descarga automática de XML | Proceso aparte (`worker`) que usa Postgres como cola; sin Redis ni Celery. Una corrida diaria por empresa, más la carga inicial al guardar la e.firma | F2 |
 | D8 | Uso desatendido de la e.firma | La descarga automática se activa por empresa con consentimiento explícito de quien guarda la e.firma; se puede pausar en cualquier momento | F2 |
 | D9 | Alta de usuarios en una empresa (decidido por Carlos, 2026-10-04) | Invitación con **doble confirmación**: la persona invitada acepta y queda "pendiente de aprobación" sin acceso, y un administrador de la empresa aprueba o rechaza. No se envían correos por ahora. La verificación de correo con enlace (junto con la recuperación de contraseña) es entrega del carril B **antes de abrir producción a clientes externos** | U1, B-seguridad |
+| D10 | Cobro de la suscripción (decidido por Carlos, 2026-10-06) | Se pospone el cobro en línea: los planes se asignan a mano desde la administración. El CFDI de la suscripción se emite fuera de FiscalCore; FiscalCore guarda los datos fiscales del cliente (RFC, razón social, régimen, CP, uso del CFDI) y el historial de pagos que registra a mano el administrador. Avisos de vencimiento próximo solo en la interfaz. Sin proveedores de pago ni claves | M7.2 |
 
 ## Forma de trabajo (igual en todas las fases)
 
@@ -117,7 +118,7 @@ de las 26 capturas y se cuadran todas las cifras de control.
 | **M4 Vista de despacho** | Tablero multiempresa con score y pendientes. Requiere quitar la unicidad global de `cfdi.uuid` (hoy un mismo CFDI no puede existir en dos empresas de la plataforma) | F3 |
 | **M5 Comparativo contra lo declarado** | Captura de lo pagado en declaraciones y diferencias contra lo calculado | F5, F7 |
 | **M6 Experiencia** | Tablas móviles como tarjetas, ayuda por pantalla, recorrido guiado | F3 |
-| **M7 Suscripción** | Planes, límites de RFC y usuarios, cobro | — |
+| **M7 Suscripción** | Planes, límites de RFC y usuarios; sin cobro en línea (D10): pagos y datos fiscales registrados a mano, historial y avisos de vencimiento | — |
 
 Las correcciones chicas detectadas en la comparación (score del dashboard que no
 respeta el periodo, fechas en formato ISO, 8 filas por página, encabezados con
@@ -451,7 +452,7 @@ pausa.
 | M1, M4, M6 | A | Pendiente | — | — |
 | M3 | B | Pendiente |
 | V1 | D | Integrada (PR #34); seguimiento con 3 menores (422 en entradas inválidas, CHECK de la 061 en bases existentes) | `docs/superpowers/specs/2026-10-04-v1-validaciones-cfdi-design.md` | `docs/superpowers/plans/2026-10-04-v1-validaciones-cfdi.md` |
-| U1, M7 | D | U1 (usuarios y perfil, PR #36) en revisión: invitaciones con doble confirmación (D9); depende del índice único sobre `lower(email)` del carril B. M7.1 (planes, límite de RFC, PR #40) en revisión |
+| U1, M7 | D | U1 (usuarios y perfil, PR #36) en revisión: invitaciones con doble confirmación (D9); depende del índice único sobre `lower(email)` del carril B. M7.1 (planes, límite de RFC, PR #40) integrada. M7.2 (D10: historial, pagos manuales, datos fiscales y avisos de vencimiento, PR #51) en revisión |
 | F3.6 | A | Pendiente (después de F3.5b) | — | — |
 | Punto de control de paridad | Coordinación | Pendiente: al terminar F5–F7 se recorre FiscalCore con Playwright contra las capturas y se cuadran las cifras de control | — | — |
 | M2, M5 | C | Pendiente | — | — |
