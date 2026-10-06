@@ -197,7 +197,7 @@ def eventos_de_pago(pago: dict, doc: dict, rfc: str) -> list[dict]:
         marcas_ev = set(marcas)
         if lado == "deduccion":
             if forma is None:
-                marcas_ev.add("forma_pago_rep")     # FormaDePagoP aún no se guarda: no se detecta el efectivo
+                marcas_ev.add("forma_pago_rep")     # REP sin FormaDePagoP guardada: no se detecta el efectivo
             _marcas_de_deduccion(doc, marcas_ev, forma, pagado)
         ev = _evento(doc, lado, "credito", pago["fecha_pago"], base, retencion, marcas_ev, monto_efecto=pagado,
                      uuid_pago=pago.get("uuid_pago"))
@@ -269,7 +269,7 @@ MENSAJES = {
     "sin_equivalencia": "Hay pagos en otra moneda sin equivalencia del documento: no se suman, falta el tipo de cambio.",
     "sin_tipo_cambio": "Hay CFDI en moneda extranjera sin tipo de cambio: no se suman.",
     "sin_proporcion": "Hay pagos de documentos con total en cero: no se puede calcular su importe.",
-    "forma_pago_rep": "La forma de pago del REP no se guarda: un pago en efectivo de una factura a crédito no se detecta como no deducible.",
+    "forma_pago_rep": "Hay pagos de REP sin forma de pago registrada (CFDI anteriores a su lectura): un pago en efectivo de una factura a crédito no se detecta como no deducible. Reprocesa el XML.",
     "anticipo": "Hay anticipos del SAT: se acumulan al cobro y su aplicación (forma de pago 30) los resta de la factura final.",
     "equivalencia_sospechosa": "Hay pagos cuya equivalencia no cuadra con el Monto del propio complemento (parece invertida): no se suman, revisa esos renglones.",
     "efectivo_hasta_umbral": "Hay compras pagadas en efectivo por $2,000 o menos: se deducen, salvo los combustibles (ClaveProdServ 151015xx), que en efectivo no se deducen por ningún monto (LISR 27-III). Esta versión no lee los conceptos: revisa las validaciones de CFDI.",

@@ -478,7 +478,7 @@ MENSAJES = {
     "objeto_imp_inconsistente": "Hay pagos con ObjetoImpDR sin IVA sobre un CFDI que sí trae IVA: se calculó por la proporción del CFDI.",
     "objeto_sin_desglose": "Hay pagos de documentos con ObjetoImpDR 03 (sin desglose de IVA): no suman IVA; su importe se muestra como base en «otras».",
     "descuadre_rep": "El IVA de los documentos de un complemento de pago no cuadra con lo que el propio complemento declara (ImpuestosP o Totales): revisa esos renglones.",
-    "forma_pago_rep": "La forma de pago del REP no se guarda: un pago en efectivo de una factura a crédito no se detecta como no acreditable.",
+    "forma_pago_rep": "Hay pagos de REP sin forma de pago registrada (CFDI anteriores a su lectura): un pago en efectivo de una factura a crédito no se detecta como no acreditable. Reprocesa el XML.",
     "anticipo": "Hay anticipos del SAT: su IVA se causa al cobrarse.",
     "aplicacion_anticipo": "Hay aplicaciones de anticipo (forma de pago 30): restan el IVA del anticipo de la factura final; si la factura final es a crédito, el REP ya trae el remanente y no se resta (aplicado en el REP).",
 }
@@ -815,6 +815,9 @@ def _repartir_acreditable(terceros: list["_Tercero"], factor: Decimal, objetivo:
         if unidades > 0 and pisos[i] < techos[i]:
             pisos[i] += CENTAVOS
             unidades -= 1
+        elif unidades < 0 and pisos[i] > CERO:
+            pisos[i] -= CENTAVOS                    # el menor residuo es el que más se acercó por arriba; nunca bajo 0
+            unidades += 1
     return pisos
 
 

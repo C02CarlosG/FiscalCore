@@ -6,7 +6,18 @@
 -- isr_config_flujo.pct_nomina_exenta: solo 0.47 (por defecto) o 0.53 (LISR 28-XXX).
 -- ============================================================
 UPDATE isr_ajustes SET motivo = 'Sin motivo registrado' WHERE length(btrim(motivo)) = 0;
-UPDATE isr_config_flujo SET pct_nomina_exenta = 0.47 WHERE pct_nomina_exenta NOT IN (0.47, 0.53);
+DO $$
+DECLARE
+    fila RECORD;
+BEGIN
+    -- Los porcentajes fuera de 0.47/0.53 se normalizan a 0.47; cada cambio queda en el log del servidor
+    FOR fila IN SELECT empresa_id, ejercicio, pct_nomina_exenta FROM isr_config_flujo WHERE pct_nomina_exenta NOT IN (0.47, 0.53) LOOP
+        RAISE NOTICE '055: empresa % ejercicio %: porcentaje de nómina exenta % cambiado a 0.47',
+            fila.empresa_id, fila.ejercicio, fila.pct_nomina_exenta;
+    END LOOP;
+    UPDATE isr_config_flujo SET pct_nomina_exenta = 0.47 WHERE pct_nomina_exenta NOT IN (0.47, 0.53);
+END
+$$;
 
 DO $$
 BEGIN

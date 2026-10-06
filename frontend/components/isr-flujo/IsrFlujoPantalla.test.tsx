@@ -84,6 +84,22 @@ describe("IsrFlujoPantalla", () => {
     expect(screen.getByText("aviso X")).toBeInTheDocument();
   });
 
+  it("lista las advertencias de efectivo e inversiones con sus CFDI", () => {
+    preparar(consulta(resumenIsr({
+      advertencias: [
+        { codigo: "efectivo_hasta_umbral", mensaje: "Hay compras pagadas en efectivo por $2,000 o menos", cfdi: 2 },
+        { codigo: "inversion_sin_depreciacion", mensaje: "Hay inversiones (I01–I08)", cfdi: 1 },
+      ],
+    })));
+    render(<IsrFlujoPantalla />);
+
+    const lista = screen.getByRole("list", { name: "Advertencias del ISR" });
+    expect(lista).toHaveTextContent("Hay compras pagadas en efectivo por $2,000 o menos");
+    expect(lista).toHaveTextContent("2 CFDI");
+    expect(lista).toHaveTextContent("Hay inversiones (I01–I08)");
+    expect(lista).toHaveTextContent("1 CFDI");
+  });
+
   it("no considera un CFDI pidiendo el motivo", async () => {
     render(<IsrFlujoPantalla />);
 

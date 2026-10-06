@@ -27,7 +27,7 @@ _COLUMNAS = [
 ]
 
 
-def construir(periodo: str, lado: str, bloque: str, filas: list[dict], resumen: dict) -> bytes:
+def construir(periodo: str, lado: str, bloque: str, filas: list[dict], resumen: dict, regimen: dict | None = None) -> bytes:
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Detalle"
@@ -58,6 +58,7 @@ def construir(periodo: str, lado: str, bloque: str, filas: list[dict], resumen: 
     _fila("Devoluciones y descuentos", lambda b: b["ingresos"]["devoluciones"])
     _fila("Total de ingresos", lambda b: b["ingresos"]["total"], negrita=True)
     _fila("Compras y gastos", lambda b: b["deducciones"]["compras_y_gastos"])
+    _fila("Devoluciones recibidas (ya restadas)", lambda b: b["deducciones"]["devoluciones_recibidas"])
     _fila("Nómina deducible", lambda b: b["deducciones"]["nomina"]["deducible"])
     _fila("Total de deducciones", lambda b: b["deducciones"]["total"], negrita=True)
     _fila("Utilidad fiscal estimada", lambda b: b["utilidad_fiscal_estimada"], negrita=True)
@@ -65,6 +66,19 @@ def construir(periodo: str, lado: str, bloque: str, filas: list[dict], resumen: 
     _fila("ISR retenido a favor", lambda b: b["ingresos"]["retenciones_a_favor"])
     _fila("ISR retenido a cargo (trabajadores)", lambda b: b["retenciones_a_cargo"]["trabajadores"])
     _fila("ISR retenido a cargo (proveedores)", lambda b: b["retenciones_a_cargo"]["proveedores"])
+    wr.append([])
+    _fila("Inversiones identificadas (no suman)", lambda b: b["deducciones"]["inversiones"]["base"])
+    _fila("Ingresos no considerados (base)", lambda b: b["ingresos"]["no_considerados"]["base"])
+    _fila("Deducciones no consideradas (base)", lambda b: b["deducciones"]["no_considerados"]["base"])
+    wr.append([])
+    wr.append(["Nómina exenta deducible", float(resumen["porcentaje_nomina_exenta"])])
+    wr.cell(row=wr.max_row, column=2).number_format = "0%"
+    if regimen:
+        wr.append(["Régimen", f'{regimen.get("codigo") or "sin régimen"} ({regimen.get("modulo")})'])
+        for aviso in regimen.get("avisos", []):
+            wr.append([aviso])
+    for a in resumen.get("advertencias", []):
+        wr.append([a["mensaje"]])
     wr.append([])
     wr.append(["Estimación del flujo: no calcula el pago provisional."])
     wr.column_dimensions["A"].width = 38

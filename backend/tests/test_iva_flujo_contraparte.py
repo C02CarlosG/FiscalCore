@@ -166,3 +166,11 @@ def test_el_reparto_no_acredita_a_un_tercero_mas_que_su_neto():
     # con residuos reales el centavo sobrante sí se reparte, solo a quien tiene margen
     assert sum(f._repartir_acreditable([_T("53.3333")] * 3, D("1"), D("160.00")), D("0")) == D("160.00")
     assert max(f._repartir_acreditable([_T("53.3333")] * 3, D("1"), D("160.00"))) <= D("53.34")
+
+
+def test_el_reparto_baja_centavos_cuando_el_objetivo_es_menor_a_la_suma_de_pisos():
+    # 3 terceros con 53.345: pisos 53.34 (160.02) y el resumen da 160.01 → se resta un centavo, nunca bajo 0
+    r = f._repartir_acreditable([_T("53.345")] * 3, D("1"), D("160.01"))
+
+    assert sum(r, D("0")) == D("160.01") and min(r) >= D("53.33") and max(r) <= D("53.34")
+    assert f._repartir_acreditable([_T("0.005")], D("1"), D("-0.01")) == [D("0.00")]      # no baja de cero

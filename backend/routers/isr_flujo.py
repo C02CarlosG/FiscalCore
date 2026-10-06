@@ -185,7 +185,9 @@ async def exportar_isr_flujo(
     filas = isr_flujo.renglones(eventos, periodo, lado, bloque, ajustes, acumulado)
     if len(filas) > MAX_FILAS_EXPORTACION:
         raise HTTPException(status_code=422, detail=f"son {len(filas)} renglones; el máximo es {MAX_FILAS_EXPORTACION}")
-    contenido = isr_flujo_exportacion.construir(periodo, lado, bloque, filas, isr_flujo.resumen(eventos, periodo, ajustes, pct))
+    contenido = isr_flujo_exportacion.construir(
+        periodo, lado, bloque, filas, isr_flujo.resumen(eventos, periodo, ajustes, pct),
+        isr_flujo.aplicabilidad(empresa.get("regimen_fiscal")))
     registrar_evento(current_user["user_id"], "isr_flujo_exportado", empresa_id=empresa_id,
                      metadata={"periodo": periodo, "lado": lado, "bloque": bloque, "acumulado": acumulado, "filas": len(filas)})
     return StreamingResponse(
