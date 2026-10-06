@@ -91,3 +91,78 @@ def test_el_json_incluido_coincide_con_la_referencia_documentada():
     meses = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
     for i, m in enumerate(meses, 1):
         assert ref["art_106_" + m] == usado[str(i)]
+
+
+# ── arrendamiento (606, Art. 116) ────────────────────────────────────────────
+
+def arrend(por_mes, **kw):
+    return p.pago_provisional_arrendamiento(kw.pop("periodo", "2026-09"), resumen_falso_mes(por_mes), **kw)
+
+
+def resumen_falso_mes(por_mes):
+    """``por_mes[k] = (ingresos_del_mes, deducciones_del_mes, retencion_del_mes)``; el resto de meses vale cero."""
+    def _resumen(periodo):
+        ing, ded, ret = por_mes.get(int(periodo[5:7]), (0, 0, 0))
+        return {"mes": {"ingresos": {"total": D(ing), "retenciones_a_favor": D(ret)}, "deducciones": {"total": D(ded)}}}
+    return _resumen
+
+
+def test_la_tarifa_116_mensual_es_la_del_art_96_y_la_trimestral_son_tres_veces():
+    mensual, trimestral = t.tarifa_art_116(2026, "mensual"), t.tarifa_art_116(2026, "trimestral")
+
+    assert mensual == t.tarifa_art_116(2026, "mensual") and len(mensual) == len(trimestral) == 11
+    assert trimestral[0][1] == D("2533.77") == D("844.59") * 3 and trimestral[1][2] == D("48.66") == D("16.22") * 3
+    assert t.tarifa_art_116(2027, "mensual") is None and t.tarifa_art_116(2026, "anual") is None
+
+
+def test_arrendamiento_mensual_sin_acumular_ni_restar_pagos_anteriores():
+    # 100,000 − 40,000 = 60,000 → 10,457.09 + 4,263.31 × 30 % = 11,736.08; sin retención
+    r = arrend({8: (500000, 0, 0), 9: (100000, 40000, 0)})
+
+    assert r["base_gravable"] == D("60000.00") and r["impuesto_causado"] == D("11736.08") and r["pago_del_periodo"] == D("11736.08")
+    assert r["ingresos_del_periodo"] == D("100000.00")             # agosto no entra: no es acumulado
+
+
+def test_arrendamiento_acredita_la_retencion_del_10_por_ciento():
+    r = arrend({9: (100000, 40000, 10000)})
+
+    assert r["isr_retenido_acreditado"] == D("10000.00") and r["pago_del_periodo"] == D("1736.08")
+    assert arrend({9: (100000, 40000, 20000)})["pago_del_periodo"] == D("0.00")
+    assert arrend({9: (100000, 40000, 20000)})["exceso_de_retenciones"] == D("8263.92")
+
+
+def test_arrendamiento_con_la_deduccion_opcional_del_35_por_ciento_sustituye_a_las_reales():
+    # 35 % de 100,000 = 35,000 (no 40,000): base 65,000 → 10,457.09 + 9,263.31 × 30 % = 13,236.08
+    r = arrend({9: (100000, 40000, 0)}, deduccion_opcional=True)
+
+    assert r["deducciones_usadas"] == D("35000.00") and r["base_gravable"] == D("65000.00") and r["impuesto_causado"] == D("13236.08")
+    assert r["deducciones_reales_del_periodo"] == D("40000.00") and any("35 %" in a for a in r["avisos"])
+
+
+def test_el_predial_se_suma_a_la_deduccion_opcional_y_no_a_las_reales():
+    con = arrend({9: (100000, 40000, 0)}, deduccion_opcional=True, predial=D("1000"))
+    sin_opcion = arrend({9: (100000, 40000, 0)}, deduccion_opcional=False, predial=D("1000"))
+
+    assert con["deducciones_usadas"] == D("36000.00") and con["impuesto_causado"] == D("12936.08")
+    assert sin_opcion["deducciones_usadas"] == D("40000.00") and sin_opcion["predial"] == D("0.00")
+
+
+def test_arrendamiento_trimestral_suma_los_tres_meses_con_la_tarifa_trimestral():
+    por_mes = {7: (20000, 5000, 0), 8: (30000, 10000, 1000), 9: (50000, 25000, 2000)}
+    r = arrend(por_mes, periodicidad="trimestral")
+
+    # 100,000 − 40,000 = 60,000 → 5,570.52 + 7,399.07 × 21.36 % = 7,150.96; retenciones 3,000
+    assert r["base_gravable"] == D("60000.00") and r["impuesto_causado"] == D("7150.96")
+    assert r["isr_retenido_acreditado"] == D("3000.00") and r["pago_del_periodo"] == D("4150.96")
+
+
+def test_arrendamiento_trimestral_solo_se_calcula_en_mes_de_pago():
+    r = arrend({8: (1, 0, 0)}, periodo="2026-08", periodicidad="trimestral")
+
+    assert r["calculado"] is False and r["motivo"] == "no_es_mes_de_pago"
+
+
+def test_arrendamiento_sin_tarifa_o_base_negativa():
+    assert arrend({}, periodo="2027-03")["motivo"] == "sin_tarifa"
+    r = arrend({9: (1000, 5000, 0)})
+    assert r["base_gravable"] == D("0.00") and r["pago_del_periodo"] == D("0.00")

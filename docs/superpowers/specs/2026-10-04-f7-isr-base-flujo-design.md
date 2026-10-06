@@ -51,7 +51,7 @@ Un régimen vacío o desconocido muestra el aviso y deja ver el flujo sin conclu
 |---|---|
 | **F7.1** | Motor puro, carga SQL, migraciones 052 (ajustes) y 053 (porcentaje), endpoints de resumen y ajustes con auditoría, E2E |
 | **F7.2** | Pantalla ISR base flujo (dos pestañas: ingresos y deducciones) y exportación a Excel |
-| **F7.3** | Pago provisional del 612 (Art. 106) con las tarifas del Anexo 8 de la RMF 2026 (`docs/referencias/anexo-8-rmf-2026-tarifas.*`, verificadas contra el PDF oficial); migración 057 (PTU pagada y pérdidas pendientes); `GET …/isr-flujo/{periodo}/pago-provisional`. 601 remite al cálculo por coeficiente existente; 606 (Art. 116) no se calcula; ejercicios sin tarifa cargada tampoco |
+| **F7.3** | Pago provisional del 612 (Art. 106) con las tarifas del Anexo 8 de la RMF 2026 (`docs/referencias/anexo-8-rmf-2026-tarifas.*`, verificadas contra el PDF oficial); migración 057 (PTU pagada y pérdidas pendientes); `GET …/isr-flujo/{periodo}/pago-provisional`. 601 remite al cálculo por coeficiente existente; 606 se calcula con el Art. 116; ejercicios sin tarifa cargada no se calculan |
 
 ## Endpoints (F7.1)
 
@@ -76,4 +76,14 @@ Un régimen vacío o desconocido muestra el aviso y deja ver el flujo sin conclu
 (utilidad − límite inferior) × % de la tarifa acumulada del mes *k*; `pago_k = máx(0, causado_k − Σ pagos anteriores − ISR retenido a
 favor del mes k)`. Los pagos anteriores restan ya netos de su retención (igual que `isr.py`). Si no se conoce lo realmente enterado
 se estima con la misma fórmula y se avisa (`meses_con_pago_estimado`); M5 podrá aportar los pagos reales. Se muestran el renglón de la
-tarifa, la fuente y la fecha de consulta. **Fuera de alcance:** Art. 116 (606), estímulos, deducción opcional del 35 %, subsidio.
+tarifa, la fuente y la fecha de consulta. **Fuera de alcance:** estímulos y subsidio.
+
+### Arrendamiento, 606 (Art. 116 y Art. 115 LISR)
+
+- **Tarifa:** la del Anexo 8 para pagos provisionales mensuales del Art. 116 (idéntica a la mensual del Art. 96) o, si el pago es
+  trimestral (ingresos de hasta 10 UMA mensuales), la trimestral (3 × límites y cuotas), ambas transcritas del PDF oficial.
+- **Base del periodo, no acumulada:** ingresos del mes (o del trimestre) − deducciones del mes (o trimestre). No resta pagos anteriores.
+- **Deducción opcional del 35 % (Art. 115, último párrafo):** configuración por empresa y ejercicio (`deduccion_opcional_35`).
+  Sustituye a las deducciones reales (sin comprobantes); el predial se suma (parámetro `predial` del endpoint, no se guarda).
+- **Retención:** al resultado se le acredita el ISR retenido por personas morales (10 %, Art. 116, párrafo 3).
+- **Periodicidad** (`arrendamiento_periodicidad`): mensual o trimestral; el trimestral solo se calcula en marzo, junio, septiembre y diciembre.

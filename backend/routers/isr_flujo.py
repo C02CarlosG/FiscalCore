@@ -43,6 +43,10 @@ class ConfigIn(BaseModel):
     perdidas_pendientes: Optional[Decimal] = Field(None, ge=0, le=Decimal("9999999999999.99"),
                                                    description="Pérdidas fiscales de ejercicios anteriores por aplicar")
 
+    arrendamiento_periodicidad: Optional[Literal["mensual", "trimestral"]] = Field(
+        None, description="606: pago provisional mensual o trimestral (ingresos de hasta 10 UMA mensuales)")
+    deduccion_opcional_35: Optional[bool] = Field(None, description="606: deducción opcional del 35 % (Art. 115), sin comprobantes")
+
     @field_validator("ptu_pagada", "perdidas_pendientes")
     @classmethod
     def _centavos(cls, v: Optional[Decimal]) -> Optional[Decimal]:
@@ -96,7 +100,8 @@ async def guardar_config(empresa_id: str, ejercicio: int, datos: ConfigIn, curre
     validar_acceso_empresa(empresa_id, current_user)
     _ejercicio_o_422(ejercicio)
     pct = datos.pct_nomina_exenta
-    isr_flujo_datos.guardar_porcentaje(empresa_id, ejercicio, pct, current_user["user_id"], datos.ptu_pagada, datos.perdidas_pendientes)
+    isr_flujo_datos.guardar_porcentaje(empresa_id, ejercicio, pct, current_user["user_id"], datos.ptu_pagada, datos.perdidas_pendientes,
+                                       datos.arrendamiento_periodicidad, datos.deduccion_opcional_35)
     return _json({"ejercicio": ejercicio, "pct_nomina_exenta": pct, **isr_flujo_datos.parametros_provisional(empresa_id, ejercicio)})
 
 
@@ -158,10 +163,16 @@ async def resumen_isr_flujo(empresa_id: str, periodo: str, current_user: dict = 
 
 
 @router.get(_BASE + "/{periodo}/pago-provisional")
-async def pago_provisional(empresa_id: str, periodo: str, current_user: dict = Depends(get_current_user)):
-    """Pago provisional del ISR del mes por flujo de efectivo (Art. 106 LISR, régimen 612) con la tarifa del Anexo 8.
-    Otros regímenes no se calculan aquí: 601 usa el coeficiente de utilidad (``/isr-provisional/{periodo}``) y 606 (Art. 116)
-    no está soportado."""
+async def pago_provisional(
+    empresa_id: str,
+    periodo: str,
+    predial: Decimal = Query(Decimal("0"), ge=0, le=Decimal("9999999999999.99"), decimal_places=2,
+                             description="606 con la deducción opcional del 35 %: predial pagado en el periodo, que se suma"),
+    current_user: dict = Depends(get_current_user),
+):
+    """Pago provisional del ISR por flujo de efectivo con la tarifa del Anexo 8: 612 (Art. 106, acumulado) y 606
+    (Art. 116, del periodo, con deducción opcional del 35 % y retención del 10 %). El 601 usa el coeficiente de utilidad
+    (``/isr-provisional/{periodo}``); otros regímenes no se calculan."""
     validar_acceso_empresa(empresa_id, current_user)
     _periodo_o_422(periodo)
     empresa = empresa_or_404(empresa_id)
@@ -172,17 +183,22 @@ async def pago_provisional(empresa_id: str, periodo: str, current_user: dict = D
         return _json({**base, "calculado": False, "motivo": "coeficiente",
                       "mensaje": "El régimen 601 calcula el pago provisional con el coeficiente de utilidad (Art. 14 LISR).",
                       "ruta": f"/api/v1/empresas/{empresa_id}/isr-provisional/{periodo}"})
-    if codigo == "606":
-        return _json({**base, "calculado": False, "motivo": "regimen_606",
-                      "mensaje": "El pago provisional de arrendamiento (606) sigue el Art. 116 LISR, con su propia tarifa y la deducción opcional del 35 %: no se calcula aquí."})
-    if codigo != "612":
-        return _json({**base, "calculado": False, "motivo": "regimen_no_soportado",
-                      "mensaje": "El régimen de la empresa no está soportado para el pago provisional por flujo."})
     ejercicio = int(periodo[:4])
     ajustes = isr_flujo_datos.cargar_ajustes(empresa_id)
     pct = isr_flujo_datos.porcentaje_nomina_exenta(empresa_id, ejercicio)
-    eventos = isr_flujo_datos.cargar_eventos(empresa_id, empresa["rfc"], periodo)
     parametros = isr_flujo_datos.parametros_provisional(empresa_id, ejercicio)
+    if codigo == "606":
+        eventos = isr_flujo_datos.cargar_eventos(empresa_id, empresa["rfc"], periodo)
+        resultado = isr_pago_provisional.pago_provisional_arrendamiento(
+            periodo, lambda p: isr_flujo.resumen(eventos, p, ajustes, pct), parametros["arrendamiento_periodicidad"],
+            parametros["deduccion_opcional_35"], predial)
+        registrar_evento(current_user["user_id"], "reporte_generado", empresa_id=empresa_id,
+                         metadata={"tipo": "isr_pago_provisional_arrendamiento", "periodo": periodo})
+        return _json({**base, **resultado})
+    if codigo != "612":
+        return _json({**base, "calculado": False, "motivo": "regimen_no_soportado",
+                      "mensaje": "El régimen de la empresa no está soportado para el pago provisional por flujo."})
+    eventos = isr_flujo_datos.cargar_eventos(empresa_id, empresa["rfc"], periodo)
     resultado = isr_pago_provisional.pago_provisional_flujo(
         periodo, lambda p: isr_flujo.resumen(eventos, p, ajustes, pct), parametros["ptu_pagada"], parametros["perdidas_pendientes"])
     registrar_evento(current_user["user_id"], "reporte_generado", empresa_id=empresa_id,

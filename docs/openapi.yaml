@@ -3034,6 +3034,8 @@ paths:
                   pct_nomina_exenta: { type: number }
                   ptu_pagada: { type: number }
                   perdidas_pendientes: { type: number }
+                  arrendamiento_periodicidad: { type: string, enum: [mensual, trimestral] }
+                  deduccion_opcional_35: { type: boolean }
         '401':
           $ref: '#/components/responses/UnauthorizedError'
         '403':
@@ -3058,6 +3060,8 @@ paths:
                 pct_nomina_exenta: { type: number, enum: [0.47, 0.53] }
                 ptu_pagada: { type: number, minimum: 0, description: "PTU pagada en el ejercicio; si se omite se conserva lo guardado" }
                 perdidas_pendientes: { type: number, minimum: 0, description: "Perdidas fiscales de ejercicios anteriores por aplicar; si se omite se conserva" }
+                arrendamiento_periodicidad: { type: string, enum: [mensual, trimestral], description: "606: pago provisional mensual o trimestral; si se omite se conserva" }
+                deduccion_opcional_35: { type: boolean, description: "606: deduccion opcional del 35 % (Art. 115); si se omite se conserva" }
       responses:
         '200':
           description: Configuracion guardada
@@ -3214,17 +3218,21 @@ paths:
     get:
       operationId: pagoProvisionalIsrFlujo
       tags: [ISR por flujo]
-      summary: Pago provisional del ISR por flujo de efectivo (Art. 106 LISR, regimen 612)
+      summary: Pago provisional del ISR por flujo de efectivo (612 Art. 106, 606 Art. 116)
       description: |
-        Utilidad acumulada (ingresos cobrados menos deducciones pagadas, menos PTU pagada y perdidas pendientes de la
-        configuracion del ejercicio) aplicada a la tarifa mensual acumulada del Anexo 8 de la RMF; resta los pagos
-        provisionales anteriores y el ISR retenido a favor del mes. Los pagos anteriores se estiman con el mismo calculo
-        (`meses_con_pago_estimado`). Solo hay tarifa cargada para 2026: otro ejercicio responde `calculado: false`.
-        El regimen 601 apunta al calculo por coeficiente de utilidad (`ruta`); 606 (Art. 116) y otros no se calculan.
-        Es una estimacion: no aplica estimulos ni la deduccion opcional del 35 %.
+        **612 (Art. 106)**: utilidad acumulada (ingresos cobrados menos deducciones pagadas, menos PTU pagada y perdidas
+        pendientes de la configuracion del ejercicio) sobre la tarifa mensual acumulada del Anexo 8 de la RMF; resta los
+        pagos provisionales anteriores (estimados con el mismo calculo, `meses_con_pago_estimado`) y el ISR retenido a
+        favor del mes. **606 (Art. 116)**: base del periodo (no acumulada) = ingresos menos deducciones; tarifa mensual
+        (o trimestral, solo en marzo, junio, septiembre y diciembre) y se acredita el ISR retenido por personas morales.
+        Con la deduccion opcional del 35 % (Art. 115) las deducciones son el 35 % de los ingresos mas `predial`.
+        Periodicidad y opcion salen de la configuracion del ejercicio. Solo hay tarifa cargada para 2026: otro ejercicio
+        responde `calculado: false`. El 601 apunta al calculo por coeficiente (`ruta`); otros regimenes no se calculan.
+        Es una estimacion: no aplica estimulos.
       parameters:
         - $ref: '#/components/parameters/EmpresaId'
         - { name: periodo, in: path, required: true, schema: { type: string, pattern: '^20[0-9]{2}-(0[1-9]|1[0-2])$' } }
+        - { name: predial, in: query, schema: { type: number, minimum: 0, default: 0 }, description: "606 con la deduccion opcional del 35 %: predial pagado en el periodo, que se suma" }
       responses:
         '200':
           description: Calculo (o el motivo por el que no se calcula)

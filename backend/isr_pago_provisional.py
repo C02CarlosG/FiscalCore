@@ -85,3 +85,61 @@ def pago_provisional_flujo(
                       " se estiman con el mismo cálculo porque no se capturó lo realmente pagado.")
     return {"calculado": True, "ejercicio": ejercicio, "mes": mes, "fuente": tarifas_isr.fuente(ejercicio),
             **detalle_mes, "meses_con_pago_estimado": estimados, "avisos": avisos}
+
+
+MESES_DE_PAGO_TRIMESTRAL = (3, 6, 9, 12)
+PORCENTAJE_OPCIONAL = Decimal("0.35")
+
+
+def pago_provisional_arrendamiento(
+    periodo: str,
+    resumen_de: Callable[[str], dict],
+    periodicidad: str = "mensual",
+    deduccion_opcional: bool = False,
+    predial: Decimal = CERO,
+) -> dict:
+    """Pago provisional de arrendamiento (606), Art. 116 LISR. No es acumulado ni resta pagos anteriores:
+
+        base    = ingresos del periodo − deducciones del periodo
+        causado = tarifa mensual (o trimestral: 3 × límites y cuotas) del Anexo 8 sobre la base
+        pago    = máx(0, causado − ISR retenido por personas morales en el periodo)   (Art. 116, párrafo 3)
+
+    El periodo es el mes, o el trimestre cuando ``periodicidad = trimestral`` (solo en marzo, junio, septiembre y diciembre).
+    Con ``deduccion_opcional`` (Art. 115, último párrafo) las deducciones son el 35 % de los ingresos, sin comprobantes, más
+    el predial (que sí se suma); sustituyen a las deducciones reales. ``resumen_de(periodo_k)`` = ``isr_flujo.resumen``."""
+    ejercicio, mes = int(periodo[:4]), int(periodo[5:7])
+    tarifa = tarifas_isr.tarifa_art_116(ejercicio, periodicidad)
+    if tarifa is None:
+        return {"calculado": False, "motivo": "sin_tarifa", "ejercicio": ejercicio,
+                "mensaje": f"No hay tarifa del Anexo 8 cargada para el ejercicio {ejercicio}: no se calcula el pago provisional."}
+    if periodicidad == "trimestral":
+        if mes not in MESES_DE_PAGO_TRIMESTRAL:
+            return {"calculado": False, "motivo": "no_es_mes_de_pago", "ejercicio": ejercicio,
+                    "mensaje": "Con pago trimestral el pago provisional se calcula en marzo, junio, septiembre o diciembre."}
+        meses = range(mes - 2, mes + 1)
+    else:
+        meses = range(mes, mes + 1)
+    ingresos = deducciones = retenciones = CERO
+    for k in meses:
+        mes_k = resumen_de(f"{ejercicio:04d}-{k:02d}")["mes"]
+        ingresos += mes_k["ingresos"]["total"]
+        deducciones += mes_k["deducciones"]["total"]
+        retenciones += mes_k["ingresos"]["retenciones_a_favor"]
+    if deduccion_opcional:
+        deducciones_usadas = _q(ingresos * PORCENTAJE_OPCIONAL) + predial
+    else:
+        deducciones_usadas = deducciones
+        predial = CERO
+    base = max(CERO, ingresos - deducciones_usadas)
+    r = aplicar_tarifa(base, tarifa)
+    pago = max(CERO, r["impuesto_causado"] - retenciones)
+    avisos = ["Estimación del flujo: no sustituye la declaración. No aplica estímulos."]
+    if deduccion_opcional:
+        avisos.append("Deducción opcional del 35 % (Art. 115): sustituye a las deducciones reales y no requiere comprobantes; el predial se suma.")
+    return {"calculado": True, "ejercicio": ejercicio, "mes": mes, "periodicidad": periodicidad, "articulo": "116",
+            "fuente": tarifas_isr.fuente(ejercicio), "ingresos_del_periodo": _q(ingresos),
+            "deducciones_reales_del_periodo": _q(deducciones), "deduccion_opcional_35": deduccion_opcional,
+            "deducciones_usadas": _q(deducciones_usadas), "predial": _q(predial), "base_gravable": _q(base),
+            "tarifa": r, "impuesto_causado": r["impuesto_causado"], "isr_retenido_acreditado": _q(retenciones),
+            "pago_del_periodo": _q(pago), "exceso_de_retenciones": _q(max(CERO, retenciones - r["impuesto_causado"])),
+            "avisos": avisos}

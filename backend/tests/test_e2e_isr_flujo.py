@@ -218,3 +218,19 @@ def test_pago_provisional_con_ptu_y_perdidas_de_la_configuracion(entorno):
         assert d["meses_con_pago_estimado"] == [1, 2, 3, 4, 5, 6, 7, 8] and d["fuente"]["url"].startswith("https://www.sat.gob.mx/")
     finally:
         client.put(_url(entorno, "config/2026"), headers=headers, json={"pct_nomina_exenta": 0.47, "ptu_pagada": 0, "perdidas_pendientes": 0})
+
+
+def test_config_de_arrendamiento_se_guarda_y_conserva(entorno):
+    client, headers = entorno[1], entorno[2]
+    try:
+        r = client.put(_url(entorno, "config/2026"), headers=headers,
+                       json={"pct_nomina_exenta": 0.47, "arrendamiento_periodicidad": "trimestral", "deduccion_opcional_35": True})
+        assert r.status_code == 200 and r.json()["arrendamiento_periodicidad"] == "trimestral" and r.json()["deduccion_opcional_35"] is True
+        # omitir los campos conserva lo guardado
+        conservado = client.put(_url(entorno, "config/2026"), headers=headers, json={"pct_nomina_exenta": 0.47}).json()
+        assert conservado["arrendamiento_periodicidad"] == "trimestral" and conservado["deduccion_opcional_35"] is True
+        assert client.put(_url(entorno, "config/2026"), headers=headers,
+                          json={"pct_nomina_exenta": 0.47, "deduccion_opcional_35": False}).json()["deduccion_opcional_35"] is False
+    finally:
+        client.put(_url(entorno, "config/2026"), headers=headers,
+                   json={"pct_nomina_exenta": 0.47, "arrendamiento_periodicidad": "mensual", "deduccion_opcional_35": False})

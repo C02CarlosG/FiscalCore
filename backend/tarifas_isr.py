@@ -1,6 +1,6 @@
 """Tarifas del ISR publicadas en el Anexo 8 de la RMF (solo las verificadas contra el documento oficial).
 
-Hoy: ejercicio 2026, tarifa mensual acumulada del Art. 106 LISR (``backend/datos/anexo8_rmf_2026.json``, copia de
+Hoy: ejercicio 2026, tarifa mensual acumulada del Art. 106 LISR y tarifas del Art. 116 (arrendamiento) (``backend/datos/anexo8_rmf_2026.json``, copia de
 ``docs/referencias/anexo-8-rmf-2026-tarifas.json``). Un ejercicio sin tarifa cargada no se calcula: no se asume la de otro."""
 from __future__ import annotations
 
@@ -30,6 +30,15 @@ def tarifa_art_106(ejercicio: int, mes: int) -> Optional[list[tuple[Decimal, Opt
     if datos is None or not 1 <= mes <= 12:
         return None
     return [(Decimal(a), None if b is None else Decimal(b), Decimal(c), Decimal(p)) for a, b, c, p in datos["art_106"][str(mes)]]
+
+
+def tarifa_art_116(ejercicio: int, periodicidad: str) -> Optional[list[tuple[Decimal, Optional[Decimal], Decimal, Decimal]]]:
+    """Tarifa de los pagos provisionales de arrendamiento (Art. 116 LISR): ``mensual`` o ``trimestral``."""
+    datos = _cargar(ejercicio)
+    clave = {"mensual": "art_116_mensual", "trimestral": "art_116_trimestral"}.get(periodicidad)
+    if datos is None or clave is None or clave not in datos:
+        return None
+    return [(Decimal(a), None if b is None else Decimal(b), Decimal(c), Decimal(p)) for a, b, c, p in datos[clave]]
 
 
 def fuente(ejercicio: int) -> Optional[dict]:
