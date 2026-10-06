@@ -242,6 +242,8 @@ def init_db() -> None:
         # 052 y 053 son idempotentes — ISR base flujo: ajustes "no considerar" y porcentaje de nómina exenta (F7.1)
         _run_sql_file("052_isr_ajustes.sql")
         _run_sql_file("053_isr_config_flujo.sql")
+        # 057 es idempotente — PTU pagada y pérdidas pendientes del ISR por flujo (F7.3); va después de la 053
+        _run_sql_file("057_isr_config_provisional.sql")
         # 051 es idempotente — catálogo de proveedores de la empresa (F6.1)
         _run_sql_file("051_proveedores.sql")
 

@@ -196,3 +196,25 @@ def test_otra_empresa_recibe_403(entorno):
     assert client.get(_url(entorno, "2026-09"), headers=ajeno).status_code == 403
     assert client.put(_url(entorno, "config/2026"), headers=ajeno, json={"pct_nomina_exenta": 0.53}).status_code == 403
     assert client.put(_url(entorno, "ajustes"), headers=ajeno, json={"uuid": _uuid(1), "lado": "ingreso", "motivo": "x"}).status_code == 403
+
+
+def test_pago_provisional_con_ptu_y_perdidas_de_la_configuracion(entorno):
+    db, client, headers = entorno[0], entorno[1], entorno[2]
+    try:
+        r = client.put(_url(entorno, "config/2026"), headers=headers,
+                       json={"pct_nomina_exenta": 0.47, "ptu_pagada": "100.50", "perdidas_pendientes": "200"})
+        assert r.status_code == 200 and r.json()["ptu_pagada"] == 100.5, r.text
+        # omitir ptu/pérdidas conserva lo guardado
+        assert client.put(_url(entorno, "config/2026"), headers=headers, json={"pct_nomina_exenta": 0.47}).json()["perdidas_pendientes"] == 200.0
+
+        d = client.get(_url(entorno, "2026-09/pago-provisional"), headers=headers).json()
+
+        assert d["calculado"] is True and d["ptu_pagada"] == 100.5 and d["perdidas_pendientes"] == 200.0
+        assert d["ingresos_acumulados"] == 2300.0 and d["deducciones_acumuladas"] == 1394.0
+        assert d["utilidad_antes_de_ajustes"] == 906.0 and d["base_gravable"] == 605.5            # 906 − 100.50 − 200
+        assert d["tarifa"]["porcentaje"] == 1.92 and d["impuesto_causado"] == 11.63               # 605.49 × 1.92 %
+        assert d["pagos_provisionales_anteriores"] == 3.83 and d["isr_retenido_del_mes"] == 40.0   # solo enero causa (199.50 × 1.92 %)
+        assert d["pago_del_mes"] == 0.0 and d["exceso_de_pagos_y_retenciones"] == 32.2
+        assert d["meses_con_pago_estimado"] == [1, 2, 3, 4, 5, 6, 7, 8] and d["fuente"]["url"].startswith("https://www.sat.gob.mx/")
+    finally:
+        client.put(_url(entorno, "config/2026"), headers=headers, json={"pct_nomina_exenta": 0.47, "ptu_pagada": 0, "perdidas_pendientes": 0})

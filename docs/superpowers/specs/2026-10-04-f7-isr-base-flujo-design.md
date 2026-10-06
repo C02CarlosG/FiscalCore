@@ -51,7 +51,7 @@ Un régimen vacío o desconocido muestra el aviso y deja ver el flujo sin conclu
 |---|---|
 | **F7.1** | Motor puro, carga SQL, migraciones 052 (ajustes) y 053 (porcentaje), endpoints de resumen y ajustes con auditoría, E2E |
 | **F7.2** | Pantalla ISR base flujo (dos pestañas: ingresos y deducciones) y exportación a Excel |
-| **F7.3** | Pago provisional por régimen con la tarifa del Art. 96 y tablas vigentes. **Se hace solo con las tarifas verificadas contra el Anexo 8 de la RMF del ejercicio** (hoy el entorno no puede consultar `sat.gob.mx`); no se asumen |
+| **F7.3** | Pago provisional del 612 (Art. 106) con las tarifas del Anexo 8 de la RMF 2026 (`docs/referencias/anexo-8-rmf-2026-tarifas.*`, verificadas contra el PDF oficial); migración 057 (PTU pagada y pérdidas pendientes); `GET …/isr-flujo/{periodo}/pago-provisional`. 601 remite al cálculo por coeficiente existente; 606 (Art. 116) no se calcula; ejercicios sin tarifa cargada tampoco |
 
 ## Endpoints (F7.1)
 
@@ -69,3 +69,11 @@ Un régimen vacío o desconocido muestra el aviso y deja ver el flujo sin conclu
 | D-F7-3 | Las inversiones se identifican y no deducen | Depreciar en F7 | Decidida: fuera de alcance |
 | D-F7-4 | El pago provisional espera tarifas verificadas | Cargar tarifas de memoria | Decidida |
 | D-F7-5 | Régimen no soportado ⇒ aviso, sin cálculo de pago | Calcular con el régimen general | Decidida |
+
+## Pago provisional (F7.3)
+
+`utilidad_k = máx(0, ingresos acumulados − deducciones acumuladas − PTU pagada − pérdidas pendientes)`; `causado_k` = cuota fija +
+(utilidad − límite inferior) × % de la tarifa acumulada del mes *k*; `pago_k = máx(0, causado_k − Σ pagos anteriores − ISR retenido a
+favor del mes k)`. Los pagos anteriores restan ya netos de su retención (igual que `isr.py`). Si no se conoce lo realmente enterado
+se estima con la misma fórmula y se avisa (`meses_con_pago_estimado`); M5 podrá aportar los pagos reales. Se muestran el renglón de la
+tarifa, la fuente y la fecha de consulta. **Fuera de alcance:** Art. 116 (606), estímulos, deducción opcional del 35 %, subsidio.

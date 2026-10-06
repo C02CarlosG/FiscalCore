@@ -48,7 +48,8 @@ def test_config_rechaza_porcentajes_invalidos(con_acceso, cuerpo):
 
 def test_config_guarda_con_el_usuario(con_acceso, monkeypatch):
     visto = {}
-    monkeypatch.setattr(isr_flujo_datos, "guardar_porcentaje", lambda e, ej, pct, u: visto.update(ej=ej, pct=str(pct), u=u))
+    monkeypatch.setattr(isr_flujo_datos, "guardar_porcentaje", lambda e, ej, pct, u, ptu=None, per=None: visto.update(ej=ej, pct=str(pct), u=u))
+    monkeypatch.setattr(isr_flujo_datos, "parametros_provisional", lambda e, ej: {"ptu_pagada": 0, "perdidas_pendientes": 0})
 
     r = client.put(f"{BASE}/config/2026", json={"pct_nomina_exenta": 0.53})
 
@@ -93,3 +94,48 @@ def test_exportar_arma_el_excel_con_detalle_y_resumen_y_audita(con_acceso, monke
 def test_exportar_rechaza_bloque_o_periodo_invalido(con_acceso):
     assert client.get(f"{BASE}/2026-09/exportar", params={"lado": "ingreso", "bloque": "otro"}).status_code == 422
     assert client.get(f"{BASE}/2026-13/exportar", params={"lado": "ingreso", "bloque": "contado"}).status_code == 422
+
+
+def _preparar_provisional(monkeypatch, regimen):
+    monkeypatch.setattr(router, "empresa_or_404", lambda eid: {"id": eid, "rfc": "AAA010101AAA", "regimen_fiscal": regimen})
+    monkeypatch.setattr(isr_flujo_datos, "cargar_ajustes", lambda e: {})
+    monkeypatch.setattr(isr_flujo_datos, "porcentaje_nomina_exenta", lambda e, ej: isr_flujo_datos.isr_flujo.PORCENTAJE_NOMINA_EXENTA)
+    monkeypatch.setattr(isr_flujo_datos, "parametros_provisional", lambda e, ej: {"ptu_pagada": 0, "perdidas_pendientes": 0})
+    monkeypatch.setattr(isr_flujo_datos, "cargar_eventos", lambda e, rfc, p: [])
+    monkeypatch.setattr(router, "registrar_evento", lambda *a, **k: None)
+
+
+def test_pago_provisional_612_se_calcula_con_la_tarifa(con_acceso, monkeypatch):
+    from backend.tests.test_isr_flujo import doc, todos
+
+    _preparar_provisional(monkeypatch, "612 - PFAE")
+    monkeypatch.setattr(isr_flujo_datos, "cargar_eventos", lambda e, rfc, p: todos(doc("U1", subtotal=100000, fecha_emision=__import__("datetime").date(2026, 1, 10))))
+
+    d = client.get(f"{BASE}/2026-01/pago-provisional").json()
+
+    assert d["calculado"] is True and d["base_gravable"] == 100000.0 and d["tarifa"]["porcentaje"] == 30.0
+    assert d["fuente"]["consultado"] == "2026-10-06"
+
+
+@pytest.mark.parametrize("regimen,motivo", [("601 - General", "coeficiente"), ("606 - Arrendamiento", "regimen_606"), ("626", "regimen_no_soportado")])
+def test_pago_provisional_de_otros_regimenes_no_se_calcula(con_acceso, monkeypatch, regimen, motivo):
+    _preparar_provisional(monkeypatch, regimen)
+
+    d = client.get(f"{BASE}/2026-09/pago-provisional").json()
+
+    assert d["calculado"] is False and d["motivo"] == motivo
+    assert (d.get("ruta") == "/api/v1/empresas/emp-1/isr-provisional/2026-09") == (motivo == "coeficiente")
+
+
+def test_pago_provisional_rechaza_periodo_invalido(con_acceso):
+    assert client.get(f"{BASE}/2026-13/pago-provisional").status_code == 422
+
+
+def test_config_acepta_ptu_y_perdidas_no_negativas(con_acceso, monkeypatch):
+    visto = {}
+    monkeypatch.setattr(isr_flujo_datos, "guardar_porcentaje", lambda e, ej, pct, u, ptu=None, per=None: visto.update(ptu=str(ptu), per=str(per)))
+    monkeypatch.setattr(isr_flujo_datos, "parametros_provisional", lambda e, ej: {"ptu_pagada": 0, "perdidas_pendientes": 0})
+
+    assert client.put(f"{BASE}/config/2026", json={"pct_nomina_exenta": 0.47, "ptu_pagada": "100.50", "perdidas_pendientes": 20}).status_code == 200
+    assert visto == {"ptu": "100.50", "per": "20"}
+    assert client.put(f"{BASE}/config/2026", json={"pct_nomina_exenta": 0.47, "ptu_pagada": -1}).status_code == 422

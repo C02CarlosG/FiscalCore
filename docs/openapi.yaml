@@ -3032,6 +3032,8 @@ paths:
                 properties:
                   ejercicio: { type: integer }
                   pct_nomina_exenta: { type: number }
+                  ptu_pagada: { type: number }
+                  perdidas_pendientes: { type: number }
         '401':
           $ref: '#/components/responses/UnauthorizedError'
         '403':
@@ -3054,6 +3056,8 @@ paths:
               required: [pct_nomina_exenta]
               properties:
                 pct_nomina_exenta: { type: number, enum: [0.47, 0.53] }
+                ptu_pagada: { type: number, minimum: 0, description: "PTU pagada en el ejercicio; si se omite se conserva lo guardado" }
+                perdidas_pendientes: { type: number, minimum: 0, description: "Perdidas fiscales de ejercicios anteriores por aplicar; si se omite se conserva" }
       responses:
         '200':
           description: Configuracion guardada
@@ -3205,6 +3209,34 @@ paths:
           $ref: '#/components/responses/ForbiddenError'
         '422':
           description: Parametros invalidos
+
+  /api/v1/empresas/{empresa_id}/isr-flujo/{periodo}/pago-provisional:
+    get:
+      operationId: pagoProvisionalIsrFlujo
+      tags: [ISR por flujo]
+      summary: Pago provisional del ISR por flujo de efectivo (Art. 106 LISR, regimen 612)
+      description: |
+        Utilidad acumulada (ingresos cobrados menos deducciones pagadas, menos PTU pagada y perdidas pendientes de la
+        configuracion del ejercicio) aplicada a la tarifa mensual acumulada del Anexo 8 de la RMF; resta los pagos
+        provisionales anteriores y el ISR retenido a favor del mes. Los pagos anteriores se estiman con el mismo calculo
+        (`meses_con_pago_estimado`). Solo hay tarifa cargada para 2026: otro ejercicio responde `calculado: false`.
+        El regimen 601 apunta al calculo por coeficiente de utilidad (`ruta`); 606 (Art. 116) y otros no se calculan.
+        Es una estimacion: no aplica estimulos ni la deduccion opcional del 35 %.
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - { name: periodo, in: path, required: true, schema: { type: string, pattern: '^20[0-9]{2}-(0[1-9]|1[0-2])$' } }
+      responses:
+        '200':
+          description: Calculo (o el motivo por el que no se calcula)
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '422':
+          description: Periodo invalido
 
   /api/v1/empresas/{empresa_id}/isr-flujo/{periodo}/exportar:
     get:
