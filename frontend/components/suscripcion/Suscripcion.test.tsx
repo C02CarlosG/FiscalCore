@@ -21,7 +21,7 @@ const planes: Plan[] = [
 
 const mia = (cambios: Partial<MiSuscripcionDatos> = {}): MiSuscripcionDatos => ({
   plan: planes[1], estado: "activa", vigente_hasta: "2026-12-31", motivo: null, uso_rfc: 2,
-  puede_agregar_rfc: true, es_admin_plataforma: false, ...cambios,
+  puede_agregar_rfc: true, es_admin_plataforma: false, dias_para_vencer: null, ...cambios,
 });
 
 function renderCon(ui: React.ReactElement, datos: MiSuscripcionDatos = mia()) {
@@ -32,13 +32,26 @@ function renderCon(ui: React.ReactElement, datos: MiSuscripcionDatos = mia()) {
       return [{ fecha: "2026-10-01T12:00:00+00:00", plan_clave: "basico", plan_nombre: "Básico", estado: "activa",
                 vigente_hasta: null }];
     }
+    if (ruta === "/api/v1/suscripcion/datos-fiscales") {
+      return { rfc: "ACE010101AA1", razon_social: "ACME SA DE CV", regimen_fiscal: "601", codigo_postal: "68000",
+               uso_cfdi: "G03" };
+    }
+    if (ruta === "/api/v1/suscripcion/pagos") {
+      return [{ id: "p1", fecha: "2026-10-01", monto: "1499.00", referencia: "SPEI 123", folio_cfdi: "A-15" }];
+    }
+    if (ruta === "/api/v1/suscripcion/admin/cuentas/u9/datos-fiscales" && !opciones?.method) return null;
+    if (ruta === "/api/v1/suscripcion/admin/cuentas/u9/pagos" && !opciones?.method) {
+      return [{ id: "p1", fecha: "2026-10-01", monto: "1499.00", referencia: null, folio_cfdi: null,
+                registrado_por: "admin@despacho.mx" }];
+    }
+    if (opciones?.method === "POST") return {};
     if (ruta === "/api/v1/suscripcion/admin/cuentas/u9/historial") {
       return [{ fecha: "2026-10-01T12:00:00+00:00", plan_clave: "basico", plan_nombre: "Básico", estado: "suspendida",
                 vigente_hasta: "2026-12-31", notas: "pago SPEI", asignada_por: "admin@despacho.mx" }];
     }
     if (ruta.startsWith("/api/v1/suscripcion/admin/cuentas?")) {
       return [{ usuario_id: "u9", email: "ana@despacho.mx", nombre: "Ana", es_admin_plataforma: false,
-                plan_clave: null, estado: null, vigente_hasta: null, notas: null, uso_rfc: 1 }];
+                plan_clave: null, estado: null, vigente_hasta: null, notas: null, uso_rfc: 1, dias_para_vencer: 3 }];
     }
     if (opciones?.method === "PUT") return {};
     throw new Error(`llamada inesperada: ${ruta}`);
@@ -89,15 +102,63 @@ describe("AdminSuscripciones", () => {
     expect(within(tabla).queryByText("Notas")).not.toBeInTheDocument();
   });
 
-  it("el administrador abre el historial completo de una cuenta", async () => {
+  it("avisa del vencimiento próximo", async () => {
+    renderCon(<MiSuscripcion />, mia({ dias_para_vencer: 3 }));
+    expect(await screen.findByText(/Tu suscripción vence en 3 días/)).toBeInTheDocument();
+  });
+
+  it("muestra mis datos fiscales y mis pagos", async () => {
+    renderCon(<MiSuscripcion />);
+    expect(await screen.findByText("ACE010101AA1")).toBeInTheDocument();
+    const tabla = await screen.findByRole("table", { name: "Pagos de la suscripción" });
+    expect(within(tabla).getByText("A-15")).toBeInTheDocument();
+    expect(within(tabla).queryByText("Registró")).not.toBeInTheDocument();
+  });
+
+  it("el administrador abre el detalle de una cuenta", async () => {
     const user = userEvent.setup();
     renderCon(<AdminSuscripciones />, mia({ es_admin_plataforma: true }));
-    await user.click(await screen.findByRole("button", { name: "Historial de ana@despacho.mx" }));
+    expect(await screen.findByText("Vence en 3 días")).toBeInTheDocument();
+    await user.click(await screen.findByRole("button", { name: "Detalle de ana@despacho.mx" }));
     const tabla = await screen.findByRole("table", { name: "Historial de plan" });
     expect(within(tabla).getByText("pago SPEI")).toBeInTheDocument();
     expect(within(tabla).getByText("admin@despacho.mx")).toBeInTheDocument();
     expect(within(tabla).getByText("Suspendida")).toBeInTheDocument();
     expect(apiFetch).toHaveBeenCalledWith("/api/v1/suscripcion/admin/cuentas/u9/historial");
+  });
+
+  it("el administrador registra un pago y guarda los datos fiscales", async () => {
+    const user = userEvent.setup();
+    renderCon(<AdminSuscripciones />, mia({ es_admin_plataforma: true }));
+    await user.click(await screen.findByRole("button", { name: "Detalle de ana@despacho.mx" }));
+    const pago = await screen.findByRole("form", { name: "Registrar pago de ana@despacho.mx" });
+    expect(within(pago).getByRole("button", { name: "Registrar pago" })).toBeDisabled();
+    await user.type(within(pago).getByLabelText("Fecha"), "2026-10-01");
+    await user.type(within(pago).getByLabelText("Monto (MXN)"), "1499.50");
+    await user.type(within(pago).getByLabelText("Folio del CFDI"), "A-16");
+    await user.click(within(pago).getByRole("button", { name: "Registrar pago" }));
+    await waitFor(() =>
+      expect(apiFetch).toHaveBeenCalledWith("/api/v1/suscripcion/admin/cuentas/u9/pagos", {
+        method: "POST",
+        body: JSON.stringify({ fecha: "2026-10-01", monto: "1499.50", referencia: null, folio_cfdi: "A-16" }),
+      }),
+    );
+    expect(await within(pago).findByText("Pago registrado.")).toBeInTheDocument();
+
+    const fiscales = screen.getByRole("form", { name: "Datos fiscales de ana@despacho.mx" });
+    await user.type(within(fiscales).getByLabelText("RFC"), "ACE010101AA1");
+    await user.type(within(fiscales).getByLabelText("Razón social"), "ACME");
+    await user.type(within(fiscales).getByLabelText("Régimen fiscal"), "601");
+    await user.type(within(fiscales).getByLabelText("Código postal"), "68000");
+    await user.type(within(fiscales).getByLabelText("Uso del CFDI"), "G03");
+    await user.click(within(fiscales).getByRole("button", { name: "Guardar datos fiscales" }));
+    await waitFor(() =>
+      expect(apiFetch).toHaveBeenCalledWith("/api/v1/suscripcion/admin/cuentas/u9/datos-fiscales", {
+        method: "PUT",
+        body: JSON.stringify({ rfc: "ACE010101AA1", razon_social: "ACME", regimen_fiscal: "601",
+                               codigo_postal: "68000", uso_cfdi: "G03" }),
+      }),
+    );
   });
 
   it("asigna un plan a una cuenta", async () => {

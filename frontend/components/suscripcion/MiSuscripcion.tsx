@@ -4,8 +4,9 @@ import { AlertTriangle } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ErrorState } from "@/components/shared/ErrorState";
 import { LoadingState } from "@/components/shared/LoadingState";
-import { useMiHistorial, useMiSuscripcion, usePlanes } from "@/hooks/useSuscripcion";
+import { useMiHistorial, useMiSuscripcion, useMisDatosFiscales, useMisPagos, usePlanes } from "@/hooks/useSuscripcion";
 import { formatearFecha, formatearMoneda } from "@/lib/formato";
+import { PagosTabla } from "./PagosTabla";
 import { ETIQUETA_ESTADO, type AsignacionHistorial, type MiSuscripcionDatos, type Plan } from "./tipos";
 
 const MOTIVO: Record<NonNullable<MiSuscripcionDatos["motivo"]>, string> = {
@@ -85,6 +86,8 @@ export function MiSuscripcion() {
   const mia = useMiSuscripcion();
   const planes = usePlanes();
   const historial = useMiHistorial();
+  const fiscales = useMisDatosFiscales();
+  const pagos = useMisPagos();
 
   if (mia.isLoading) return <LoadingState label="Consultando suscripción" />;
   if (mia.isError || !mia.data) {
@@ -104,6 +107,15 @@ export function MiSuscripcion() {
           </p>
         </CardHeader>
         <CardContent className="space-y-4 px-5 pb-5 sm:px-6">
+          {datos.dias_para_vencer !== null && (
+            <p role="status" className="flex items-start gap-2 rounded-md border border-status-pendiente/30 bg-status-pendiente-soft p-3 text-sm text-status-pendiente">
+              <AlertTriangle className="mt-0.5 h-4 w-4 flex-none" />
+              {datos.dias_para_vencer === 0
+                ? "Tu suscripción vence hoy."
+                : `Tu suscripción vence en ${datos.dias_para_vencer} ${datos.dias_para_vencer === 1 ? "día" : "días"}.`}{" "}
+              Contacta a tu proveedor para renovarla; al vencer aplica el plan por defecto.
+            </p>
+          )}
           <Uso datos={datos} />
           {datos.motivo && <p className="text-sm text-muted-foreground">{MOTIVO[datos.motivo]}</p>}
           {!datos.puede_agregar_rfc && (
@@ -145,6 +157,42 @@ export function MiSuscripcion() {
           </CardContent>
         </Card>
       )}
+
+      <Card>
+        <CardHeader className="px-5 py-5 sm:px-6">
+          <CardTitle className="font-display text-base">Pagos y facturación</CardTitle>
+          <CardDescription>
+            Los pagos los registra tu proveedor y el CFDI de la suscripción se emite con estos datos fiscales.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4 px-5 pb-5 sm:px-6">
+          {fiscales.data ? (
+            <dl aria-label="Datos fiscales" className="grid grid-cols-1 gap-2 text-sm sm:grid-cols-5">
+              {(
+                [
+                  ["RFC", fiscales.data.rfc],
+                  ["Razón social", fiscales.data.razon_social],
+                  ["Régimen", fiscales.data.regimen_fiscal],
+                  ["Código postal", fiscales.data.codigo_postal],
+                  ["Uso del CFDI", fiscales.data.uso_cfdi],
+                ] as const
+              ).map(([etiqueta, valor]) => (
+                <div key={etiqueta}>
+                  <dt className="text-xs text-muted-foreground">{etiqueta}</dt>
+                  <dd className="font-medium">{valor}</dd>
+                </div>
+              ))}
+            </dl>
+          ) : (
+            fiscales.data === null && (
+              <p className="text-sm text-muted-foreground">
+                Aún no hay datos fiscales para tu factura. Envíalos a tu proveedor para que los capture.
+              </p>
+            )
+          )}
+          {pagos.data && <PagosTabla pagos={pagos.data} />}
+        </CardContent>
+      </Card>
 
       {historial.data && (
         <Card>

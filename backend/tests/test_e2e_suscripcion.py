@@ -209,3 +209,53 @@ def test_historial_de_asignaciones(entorno):
                       headers=h_admin).status_code == 404
     # Una cuenta no ve el historial de otra.
     assert client.get("/api/v1/suscripcion/historial", headers=h_otro).json() == []
+
+
+def test_datos_fiscales_pagos_y_aviso_de_vencimiento(entorno):
+    """M7.2 (D10): el admin captura datos fiscales y registra pagos a mano; la cuenta los
+    ve sin quién los registró y recibe el aviso de vencimiento próximo."""
+    from datetime import timedelta
+
+    from backend import suscripcion_datos
+
+    db, client, h_titular, h_admin, h_otro = entorno
+    titular = _id(db, TITULAR)
+    base = f"/api/v1/suscripcion/admin/cuentas/{titular}"
+    fiscales = {"rfc": "ace010101aa1", "razon_social": "ACME SA DE CV", "regimen_fiscal": "601",
+                "codigo_postal": "68000", "uso_cfdi": "G03"}
+
+    assert client.get("/api/v1/suscripcion/datos-fiscales", headers=h_titular).json() is None
+    assert client.put(f"{base}/datos-fiscales", headers=h_otro, json=fiscales).status_code == 403
+    assert client.put(f"{base}/datos-fiscales", headers=h_admin, json={**fiscales, "regimen_fiscal": "612"}).status_code == 422
+    r = client.put(f"{base}/datos-fiscales", headers=h_admin, json=fiscales)
+    assert r.status_code == 200, r.text
+    mios = client.get("/api/v1/suscripcion/datos-fiscales", headers=h_titular).json()
+    assert (mios["rfc"], mios["uso_cfdi"]) == ("ACE010101AA1", "G03")
+
+    # Pagos: solo el admin registra; la cuenta ve los suyos sin quién los registró.
+    hoy = suscripcion_datos.hoy()
+    assert client.post(f"{base}/pagos", headers=h_otro, json={"fecha": hoy.isoformat(), "monto": "1"}).status_code == 403
+    assert client.post(f"{base}/pagos", headers=h_admin,
+                       json={"fecha": (hoy + timedelta(days=1)).isoformat(), "monto": "1"}).status_code == 422
+    for dias, monto, folio in ((40, "1499", "A-1"), (10, "1499.50", None)):
+        r = client.post(f"{base}/pagos", headers=h_admin,
+                        json={"fecha": (hoy - timedelta(days=dias)).isoformat(), "monto": monto,
+                              "referencia": "SPEI", "folio_cfdi": folio})
+        assert r.status_code == 201, r.text
+    mios = client.get("/api/v1/suscripcion/pagos", headers=h_titular).json()
+    assert [(p["monto"], p["folio_cfdi"]) for p in mios] == [("1499.50", None), ("1499.00", "A-1")]
+    assert all("registrado_por" not in p for p in mios)
+    completos = client.get(f"{base}/pagos", headers=h_admin).json()
+    assert {p["registrado_por"] for p in completos} == {ADMIN}
+    assert client.get("/api/v1/suscripcion/pagos", headers=h_otro).json() == []
+    acciones = [f["accion"] for f in db.query_all(
+        "SELECT accion FROM auditoria WHERE entidad_id = %s ORDER BY creado_en", (titular,))]
+    assert acciones.count("suscripcion.registrar_pago") == 2 and "suscripcion.datos_fiscales" in acciones
+
+    # Aviso: vence en 5 días → 5; en 30, sin aviso.
+    for dias, aviso in ((5, 5), (30, None)):
+        vence = (hoy + timedelta(days=dias)).isoformat()
+        assert client.put(base, headers=h_admin, json={"plan_clave": "basico", "vigente_hasta": vence}).status_code == 200
+        assert _mia(client, h_titular)["dias_para_vencer"] == aviso
+        [cuenta] = client.get("/api/v1/suscripcion/admin/cuentas", headers=h_admin, params={"q": "m7-titular"}).json()
+        assert cuenta["dias_para_vencer"] == aviso

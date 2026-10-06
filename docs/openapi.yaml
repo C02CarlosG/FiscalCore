@@ -3538,6 +3538,7 @@ paths:
                   motivo: { type: string, nullable: true, enum: [sin_suscripcion, suspendida, cancelada, vencida, plan_no_disponible, null] }
                   uso_rfc: { type: integer }
                   puede_agregar_rfc: { type: boolean }
+                  dias_para_vencer: { type: integer, nullable: true, description: "Días para el vencimiento si es en 15 días o menos (aviso solo en la interfaz, D10)" }
                   es_admin_plataforma: { type: boolean }
         '401':
           $ref: '#/components/responses/UnauthorizedError'
@@ -3556,6 +3557,39 @@ paths:
               schema:
                 type: array
                 items: { $ref: '#/components/schemas/AsignacionPlan' }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /api/v1/suscripcion/datos-fiscales:
+    get:
+      operationId: misDatosFiscalesSuscripcion
+      tags: [Suscripción]
+      summary: Datos fiscales con los que se emite el CFDI de mi suscripción (null si no hay)
+      description: Los captura el administrador de la plataforma (M7.2, decisión D10).
+      responses:
+        '200':
+          description: Datos fiscales o null
+          content:
+            application/json:
+              schema:
+                nullable: true
+                allOf: [{ $ref: '#/components/schemas/DatosFiscalesCliente' }]
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /api/v1/suscripcion/pagos:
+    get:
+      operationId: misPagosSuscripcion
+      tags: [Suscripción]
+      summary: Pagos de mi suscripción registrados a mano, del más reciente al más antiguo (hasta 100)
+      responses:
+        '200':
+          description: Pagos
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/PagoSuscripcion' }
         '401':
           $ref: '#/components/responses/UnauthorizedError'
 
@@ -3599,6 +3633,7 @@ paths:
                     vigente_hasta: { type: string, format: date, nullable: true }
                     notas: { type: string, nullable: true }
                     uso_rfc: { type: integer }
+                    dias_para_vencer: { type: integer, nullable: true }
         '401':
           $ref: '#/components/responses/UnauthorizedError'
         '403':
@@ -3668,6 +3703,125 @@ paths:
           $ref: '#/components/responses/ForbiddenError'
         '404':
           $ref: '#/components/responses/NotFoundError'
+
+  /api/v1/suscripcion/admin/cuentas/{usuario_id}/datos-fiscales:
+    get:
+      operationId: datosFiscalesDeCuenta
+      tags: [Suscripción]
+      summary: Datos fiscales de una cuenta (solo admin de la plataforma; null si no hay)
+      parameters:
+        - { name: usuario_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Datos fiscales o null
+          content:
+            application/json:
+              schema:
+                nullable: true
+                allOf: [{ $ref: '#/components/schemas/DatosFiscalesCliente' }]
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+    put:
+      operationId: editarDatosFiscalesDeCuenta
+      tags: [Suscripción]
+      summary: Captura o corrige los datos fiscales de una cuenta (solo admin de la plataforma)
+      description: |
+        RFC válido; régimen del catálogo c_RegimenFiscal que corresponda a persona física
+        (RFC de 13) o moral (RFC de 12); código postal de 5 dígitos; uso del catálogo
+        c_UsoCFDI 4.0. Se audita `suscripcion.datos_fiscales`.
+      parameters:
+        - { name: usuario_id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [rfc, razon_social, regimen_fiscal, codigo_postal, uso_cfdi]
+              properties:
+                rfc: { type: string }
+                razon_social: { type: string, maxLength: 254 }
+                regimen_fiscal: { type: string, example: '601' }
+                codigo_postal: { type: string, pattern: '^[0-9]{5}$' }
+                uso_cfdi: { type: string, example: G03 }
+      responses:
+        '200':
+          description: Datos guardados
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DatosFiscalesCliente' }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '422':
+          description: Dato inválido
+
+  /api/v1/suscripcion/admin/cuentas/{usuario_id}/pagos:
+    get:
+      operationId: pagosDeCuenta
+      tags: [Suscripción]
+      summary: Pagos registrados de una cuenta, con quién los registró (solo admin de la plataforma)
+      parameters:
+        - { name: usuario_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Pagos
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  allOf:
+                    - $ref: '#/components/schemas/PagoSuscripcion'
+                    - type: object
+                      properties:
+                        registrado_por: { type: string, nullable: true, description: Correo de quien lo registró }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+    post:
+      operationId: registrarPagoDeCuenta
+      tags: [Suscripción]
+      summary: Registra un pago recibido fuera de la plataforma (D10, sin cobro en línea)
+      description: Fecha no futura; monto mayor que 0 con hasta dos decimales, como texto. Se audita `suscripcion.registrar_pago`.
+      parameters:
+        - { name: usuario_id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [fecha, monto]
+              properties:
+                fecha: { type: string, format: date }
+                monto: { type: string, example: '1499.00' }
+                referencia: { type: string, maxLength: 200, nullable: true }
+                folio_cfdi: { type: string, maxLength: 40, nullable: true, description: Folio del CFDI emitido por la suscripción }
+      responses:
+        '201':
+          description: Pago registrado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PagoSuscripcion' }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '422':
+          description: Dato inválido
 
   /api/v1/suscripcion/admin/cuentas/{usuario_id}:
     put:
@@ -5114,6 +5268,25 @@ components:
         rol: { type: string, enum: [administrador, contador] }
         cuenta_creada: { type: string, format: date-time, nullable: true }
         aceptada: { type: string, format: date-time, nullable: true }
+
+    DatosFiscalesCliente:
+      type: object
+      properties:
+        rfc: { type: string }
+        razon_social: { type: string }
+        regimen_fiscal: { type: string }
+        codigo_postal: { type: string }
+        uso_cfdi: { type: string }
+        actualizado: { type: string, format: date-time }
+
+    PagoSuscripcion:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        fecha: { type: string, format: date }
+        monto: { type: string, description: MXN, dos decimales }
+        referencia: { type: string, nullable: true }
+        folio_cfdi: { type: string, nullable: true }
 
     AsignacionPlan:
       type: object
