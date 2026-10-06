@@ -1029,6 +1029,7 @@ paths:
         - { name: metodo, in: query, schema: { type: string, enum: [PUE, PPD, todos], default: todos } }
         - { name: pago, in: query, schema: { type: string, enum: [pendientes, pagadas, todos], default: todos }, description: Solo aplica con metodo=PPD }
         - { name: q, in: query, schema: { type: string, maxLength: 100 }, description: 'Busca en UUID, RFC y nombre de la contraparte, serie y folio' }
+        - { name: etiqueta, in: query, schema: { type: string, format: uuid }, description: 'Solo los CFDI con esa etiqueta de la empresa' }
         - { name: filtros, in: query, schema: { type: string }, description: 'JSON: lista de hasta 10 objetos {campo, op, valor}' }
         - { name: orden, in: query, schema: { type: string, default: fecha_emision }, description: Clave de una columna ordenable }
         - { name: dir, in: query, schema: { type: string, enum: [asc, desc], default: asc } }
@@ -1080,6 +1081,7 @@ paths:
         - { name: metodo, in: query, schema: { type: string, enum: [PUE, PPD, todos], default: todos } }
         - { name: pago, in: query, schema: { type: string, enum: [pendientes, pagadas, todos], default: todos } }
         - { name: q, in: query, schema: { type: string, maxLength: 100 } }
+        - { name: etiqueta, in: query, schema: { type: string, format: uuid }, description: 'Solo los CFDI con esa etiqueta de la empresa' }
         - { name: filtros, in: query, schema: { type: string } }
       responses:
         '200':
@@ -1163,6 +1165,7 @@ paths:
         - { name: metodo, in: query, schema: { type: string, enum: [PUE, PPD, todos], default: todos } }
         - { name: pago, in: query, schema: { type: string, enum: [pendientes, pagadas, todos], default: todos } }
         - { name: q, in: query, schema: { type: string, maxLength: 100 } }
+        - { name: etiqueta, in: query, schema: { type: string, format: uuid }, description: 'Solo los CFDI con esa etiqueta de la empresa' }
         - { name: filtros, in: query, schema: { type: string } }
         - { name: orden, in: query, schema: { type: string, default: fecha_emision } }
         - { name: dir, in: query, schema: { type: string, enum: [asc, desc], default: asc } }
@@ -1305,6 +1308,248 @@ paths:
           $ref: '#/components/responses/ForbiddenError'
         '404':
           description: No pertenece a la empresa o no hay XML guardado
+
+  /api/v1/empresas/{empresa_id}/etiquetas:
+    get:
+      operationId: listarEtiquetas
+      tags: [CFDI]
+      summary: Catalogo de etiquetas de la empresa, con cuantos CFDI tiene cada una
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+      responses:
+        '200': { description: "{ items: [{ id, nombre, color, cfdis }] }" }
+        '401': { $ref: '#/components/responses/UnauthorizedError' }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+    post:
+      operationId: crearEtiqueta
+      tags: [CFDI]
+      summary: Crea una etiqueta (nombre unico sin distinguir mayusculas; hasta 100 por empresa)
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [nombre]
+              properties:
+                nombre: { type: string, maxLength: 40 }
+                color: { type: string, pattern: '^#[0-9a-fA-F]{6}$' }
+      responses:
+        '201': { description: Etiqueta creada }
+        '401': { $ref: '#/components/responses/UnauthorizedError' }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+        '409': { description: Ya existe una etiqueta con ese nombre }
+        '413': { description: Tope de etiquetas por empresa }
+        '422': { description: Nombre o color invalido }
+
+  /api/v1/empresas/{empresa_id}/etiquetas/{etiqueta_id}:
+    patch:
+      operationId: editarEtiqueta
+      tags: [CFDI]
+      summary: Cambia el nombre o el color de una etiqueta
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - { name: etiqueta_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                nombre: { type: string, maxLength: 40 }
+                color: { type: string, pattern: '^#[0-9a-fA-F]{6}$' }
+      responses:
+        '200': { description: Etiqueta actualizada }
+        '401': { $ref: '#/components/responses/UnauthorizedError' }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+        '404': { description: La etiqueta no existe o es de otra empresa }
+        '409': { description: Ya existe una etiqueta con ese nombre }
+        '422': { description: Nombre o color invalido }
+    delete:
+      operationId: borrarEtiqueta
+      tags: [CFDI]
+      summary: Borra la etiqueta y la quita de todos los CFDI
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - { name: etiqueta_id, in: path, required: true, schema: { type: string } }
+      responses:
+        '204': { description: Borrada }
+        '401': { $ref: '#/components/responses/UnauthorizedError' }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+        '404': { description: La etiqueta no existe o es de otra empresa }
+
+  /api/v1/empresas/{empresa_id}/cfdis/etiquetas/lote:
+    post:
+      operationId: etiquetarCfdiLote
+      tags: [CFDI]
+      summary: Agrega o quita etiquetas a hasta 500 CFDI (idempotente)
+      description: |
+        Los UUID que no son de la empresa se ignoran sin avisar cuales. Una etiqueta
+        de otra empresa responde 404 para todo el lote. Se audita (`cfdi_etiquetas_lote`).
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [uuids]
+              properties:
+                uuids: { type: array, maxItems: 500, items: { type: string, maxLength: 36 } }
+                agregar: { type: array, items: { type: string } }
+                quitar: { type: array, items: { type: string } }
+      responses:
+        '200': { description: "{ cfdis, agregados, quitados }" }
+        '401': { $ref: '#/components/responses/UnauthorizedError' }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+        '404': { description: Alguna etiqueta no existe o es de otra empresa }
+        '413': { description: Mas de 500 CFDI o mas de 10 etiquetas }
+        '422': { description: Lote vacio o etiqueta repetida en agregar y quitar }
+
+  /api/v1/empresas/{empresa_id}/cfdis/{uuid}/etiquetas:
+    get:
+      operationId: etiquetasDelCfdi
+      tags: [CFDI]
+      summary: Etiquetas asignadas a un CFDI
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - { name: uuid, in: path, required: true, schema: { type: string, maxLength: 36 } }
+      responses:
+        '200': { description: "{ items: [{ id, nombre, color }] }" }
+        '401': { $ref: '#/components/responses/UnauthorizedError' }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+        '404': { description: El UUID no pertenece a la empresa }
+
+  /api/v1/empresas/{empresa_id}/cfdis/{uuid}/comentarios:
+    get:
+      operationId: listarComentariosCfdi
+      tags: [CFDI]
+      summary: Comentarios de un CFDI, del mas antiguo al mas reciente
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - { name: uuid, in: path, required: true, schema: { type: string, maxLength: 36 } }
+      responses:
+        '200': { description: "{ items: [{ id, texto, creado, autor, puede_borrar }] }" }
+        '401': { $ref: '#/components/responses/UnauthorizedError' }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+        '404': { description: El UUID no pertenece a la empresa }
+    post:
+      operationId: crearComentarioCfdi
+      tags: [CFDI]
+      summary: Agrega un comentario (hasta 2000 caracteres)
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - { name: uuid, in: path, required: true, schema: { type: string, maxLength: 36 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [texto]
+              properties:
+                texto: { type: string, maxLength: 2000 }
+      responses:
+        '201': { description: Comentario creado }
+        '401': { $ref: '#/components/responses/UnauthorizedError' }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+        '404': { description: El UUID no pertenece a la empresa }
+        '422': { description: Comentario vacio o demasiado largo }
+
+  /api/v1/empresas/{empresa_id}/cfdis/{uuid}/comentarios/{comentario_id}:
+    delete:
+      operationId: borrarComentarioCfdi
+      tags: [CFDI]
+      summary: Borra un comentario (quien lo escribio o un administrador de la empresa)
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - { name: uuid, in: path, required: true, schema: { type: string, maxLength: 36 } }
+        - { name: comentario_id, in: path, required: true, schema: { type: string } }
+      responses:
+        '204': { description: Borrado }
+        '401': { $ref: '#/components/responses/UnauthorizedError' }
+        '403': { description: Sin acceso a la empresa, o no es suyo ni es administrador }
+        '404': { description: No existe o es de otra empresa }
+
+  /api/v1/empresas/{empresa_id}/cfdis/{uuid}/evidencias:
+    get:
+      operationId: listarEvidenciasCfdi
+      tags: [CFDI]
+      summary: Evidencias de un CFDI (solo metadatos; el contenido viaja en la descarga)
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - { name: uuid, in: path, required: true, schema: { type: string, maxLength: 36 } }
+      responses:
+        '200': { description: "{ items: [{ id, nombre, tipo, tamano, creado, autor, puede_borrar }] }" }
+        '401': { $ref: '#/components/responses/UnauthorizedError' }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+        '404': { description: El UUID no pertenece a la empresa }
+    post:
+      operationId: subirEvidenciaCfdi
+      tags: [CFDI]
+      summary: Adjunta un archivo al CFDI
+      description: |
+        PDF, PNG, JPG, XLSX, XML, TXT o CSV de hasta 5 MB, hasta 20 por CFDI. El tipo
+        se decide por el contenido del archivo, no por la extension ni el Content-Type
+        declarados. El nombre se sanea. Se audita (`cfdi_evidencia_subida`).
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - { name: uuid, in: path, required: true, schema: { type: string, maxLength: 36 } }
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [archivo]
+              properties:
+                archivo: { type: string, format: binary }
+      responses:
+        '201': { description: Evidencia guardada }
+        '401': { $ref: '#/components/responses/UnauthorizedError' }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+        '404': { description: El UUID no pertenece a la empresa }
+        '413': { description: Archivo de mas de 5 MB o CFDI con 20 evidencias }
+        '422': { description: Tipo no permitido, archivo vacio o contenido que no corresponde a la extension }
+
+  /api/v1/empresas/{empresa_id}/cfdis/{uuid}/evidencias/{evidencia_id}:
+    get:
+      operationId: descargarEvidenciaCfdi
+      tags: [CFDI]
+      summary: Descarga una evidencia
+      description: |
+        Siempre como adjunto (`Content-Disposition: attachment`, `X-Content-Type-Options: nosniff`).
+        Se audita (`cfdi_evidencia_descargada`).
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - { name: uuid, in: path, required: true, schema: { type: string, maxLength: 36 } }
+        - { name: evidencia_id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Contenido del archivo
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        '401': { $ref: '#/components/responses/UnauthorizedError' }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+        '404': { description: No existe o es de otra empresa }
+    delete:
+      operationId: borrarEvidenciaCfdi
+      tags: [CFDI]
+      summary: Borra una evidencia (quien la subio o un administrador de la empresa)
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - { name: uuid, in: path, required: true, schema: { type: string, maxLength: 36 } }
+        - { name: evidencia_id, in: path, required: true, schema: { type: string } }
+      responses:
+        '204': { description: Borrada }
+        '401': { $ref: '#/components/responses/UnauthorizedError' }
+        '403': { description: Sin acceso a la empresa, o no es suya ni es administrador }
+        '404': { description: No existe o es de otra empresa }
 
   /api/v1/empresas/{empresa_id}/inicio/resumen:
     get:

@@ -25,7 +25,7 @@ from slowapi.middleware import SlowAPIMiddleware
 from . import db
 from .proxy import instalar_proxy
 from .deps import limiter  # importar deps.py valida JWT_SECRET al arrancar
-from .routers import auth, empresas, ingesta, riesgos, scoring, conciliacion, dashboard, sat, admin, reportes, movimientos, cfdis, preferencias
+from .routers import auth, empresas, ingesta, riesgos, scoring, conciliacion, dashboard, sat, admin, reportes, movimientos, cfdis, preferencias, cfdi_notas
 from .routers import inicio
 from .routers import informacion_fiscal
 from .routers import iva_flujo
@@ -89,6 +89,7 @@ app.include_router(admin.router)
 app.include_router(reportes.router)
 app.include_router(movimientos.router)
 app.include_router(cfdis.router)
+app.include_router(cfdi_notas.router)
 app.include_router(preferencias.router)
 app.include_router(inicio.router)
 app.include_router(informacion_fiscal.router)

@@ -39,7 +39,9 @@ def _celda(col: Columna, valor: Any) -> tuple[Any, str | None]:
     if col.tipo_dato == "booleano":
         return "Sí" if valor else "No", None
     if col.tipo_dato == "lista":
-        return ", ".join(str(v) for v in valor) if isinstance(valor, list) else str(valor), None
+        if isinstance(valor, list):
+            return ", ".join(str(v["nombre"] if isinstance(v, dict) else v) for v in valor), None
+        return str(valor), None
     if col.tipo_dato == "numero":
         return float(valor), None
     return str(valor), None

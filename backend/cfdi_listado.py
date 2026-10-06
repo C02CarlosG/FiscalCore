@@ -28,6 +28,7 @@ MAX_NUMERO = Decimal("1e15")   # holgado para cualquier importe; evita desbordar
 CENTAVOS = Decimal("0.01")
 
 # Años 2000-2099: fuera de eso date() o Postgres fallan, y no hay CFDI.
+_UUID_RE = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
 _PERIODO_RE = re.compile(r"20[0-9]{2}-(0[1-9]|1[0-2])")
 _COMPARACION = {"igual": "=", "mayor": ">", "menor": "<"}
 _NUMERICOS = ("igual", "mayor", "menor", "entre")
@@ -58,6 +59,7 @@ class Consulta:
     metodo: str = "todos"
     pago: str = "todos"
     q: Optional[str] = None
+    etiqueta: Optional[str] = None
     filtros: list[dict] = field(default_factory=list)
     orden: str = "fecha_emision"
     dir: str = "asc"
@@ -161,6 +163,7 @@ def validar(
     dir: str = "asc",
     pagina: int = 1,
     por_pagina: int = 30,
+    etiqueta: Optional[str] = None,
 ) -> Consulta:
     """Valida todos los parámetros contra el catálogo. Lanza ``FiltroInvalido``."""
     _uno_de("direccion", direccion, DIRECCIONES)
@@ -178,6 +181,9 @@ def validar(
     if q and len(q) > MAX_BUSQUEDA:
         raise FiltroInvalido(f"La búsqueda admite hasta {MAX_BUSQUEDA} caracteres")
 
+    if etiqueta is not None and not _UUID_RE.fullmatch(str(etiqueta)):
+        raise FiltroInvalido("etiqueta inválida")
+
     por_clave = {c.clave: c for c in columnas(direccion, tipo)}
     col_orden = por_clave.get(orden)
     if col_orden is None or not col_orden.ordenable:
@@ -185,7 +191,8 @@ def validar(
 
     return Consulta(
         direccion=direccion, periodo=periodo, tipo=tipo, estado=estado, metodo=metodo, pago=pago,
-        q=q, filtros=_validar_filtros(filtros, por_clave), orden=orden, dir=dir,
+        q=q, etiqueta=etiqueta.lower() if etiqueta else None,
+        filtros=_validar_filtros(filtros, por_clave), orden=orden, dir=dir,
         pagina=pagina, por_pagina=por_pagina,
     )
 
@@ -239,6 +246,11 @@ def condiciones(
                   "(COALESCE(c.serie, '') || COALESCE(c.folio, ''))"]
         sql.append("(" + " OR ".join(f"{campo} ILIKE %s ESCAPE '\\'" for campo in campos) + ")")
         params += [patron] * len(campos)
+    if c.etiqueta:
+        # La etiqueta debe ser de esta empresa: una de otra no filtra nada.
+        sql.append("EXISTS (SELECT 1 FROM cfdi_etiquetas ce JOIN etiquetas e ON e.id = ce.etiqueta_id "
+                   "WHERE ce.cfdi_id = c.id AND ce.etiqueta_id = %s AND e.empresa_id = c.empresa_id)")
+        params.append(c.etiqueta)
     for f in c.filtros:
         fragmento, valores = _filtro_sql(por_clave[f["campo"]], f["op"], f["valor"])
         sql.append(fragmento)

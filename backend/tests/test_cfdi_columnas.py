@@ -6,7 +6,7 @@ from backend import cfdi_columnas as cc
 VISIBLES = [
     "fecha_emision", "serie", "folio", "rfc_contraparte", "contraparte", "total", "saldo",
     "pagos_relacionados", "subtotal", "descuento", "neto", "traslado_iva", "uuid_sustituye",
-    "uso_cfdi", "metodo_pago", "forma_pago", "categoria", "estado",
+    "uso_cfdi", "metodo_pago", "forma_pago", "categoria", "estado", "etiquetas", "comentarios", "evidencias",
 ]
 
 
@@ -105,7 +105,7 @@ def test_las_columnas_solo_usan_los_alias_que_su_tipo_define(tipo):
         if col.sql is None:
             continue
         usados = set(re.findall(r"\b([a-z]{1,4})\.[a-z_]+", col.sql))
-        usados -= {"r", "u", "i", "n", "k", "p", "pr", "e"}   # alias internos de subconsultas propias
+        usados -= {"r", "u", "i", "n", "k", "p", "pr", "e", "ce", "v"}   # alias internos de subconsultas propias
         assert usados <= permitidos, (tipo, col.clave, usados)
 
 
