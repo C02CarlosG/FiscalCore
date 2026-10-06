@@ -269,6 +269,9 @@ def init_db() -> None:
         # 064 es idempotente — CHECK de objeto en validaciones_cfdi_config para bases donde la tabla ya existía (V1)
         _run_sql_file("064_validaciones_config_check.sql")
 
+        # 056 es idempotente — declaraciones presentadas para el comparativo contra lo calculado (M5)
+        _run_sql_file("056_declaraciones.sql")
+
         # 065 es idempotente — historial de asignaciones de plan por cuenta (M7.2, carril D)
         _run_sql_file("065_suscripciones_historial.sql")
 
