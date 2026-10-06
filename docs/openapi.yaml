@@ -3206,6 +3206,34 @@ paths:
         '422':
           description: Parametros invalidos
 
+  /api/v1/empresas/{empresa_id}/isr-flujo/{periodo}/exportar:
+    get:
+      operationId: exportarIsrFlujo
+      tags: [ISR por flujo]
+      summary: Excel con el detalle de una cifra del ISR por flujo y el resumen del mes y del acumulado
+      description: |
+        Hoja `Detalle` con todos los renglones de la cifra (base, ISR retenido, nomina, marcas y motivo)
+        y hoja `Resumen` con ingresos, deducciones, utilidad fiscal estimada y retenciones del mes y del
+        acumulado. Si la cifra pasa de 50,000 renglones responde 422. Queda en la auditoria (`isr_flujo_exportado`).
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - { name: periodo, in: path, required: true, schema: { type: string, pattern: '^20[0-9]{2}-(0[1-9]|1[0-2])$' } }
+        - { name: lado, in: query, required: true, schema: { type: string, enum: [ingreso, deduccion] } }
+        - { name: bloque, in: query, required: true, schema: { type: string, enum: [contado, credito, devoluciones, nomina, inversiones, no_considerados] } }
+        - { name: acumulado, in: query, schema: { type: boolean, default: false } }
+      responses:
+        '200':
+          description: Libro de Excel
+          content:
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema: { type: string, format: binary }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '422':
+          description: Parametros invalidos o mas de 50,000 renglones
+
   /api/v1/empresas/{empresa_id}/cedula-iva/{periodo}:
     get:
       operationId: cedulaIva
