@@ -25,7 +25,7 @@ const datos = (puede: boolean): UsuariosDeEmpresa => ({
     ? [{ id: "i1", email: "pendiente@despacho.mx", rol: "contador", estado: "pendiente", creada: "2026-10-04T00:00:00+00:00" }]
     : [],
   por_aprobar: puede
-    ? [{ id: "a1", email: "Victima@corp.com", nombre: "Impostor", rol: "administrador",
+    ? [{ id: "a1", email: "Victima@corp.com", email_invitado: "victima@corp.com", nombre: "Impostor", rol: "administrador",
          cuenta_creada: "2026-10-04T00:00:00+00:00", aceptada: "2026-10-04T01:00:00+00:00" }]
     : [],
 });
@@ -128,6 +128,8 @@ describe("UsuariosEmpresa", () => {
     expect(screen.getByText("Impostor")).toBeInTheDocument();
     expect(screen.getByText("Victima@corp.com")).toBeInTheDocument();
     expect(screen.getByText(/cuenta creada el/)).toBeInTheDocument();
+    // Mismo correo en otras mayúsculas: no se repite el invitado.
+    expect(screen.queryByText(/Invitación enviada a/)).not.toBeInTheDocument();
   });
 
   it("aprueba y rechaza una aceptación", async () => {

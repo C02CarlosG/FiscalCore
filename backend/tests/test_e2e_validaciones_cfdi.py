@@ -81,6 +81,11 @@ def _sembrar(db, empresa_id, otra_empresa_id):
     combustible = _recibido(db, empresa_id, 24, forma_pago="01", total="500")   # gasolina en efectivo: cuenta
     db.execute("INSERT INTO cfdi_conceptos (cfdi_id, linea, clave_prod_serv, descripcion, cantidad, valor_unitario, importe)"
                " VALUES (%s, 1, '15101514', 'Gasolina', 20, 25, 500)", (combustible,))
+    # Gas LP (clase 151115): en efectivo se advierte por cualquier monto; por transferencia, no.
+    for n, forma in ((25, "01"), (26, "03")):
+        gas = _recibido(db, empresa_id, n, forma_pago=forma, total="300")
+        db.execute("INSERT INTO cfdi_conceptos (cfdi_id, linea, clave_prod_serv, descripcion, cantidad, valor_unitario, importe)"
+                   " VALUES (%s, 1, '15111510', 'Gas LP', 30, 10, 300)", (gas,))
     # Otra empresa con el mismo RFC emisor: nunca cuenta.
     _cfdi(db, otra_empresa_id, 30, forma_pago="99")
 
@@ -135,7 +140,11 @@ def test_conteos_del_periodo_y_acumulado(entorno):
     }
     assert _conteos(cuerpo, "recibidos") == {
         "pue_forma_99": (1, 1), "pue_con_rep": (0, 0), "egreso_sin_relacion": (0, 0), "no_bancarizado": (3, 3),
+        "gas_efectivo": (1, 1),
     }
+    gas = next(t for t in cuerpo["recibidos"] if t["clave"] == "gas_efectivo")
+    assert gas["tipo"] == "advertencia"
+    assert next(t for t in cuerpo["recibidos"] if t["clave"] == "no_bancarizado")["tipo"] == "exclusion"
     assert cuerpo["configuracion"] == {"inactivas": [], "umbral_efectivo": "2000.00"}
 
 
@@ -146,6 +155,7 @@ def test_lista_trae_exactamente_lo_que_se_cuenta(entorno):
     assert lista["total_filas"] == 2
     lista = _lista(client, headers, base, "recibidos", "no_bancarizado")
     assert {f["uuid"] for f in lista["cfdis"]} == {_uuid(21), _uuid(22), _uuid(24)}
+    assert [f["uuid"] for f in _lista(client, headers, base, "recibidos", "gas_efectivo")["cfdis"]] == [_uuid(25)]
     fila = next(f for f in lista["cfdis"] if f["uuid"] == _uuid(22))
     assert (fila["rfc"], fila["moneda"], fila["forma_pago"]) == (PROV, "USD", "01")
     assert [f["uuid"] for f in _lista(client, headers, base, "emitidos", "pue_con_rep")["cfdis"]] == [_uuid(4)]

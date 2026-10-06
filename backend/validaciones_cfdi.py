@@ -26,6 +26,10 @@ UMBRAL_MAXIMO = UMBRAL_EFECTIVO
 # Clase SAT 151015 "Petróleo y destilados" (gasolinas, diésel): en efectivo no es
 # deducible sin importar el monto (art. 27-III LISR, segundo párrafo).
 PREFIJO_COMBUSTIBLES = "151015"
+# Clase SAT 151115 (gas LP, gas natural). Es combustible vehicular solo según su uso, que
+# el CFDI no dice: por eso se señala como advertencia y no como gasto no deducible.
+PREFIJO_GAS = "151115"
+TIPOS = ("exclusion", "advertencia")
 _PERIODO_RE = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
 
 
@@ -39,6 +43,9 @@ class Validacion:
     titulo: str
     descripcion: str
     direcciones: tuple[str, ...]
+    # "exclusion": el CFDI no es deducible o está mal emitido. "advertencia": depende de un
+    # dato que el CFDI no trae y el contador debe revisarlo.
+    tipo: str = "exclusion"
 
 
 CATALOGO: tuple[Validacion, ...] = (
@@ -65,6 +72,14 @@ CATALOGO: tuple[Validacion, ...] = (
         "Recibidos pagados en efectivo por más del umbral, y combustibles en efectivo por "
         "cualquier monto: no deducibles (art. 27-III LISR) ni acreditables (art. 5-I LIVA).",
         ("recibidos",),
+    ),
+    Validacion(
+        "gas_efectivo", "Gas pagado en efectivo",
+        "Gas LP o natural pagado en efectivo (cualquier monto): no es deducible si es "
+        "combustible para vehículos (art. 27-III LISR, último párrafo). El CFDI no dice el "
+        "uso; revisa si fue para vehículos.",
+        ("recibidos",),
+        tipo="advertencia",
     ),
 )
 POR_CLAVE = {x.clave: x for x in CATALOGO}
@@ -189,6 +204,11 @@ _CONDICIONES = {
         f"c.tipo_comprobante = 'I' AND c.forma_pago = '01' AND (c.total * {A_PESOS} > %s "
         "OR EXISTS (SELECT 1 FROM cfdi_conceptos cc WHERE cc.cfdi_id = c.id "
         f"AND cc.clave_prod_serv LIKE '{PREFIJO_COMBUSTIBLES}%%'))"
+    ),
+    "gas_efectivo": (
+        "c.tipo_comprobante = 'I' AND c.forma_pago = '01' AND EXISTS ("
+        "SELECT 1 FROM cfdi_conceptos cc WHERE cc.cfdi_id = c.id "
+        f"AND cc.clave_prod_serv LIKE '{PREFIJO_GAS}%%')"
     ),
 }
 

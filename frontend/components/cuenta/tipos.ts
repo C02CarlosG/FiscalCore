@@ -34,6 +34,8 @@ export interface AceptacionPorAprobar {
   id: string;
   /** Correo y nombre de la cuenta que aceptó, tal como se registró. */
   email: string;
+  /** Correo al que se mandó la invitación (en minúsculas). */
+  email_invitado: string;
   nombre: string | null;
   rol: RolEmpresa;
   cuenta_creada: string | null;
