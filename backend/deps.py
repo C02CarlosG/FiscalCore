@@ -73,7 +73,27 @@ def verificar_token(token: str) -> dict:
 def get_current_user(creds: HTTPAuthorizationCredentials = Depends(_bearer)) -> dict:
     if not creds:
         raise HTTPException(status_code=401, detail="Se requiere autenticación")
-    return verificar_token(creds.credentials)
+    payload = verificar_token(creds.credentials)
+    _validar_sesion(payload)
+    return payload
+
+
+def _validar_sesion(payload: dict) -> None:
+    """401 si el usuario ya no existe, está desactivado o el token es de una versión anterior.
+
+    Los tokens emitidos antes de existir `tv` se toman como versión 0, la de toda cuenta
+    que nunca ha invalidado sesiones.
+    """
+    usuario = db.query_one(
+        "SELECT activo, token_version FROM usuarios WHERE id = %s", (payload.get("user_id"),))
+    if (not usuario or not usuario["activo"]
+            or usuario["token_version"] != payload.get("tv", 0)):
+        raise HTTPException(status_code=401, detail="Sesión no válida. Inicia sesión de nuevo")
+
+
+def invalidar_sesiones(user_id: str) -> None:
+    """Deja sin efecto todos los JWT vigentes del usuario (cambio de contraseña, baja, cambio de rol)."""
+    db.execute("UPDATE usuarios SET token_version = token_version + 1 WHERE id = %s", (user_id,))
 
 
 def require_admin(current_user: dict = Depends(get_current_user)) -> dict:

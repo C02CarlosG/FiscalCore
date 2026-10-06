@@ -28,6 +28,11 @@ class RegisterRequest(BaseModel):
     password: str
     nombre: Optional[str] = None
 
+    @field_validator("email")
+    @classmethod
+    def email_normalizado(cls, v: str) -> str:
+        return v.strip().lower()
+
     @field_validator("password")
     @classmethod
     def password_longitud_minima(cls, v: str) -> str:
@@ -60,6 +65,11 @@ class AgregarEmpresaRequest(BaseModel):
 class LoginRequest(BaseModel):
     email: str
     password: str
+
+    @field_validator("email")
+    @classmethod
+    def email_normalizado(cls, v: str) -> str:
+        return v.strip().lower()
 
 
 class ActualizarPerfilRequest(BaseModel):
