@@ -7,8 +7,12 @@ import type {
   AsignacionHistorial,
   CambioPlan,
   CuentaSuscripcion,
+  DatosFiscalesCliente,
   MiSuscripcionDatos,
+  PagoInput,
+  PagoSuscripcion,
   Plan,
+  Vencimiento,
 } from "@/components/suscripcion/tipos";
 
 const BASE = "/api/v1/suscripcion";
@@ -64,5 +68,87 @@ export function useEditarPlan() {
     mutationFn: ({ clave, cambio }: { clave: string; cambio: CambioPlan }) =>
       apiFetch<Plan>(`${BASE}/admin/planes/${clave}`, { method: "PUT", body: JSON.stringify(cambio) }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: CLAVE }),
+  });
+}
+
+export function useMisDatosFiscales() {
+  return useQuery({
+    queryKey: [...CLAVE, "datos-fiscales"],
+    queryFn: () => apiFetch<DatosFiscalesCliente | null>(`${BASE}/datos-fiscales`),
+  });
+}
+
+export function useMisPagos() {
+  return useQuery({ queryKey: [...CLAVE, "pagos"], queryFn: () => apiFetch<PagoSuscripcion[]>(`${BASE}/pagos`) });
+}
+
+export function useDatosFiscalesCuenta(usuarioId: string, habilitado: boolean) {
+  return useQuery({
+    queryKey: [...CLAVE, "datos-fiscales", usuarioId],
+    queryFn: () => apiFetch<DatosFiscalesCliente | null>(`${BASE}/admin/cuentas/${usuarioId}/datos-fiscales`),
+    enabled: habilitado,
+  });
+}
+
+export function usePagosCuenta(usuarioId: string, habilitado: boolean) {
+  return useQuery({
+    queryKey: [...CLAVE, "pagos", usuarioId],
+    queryFn: () => apiFetch<PagoSuscripcion[]>(`${BASE}/admin/cuentas/${usuarioId}/pagos`),
+    enabled: habilitado,
+  });
+}
+
+export function useGuardarDatosFiscales(usuarioId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (datos: DatosFiscalesCliente) =>
+      apiFetch<DatosFiscalesCliente>(`${BASE}/admin/cuentas/${usuarioId}/datos-fiscales`, {
+        method: "PUT",
+        body: JSON.stringify(datos),
+      }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: [...CLAVE, "datos-fiscales", usuarioId] }),
+  });
+}
+
+export function useRegistrarPago(usuarioId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (pago: PagoInput) =>
+      apiFetch<PagoSuscripcion>(`${BASE}/admin/cuentas/${usuarioId}/pagos`, {
+        method: "POST",
+        body: JSON.stringify(pago),
+      }),
+    // El pago extiende la vigencia: se refrescan pagos, historial, cuentas y vencimientos.
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: CLAVE }),
+  });
+}
+
+export function useGuardarMisDatosFiscales() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (datos: DatosFiscalesCliente) =>
+      apiFetch<DatosFiscalesCliente>(`${BASE}/datos-fiscales`, { method: "PUT", body: JSON.stringify(datos) }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: [...CLAVE, "datos-fiscales"] }),
+  });
+}
+
+export function useAnularPago(usuarioId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ pagoId, motivo }: { pagoId: string; motivo: string }) =>
+      apiFetch<{ vigencia_revertida: boolean }>(`${BASE}/admin/cuentas/${usuarioId}/pagos/${pagoId}/anular`, {
+        method: "POST",
+        body: JSON.stringify({ motivo }),
+      }),
+    // Anular puede revertir la vigencia: se refrescan pagos, historial y cuentas.
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: CLAVE }),
+  });
+}
+
+export function useVencimientos(habilitado: boolean) {
+  return useQuery({
+    queryKey: [...CLAVE, "vencimientos"],
+    queryFn: () => apiFetch<Vencimiento[]>(`${BASE}/admin/vencimientos`),
+    enabled: habilitado,
   });
 }

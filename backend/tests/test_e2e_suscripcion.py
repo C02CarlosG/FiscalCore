@@ -209,3 +209,132 @@ def test_historial_de_asignaciones(entorno):
                       headers=h_admin).status_code == 404
     # Una cuenta no ve el historial de otra.
     assert client.get("/api/v1/suscripcion/historial", headers=h_otro).json() == []
+
+
+def test_datos_fiscales_los_editan_la_cuenta_y_el_admin(entorno):
+    db, client, h_titular, h_admin, h_otro = entorno
+    titular = _id(db, TITULAR)
+    base = f"/api/v1/suscripcion/admin/cuentas/{titular}"
+    fiscales = {"rfc": "ace010101aa1", "razon_social": "ACME SA DE CV", "regimen_fiscal": "601",
+                "codigo_postal": "68000", "uso_cfdi": "G03", "correo": "Facturas@ACME.mx"}
+
+    assert client.get("/api/v1/suscripcion/datos-fiscales", headers=h_titular).json() is None
+    assert client.put(f"{base}/datos-fiscales", headers=h_otro, json=fiscales).status_code == 403
+    assert client.put("/api/v1/suscripcion/datos-fiscales", headers=h_titular,
+                      json={**fiscales, "regimen_fiscal": "612"}).status_code == 422
+    # La cuenta los captura…
+    r = client.put("/api/v1/suscripcion/datos-fiscales", headers=h_titular, json=fiscales)
+    assert r.status_code == 200, r.text
+    assert (r.json()["rfc"], r.json()["correo"]) == ("ACE010101AA1", "facturas@acme.mx")
+    # …y el administrador los corrige; la cuenta ve la corrección.
+    r = client.put(f"{base}/datos-fiscales", headers=h_admin, json={**fiscales, "uso_cfdi": "S01"})
+    assert r.status_code == 200, r.text
+    assert client.get("/api/v1/suscripcion/datos-fiscales", headers=h_titular).json()["uso_cfdi"] == "S01"
+    assert client.get(f"{base}/datos-fiscales", headers=h_admin).json()["uso_cfdi"] == "S01"
+    # Otra cuenta no ve ni toca los de esta.
+    assert client.get("/api/v1/suscripcion/datos-fiscales", headers=h_otro).json() is None
+    por = [f["metadata"]["por"] for f in db.query_all(
+        "SELECT metadata FROM auditoria WHERE accion = 'suscripcion.datos_fiscales' AND entidad_id = %s "
+        "ORDER BY creado_en", (titular,))]
+    assert por == ["cuenta", "admin"]
+
+
+def test_pagos_extienden_la_vigencia_y_anular_la_revierte(entorno):
+    from datetime import timedelta
+
+    from backend import suscripcion_datos
+
+    db, client, h_titular, h_admin, h_otro = entorno
+    titular = _id(db, TITULAR)
+    base = f"/api/v1/suscripcion/admin/cuentas/{titular}"
+    hoy = suscripcion_datos.hoy()
+
+    def pagar(dias_atras, monto, meses=1, **extra):
+        return client.post(f"{base}/pagos", headers=h_admin,
+                           json={"fecha": (hoy - timedelta(days=dias_atras)).isoformat(), "monto": monto,
+                                 "meses": meses, "referencia": "SPEI", **extra})
+
+    # Sin plan asignado no se registran pagos.
+    assert pagar(0, "1").status_code == 409
+    vence = hoy + timedelta(days=10)
+    assert client.put(base, headers=h_admin, json={"plan_clave": "basico", "vigente_hasta": vence.isoformat()}).status_code == 200
+
+    assert client.post(f"{base}/pagos", headers=h_otro, json={"fecha": hoy.isoformat(), "monto": "1"}).status_code == 403
+    assert pagar(-1, "1").status_code == 422      # fecha futura
+
+    # Un pago de 1 mes extiende desde la vigencia (todavía no vencía).
+    r = pagar(0, "499", meses=1, folio_cfdi="A-1")
+    assert r.status_code == 201, r.text
+    primero = r.json()
+    from backend.suscripcion_pagos import sumar_meses
+    assert primero["vigente_hasta_nueva"] == sumar_meses(vence, 1).isoformat()
+    assert _mia(client, h_titular)["vigente_hasta"] == primero["vigente_hasta_nueva"]
+    # El segundo, de 12 meses, parte de la nueva vigencia.
+    segundo = pagar(0, "4990.50", meses=12, uuid_cfdi="6f9619ff-8b86-d011-b42d-00c04fc964ff").json()
+    assert segundo["vigente_hasta_nueva"] == sumar_meses(sumar_meses(vence, 1), 12).isoformat()
+
+    mios = client.get("/api/v1/suscripcion/pagos", headers=h_titular).json()
+    assert {p["monto"] for p in mios} == {"499.00", "4990.50"}
+    assert all("registrado_por" not in p for p in mios)
+    assert {p["registrado_por"] for p in client.get(f"{base}/pagos", headers=h_admin).json()} == {ADMIN}
+    assert client.get("/api/v1/suscripcion/pagos", headers=h_otro).json() == []
+
+    # Anular el primero no revierte: el segundo ya movió la vigencia después.
+    url_primero = f"{base}/pagos/{primero['id']}/anular"
+    assert client.post(url_primero, headers=h_admin, json={}).status_code == 422
+    assert client.post(url_primero, headers=h_otro, json={"motivo": "x"}).status_code == 403
+    r = client.post(url_primero, headers=h_admin, json={"motivo": "duplicado"})
+    assert (r.status_code, r.json()) == (200, {"vigencia_revertida": False})
+    assert client.post(url_primero, headers=h_admin, json={"motivo": "otra vez"}).status_code == 404
+    # Anular el segundo sí revierte a la vigencia anterior a ese pago.
+    r = client.post(f"{base}/pagos/{segundo['id']}/anular", headers=h_admin, json={"motivo": "rebotó"})
+    assert r.json() == {"vigencia_revertida": True}
+    assert _mia(client, h_titular)["vigente_hasta"] == primero["vigente_hasta_nueva"]
+    estados = {p["id"]: (p["estado"], p["motivo_anulacion"]) for p in client.get(f"{base}/pagos", headers=h_admin).json()}
+    assert estados == {primero["id"]: ("anulado", "duplicado"), segundo["id"]: ("anulado", "rebotó")}
+    # La cuenta ve el estado pero no el motivo interno.
+    assert {p["estado"] for p in client.get("/api/v1/suscripcion/pagos", headers=h_titular).json()} == {"anulado"}
+
+    # Un pago con la suscripción ya vencida extiende desde la fecha del pago.
+    assert client.put(base, headers=h_admin,
+                      json={"plan_clave": "basico", "vigente_hasta": (hoy - timedelta(days=20)).isoformat()}).status_code == 200
+    r = pagar(5, "499")
+    assert r.json()["vigente_hasta_nueva"] == sumar_meses(hoy - timedelta(days=5), 1).isoformat()
+
+    # Cada pago y cada anulación que movió la vigencia quedan en el historial.
+    notas = [f["notas"] for f in client.get(f"{base}/historial", headers=h_admin).json()]
+    assert notas.count("Pago anulado") == 1 and sum(1 for n in notas if n and n.startswith("Pago registrado")) == 3
+    acciones = [f["accion"] for f in db.query_all("SELECT accion FROM auditoria WHERE entidad_id = %s", (titular,))]
+    assert acciones.count("suscripcion.registrar_pago") == 3 and acciones.count("suscripcion.anular_pago") == 2
+
+
+def test_avisos_y_lista_de_vencimientos(entorno):
+    from datetime import timedelta
+
+    from backend import suscripcion_datos
+
+    db, client, h_titular, h_admin, h_otro = entorno
+    hoy = suscripcion_datos.hoy()
+    titular, otro = _id(db, TITULAR), _id(db, OTRO)
+    url = "/api/v1/suscripcion/admin/vencimientos"
+    assert client.get(url, headers=h_titular).status_code == 403
+
+    def asignar(uid, dias, estado="activa"):
+        r = client.put(f"/api/v1/suscripcion/admin/cuentas/{uid}", headers=h_admin,
+                       json={"plan_clave": "basico", "estado": estado, "vigente_hasta": (hoy + timedelta(days=dias)).isoformat()})
+        assert r.status_code == 200, r.text
+
+    # Vence en 5 días → aviso 5; vencida hace 3 → -3; en 30 → sin aviso.
+    for dias, aviso in ((5, 5), (-3, -3), (30, None)):
+        asignar(titular, dias)
+        assert _mia(client, h_titular)["dias_para_vencer"] == aviso
+        [cuenta] = client.get("/api/v1/suscripcion/admin/cuentas", headers=h_admin, params={"q": "m7-titular"}).json()
+        assert cuenta["dias_para_vencer"] == aviso
+
+    asignar(titular, -3)
+    asignar(otro, 2)
+    propias = [v for v in client.get(url, headers=h_admin).json() if v["email"] in (TITULAR, OTRO)]
+    assert [(v["email"], v["dias_para_vencer"]) for v in propias] == [(TITULAR, -3), (OTRO, 2)]
+    # Una suspendida no aparece (se explica con su estado).
+    asignar(otro, 2, estado="suspendida")
+    assert all(v["email"] != OTRO for v in client.get(url, headers=h_admin).json())

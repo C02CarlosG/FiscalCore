@@ -12,8 +12,11 @@ from datetime import date, datetime
 from typing import Optional
 from zoneinfo import ZoneInfo
 
+import psycopg2.extras
+
 from . import db
 from . import suscripcion as s
+from . import suscripcion_pagos as sp
 
 _ZONA = ZoneInfo("America/Mexico_City")
 
@@ -90,6 +93,8 @@ def resumen(usuario_id: str) -> dict:
         "uso_rfc": uso,
         "puede_agregar_rfc": s.puede_agregar_rfc(plan, uso, admin),
         "es_admin_plataforma": admin,
+        # Días para el vencimiento si es próximo (aviso solo en la interfaz, D10).
+        "dias_para_vencer": sp.aviso_vencimiento(sus["vigente_hasta"] if sus else None, motivo, hoy()),
     }
 
 
@@ -206,3 +211,156 @@ def cuentas(busqueda: str, limite: int = 200) -> list[dict]:
         """,
         (patron, patron),
     )
+
+
+
+# ─── M7.2 (D10): datos fiscales y pagos registrados a mano ────────────────────
+
+class SinSuscripcion(LookupError):
+    """La cuenta no tiene plan asignado: primero se asigna, luego se registran pagos (409)."""
+
+
+class PagoNoEncontrado(LookupError):
+    """No hay un pago activo con ese id en esa cuenta (404)."""
+
+
+_CAMPOS_FISCALES = ("rfc", "razon_social", "regimen_fiscal", "codigo_postal", "uso_cfdi", "correo")
+
+
+def datos_fiscales(usuario_id: str) -> Optional[dict]:
+    fila = db.query_one(
+        f"SELECT {', '.join(_CAMPOS_FISCALES)}, updated_at FROM suscripciones_datos_fiscales WHERE usuario_id = %s",
+        (usuario_id,),
+    )
+    if not fila:
+        return None
+    return {**{k: fila[k] for k in _CAMPOS_FISCALES}, "actualizado": fila["updated_at"].isoformat()}
+
+
+def guardar_datos_fiscales(usuario_id: str, datos: dict, quien: str) -> dict:
+    """Los guarda la propia cuenta o el administrador de la plataforma (``quien``)."""
+    db.execute(
+        f"""
+        INSERT INTO suscripciones_datos_fiscales ({', '.join(_CAMPOS_FISCALES)}, usuario_id, actualizado_por, updated_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW())
+        ON CONFLICT (usuario_id) DO UPDATE SET
+            {', '.join(f"{c} = EXCLUDED.{c}" for c in _CAMPOS_FISCALES)},
+            actualizado_por = EXCLUDED.actualizado_por, updated_at = NOW()
+        """,
+        (*(datos[c] for c in _CAMPOS_FISCALES), usuario_id, quien),
+    )
+    return datos_fiscales(usuario_id)
+
+
+def _pago(f: dict, con_internos: bool) -> dict:
+    pago = {
+        "id": str(f["id"]), "fecha": f["fecha"].isoformat(), "monto": str(f["monto"].quantize(s.CENTAVOS)),
+        "referencia": f["referencia"], "folio_cfdi": f["folio_cfdi"], "uuid_cfdi": f["uuid_cfdi"],
+        "meses": f["meses"], "vigente_hasta_nueva": f["vigente_hasta_nueva"].isoformat(), "estado": f["estado"],
+    }
+    if con_internos:
+        pago.update(registrado_por=f.get("registrado_por"), motivo_anulacion=f.get("motivo_anulacion"))
+    return pago
+
+
+_SQL_PAGO = """
+    SELECT p.id, p.fecha, p.monto, p.referencia, p.folio_cfdi, p.uuid_cfdi, p.meses, p.vigente_hasta_nueva,
+           p.estado, p.motivo_anulacion, a.email AS registrado_por
+    FROM suscripciones_pagos p
+    LEFT JOIN usuarios a ON a.id = p.registrado_por
+"""
+
+
+def pagos(usuario_id: str, con_internos: bool, limite: int = 100) -> list[dict]:
+    filas = db.query_all(
+        _SQL_PAGO + " WHERE p.usuario_id = %s ORDER BY p.fecha DESC, p.creado_en DESC LIMIT %s",
+        (usuario_id, limite),
+    )
+    return [_pago(f, con_internos) for f in filas]
+
+
+def _historial_por_pago(cur, usuario_id: str, sus: dict, vigente_hasta: date, nota: str, quien: str) -> None:
+    cur.execute(
+        "INSERT INTO suscripciones_historial (usuario_id, plan_clave, estado, vigente_hasta, notas, asignada_por) "
+        "VALUES (%s, %s, %s, %s, %s, %s)",
+        (usuario_id, sus["plan_clave"], sus["estado"], vigente_hasta, nota, quien),
+    )
+
+
+def registrar_pago(usuario_id: str, pago: dict, admin_id: str) -> dict:
+    """Guarda el pago y extiende la vigencia en la misma transacción (con la suscripción
+    bloqueada, para que dos pagos simultáneos no partan de la misma vigencia)."""
+    with db.get_conn() as conn, conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        cur.execute("SELECT plan_clave, estado, vigente_hasta FROM suscripciones WHERE usuario_id = %s FOR UPDATE",
+                    (usuario_id,))
+        sus = cur.fetchone()
+        if sus is None:
+            raise SinSuscripcion("La cuenta no tiene un plan asignado: asígnalo antes de registrar pagos")
+        nueva = sp.nueva_vigencia(sus["vigente_hasta"], pago["fecha"], pago["meses"])
+        cur.execute(
+            """
+            INSERT INTO suscripciones_pagos (usuario_id, fecha, monto, referencia, folio_cfdi, uuid_cfdi, meses,
+                                             vigente_hasta_anterior, vigente_hasta_nueva, registrado_por)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id
+            """,
+            (usuario_id, pago["fecha"], pago["monto"], pago["referencia"], pago["folio_cfdi"], pago["uuid_cfdi"],
+             pago["meses"], sus["vigente_hasta"], nueva, admin_id),
+        )
+        pago_id = cur.fetchone()["id"]
+        cur.execute("UPDATE suscripciones SET vigente_hasta = %s, updated_at = NOW() WHERE usuario_id = %s",
+                    (nueva, usuario_id))
+        _historial_por_pago(cur, usuario_id, sus, nueva, f"Pago registrado ({pago['meses']} meses)", admin_id)
+        cur.execute(_SQL_PAGO + " WHERE p.id = %s", (pago_id,))
+        return _pago(cur.fetchone(), con_internos=False)
+
+
+def anular_pago(usuario_id: str, pago_id: str, motivo: str, admin_id: str) -> dict:
+    """Marca el pago como anulado (no se borra). Si la vigencia sigue siendo la que dejó
+    este pago, vuelve a la anterior; si otro pago o una asignación la cambió después, se
+    queda y lo dice ``vigencia_revertida``."""
+    with db.get_conn() as conn, conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        cur.execute("SELECT plan_clave, estado, vigente_hasta FROM suscripciones WHERE usuario_id = %s FOR UPDATE",
+                    (usuario_id,))
+        sus = cur.fetchone()
+        cur.execute(
+            "SELECT id, vigente_hasta_anterior, vigente_hasta_nueva FROM suscripciones_pagos "
+            "WHERE id = %s AND usuario_id = %s AND estado = 'activo' FOR UPDATE",
+            (pago_id, usuario_id),
+        )
+        fila = cur.fetchone()
+        if fila is None:
+            raise PagoNoEncontrado(pago_id)
+        cur.execute(
+            "UPDATE suscripciones_pagos SET estado = 'anulado', motivo_anulacion = %s, anulado_por = %s, "
+            "anulado_en = NOW() WHERE id = %s",
+            (motivo, admin_id, pago_id),
+        )
+        revertida = bool(sus) and sus["vigente_hasta"] == fila["vigente_hasta_nueva"]
+        if revertida:
+            cur.execute("UPDATE suscripciones SET vigente_hasta = %s, updated_at = NOW() WHERE usuario_id = %s",
+                        (fila["vigente_hasta_anterior"], usuario_id))
+            _historial_por_pago(cur, usuario_id, sus, fila["vigente_hasta_anterior"], "Pago anulado", admin_id)
+    return {"vigencia_revertida": revertida}
+
+
+def vencimientos(hoy_: date, dias: int = sp.DIAS_AVISO) -> list[dict]:
+    """Cuentas con suscripción activa que vencen en ``dias`` días o menos, o ya vencieron
+    (para el administrador de la plataforma), de la que vence antes a la que vence después."""
+    filas = db.query_all(
+        """
+        SELECT u.id AS usuario_id, u.email, u.nombre, su.plan_clave, p.nombre AS plan_nombre, su.vigente_hasta
+        FROM suscripciones su
+        JOIN usuarios u ON u.id = su.usuario_id
+        JOIN planes p ON p.clave = su.plan_clave
+        WHERE su.estado = 'activa' AND su.vigente_hasta IS NOT NULL AND su.vigente_hasta <= %s
+        ORDER BY su.vigente_hasta, u.email
+        LIMIT 500
+        """,
+        (sp.sumar_dias(hoy_, dias),),
+    )
+    return [
+        {"usuario_id": str(f["usuario_id"]), "email": f["email"], "nombre": f["nombre"], "plan_clave": f["plan_clave"],
+         "plan_nombre": f["plan_nombre"], "vigente_hasta": f["vigente_hasta"].isoformat(),
+         "dias_para_vencer": (f["vigente_hasta"] - hoy_).days}
+        for f in filas
+    ]

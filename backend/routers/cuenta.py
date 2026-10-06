@@ -325,7 +325,7 @@ async def invitar(
         # El permiso se revisa sobre los vínculos bloqueados: si otro administrador le
         # quita el rol al mismo tiempo, esta invitación espera y luego se rechaza.
         _exigir_administrador(current_user, roles, rol_plataforma)
-        if mio and mio.strip().lower() == email:
+        if mio and mio.strip(" ").lower() == email:
             # También impide que un administrador de la plataforma se dé acceso a sí mismo.
             raise HTTPException(status_code=422, detail="No puedes invitarte a ti mismo")
         cur.execute(
@@ -407,7 +407,7 @@ def _resolver(empresa_id: uuid.UUID, invitacion_id: uuid.UUID, current_user: dic
         if aprobar:
             # B1 otra vez al aprobar: si desde que aceptó apareció otra cuenta con el mismo
             # correo en minúsculas (o el de la cuenta ya no es el invitado), no se aprueba.
-            correo = inv["email_cuenta"].strip().lower()
+            correo = inv["email_cuenta"].strip(" ").lower()  # igual que lower(btrim(email)) en SQL
             cur.execute("SELECT COUNT(*) AS n FROM usuarios WHERE lower(btrim(email)) = %s", (correo,))
             if correo != inv["email"] or cur.fetchone()["n"] > 1:
                 registrar_evento(current_user["user_id"], "cuenta.correo_ambiguo", empresa_id=eid,
@@ -474,7 +474,7 @@ def _mi_correo(current_user: dict):
     fila = db.query_one("SELECT email FROM usuarios WHERE id = %s AND activo = TRUE", (current_user["user_id"],))
     if not fila:
         raise HTTPException(status_code=403, detail="Cuenta inactiva")
-    email = fila["email"].strip().lower()
+    email = fila["email"].strip(" ").lower()  # igual que lower(btrim(email)) en SQL
     cuentas = db.query_one("SELECT COUNT(*) AS n FROM usuarios WHERE lower(btrim(email)) = %s", (email,))["n"]
     if cuentas > 1:
         registrar_evento(current_user["user_id"], "cuenta.correo_ambiguo", entidad="usuario",

@@ -3234,6 +3234,127 @@ paths:
         '422':
           description: Parametros invalidos o mas de 50,000 renglones
 
+  /api/v1/empresas/{empresa_id}/declaraciones:
+    get:
+      operationId: listarDeclaraciones
+      tags: [Declaraciones]
+      summary: Declaraciones capturadas del ejercicio
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - { name: ejercicio, in: query, required: true, schema: { type: integer, minimum: 2000, maximum: 2099 } }
+      responses:
+        '200':
+          description: Las declaraciones capturadas, sin recalcular
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ejercicio: { type: integer }
+                  items: { type: array, items: { $ref: '#/components/schemas/Declaracion' } }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '422':
+          description: Ejercicio invalido
+
+  /api/v1/empresas/{empresa_id}/declaraciones/{periodo}:
+    get:
+      operationId: comparativoDeclarado
+      tags: [Declaraciones]
+      summary: Lo declarado contra lo calculado de IVA e ISR del periodo
+      description: |
+        Por impuesto: `estado` (`sin_declaracion`, `cuadra`, `con_diferencias`, `sin_comparar`), los renglones con
+        declarado, calculado (a peso) y diferencia (hasta $1.00 es `cuadra`: las declaraciones van en pesos) y `pendiente_de_pago`
+        (a cargo de la vigente menos lo pagado de toda la cadena). `sin_comparar` = no hay nada capturado contra nada calculado.
+        En IVA el saldo a favor aplicado resta de lo calculado a cargo; en ISR son cifras del mes.
+        El pago provisional del ISR no se calcula (F7.3): se muestra solo lo declarado (`sin_calculo`).
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - { name: periodo, in: path, required: true, schema: { type: string, pattern: '^20[0-9]{2}-(0[1-9]|1[0-2])$' } }
+        - { name: factor, in: query, schema: { type: number, minimum: 0, maximum: 1, default: 1 } }
+      responses:
+        '200':
+          description: Comparativo de IVA e ISR
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '422':
+          description: Periodo o factor invalidos
+
+  /api/v1/empresas/{empresa_id}/declaraciones/{periodo}/{impuesto}:
+    put:
+      operationId: guardarDeclaracion
+      tags: [Declaraciones]
+      summary: Captura o reemplaza la declaracion del periodo e impuesto
+      description: |
+        Todos los importes son opcionales; solo se compara lo capturado. `tipo: normal` captura (o corrige mientras no haya
+        complementarias) la normal; `tipo: complementaria` agrega una nueva al historial y la vigente es la ultima. 409 si
+        llega una normal con complementarias o una complementaria sin normal. Queda en la auditoria (`declaracion_guardada`).
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - { name: periodo, in: path, required: true, schema: { type: string, pattern: '^20[0-9]{2}-(0[1-9]|1[0-2])$' } }
+        - { name: impuesto, in: path, required: true, schema: { type: string, enum: [iva, isr] } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                tipo: { type: string, enum: [normal, complementaria], default: normal }
+                fecha_presentacion: { type: string, format: date, nullable: true }
+                numero_operacion: { type: string, maxLength: 40, nullable: true }
+                ingresos: { type: number, minimum: 0, nullable: true }
+                deducciones: { type: number, minimum: 0, nullable: true }
+                impuesto_trasladado: { type: number, minimum: 0, nullable: true }
+                impuesto_acreditable: { type: number, minimum: 0, nullable: true }
+                retenciones: { type: number, minimum: 0, nullable: true }
+                retenciones_a_terceros: { type: number, minimum: 0, nullable: true, description: "Impuesto retenido a terceros por enterar" }
+                saldo_a_favor_aplicado: { type: number, minimum: 0, nullable: true, description: "Solo IVA: saldo a favor de periodos anteriores aplicado" }
+                impuesto_a_cargo: { type: number, nullable: true, description: "A cargo (+) o a favor (-); el unico importe con signo" }
+                monto_pagado: { type: number, minimum: 0, nullable: true }
+                notas: { type: string, maxLength: 500 }
+      responses:
+        '200':
+          description: La declaracion guardada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Declaracion' }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '409':
+          description: La captura contradice el historial (normal sobre una complementaria, o complementaria sin normal)
+        '422':
+          description: Periodo, impuesto o importes invalidos
+    delete:
+      operationId: eliminarDeclaracion
+      tags: [Declaraciones]
+      summary: Elimina la declaracion vigente (la ultima del historial)
+      description: La anterior, si existe, vuelve a ser la vigente. Queda en la auditoria (`declaracion_eliminada`).
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - { name: periodo, in: path, required: true, schema: { type: string, pattern: '^20[0-9]{2}-(0[1-9]|1[0-2])$' } }
+        - { name: impuesto, in: path, required: true, schema: { type: string, enum: [iva, isr] } }
+      responses:
+        '204':
+          description: Eliminada
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          description: No hay declaracion capturada
+        '422':
+          description: Periodo o impuesto invalidos
+
   /api/v1/empresas/{empresa_id}/cedula-iva/{periodo}:
     get:
       operationId: cedulaIva
@@ -3640,6 +3761,7 @@ paths:
                   motivo: { type: string, nullable: true, enum: [sin_suscripcion, suspendida, cancelada, vencida, plan_no_disponible, null] }
                   uso_rfc: { type: integer }
                   puede_agregar_rfc: { type: boolean }
+                  dias_para_vencer: { type: integer, nullable: true, description: "Días para el vencimiento si es en 15 días o menos; negativo si ya venció (aviso solo en la interfaz, D10)" }
                   es_admin_plataforma: { type: boolean }
         '401':
           $ref: '#/components/responses/UnauthorizedError'
@@ -3658,6 +3780,60 @@ paths:
               schema:
                 type: array
                 items: { $ref: '#/components/schemas/AsignacionPlan' }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /api/v1/suscripcion/datos-fiscales:
+    get:
+      operationId: misDatosFiscalesSuscripcion
+      tags: [Suscripción]
+      summary: Datos fiscales con los que se emite el CFDI de mi suscripción (null si no hay)
+      description: Los captura el administrador de la plataforma (M7.2, decisión D10).
+      responses:
+        '200':
+          description: Datos fiscales o null
+          content:
+            application/json:
+              schema:
+                nullable: true
+                allOf: [{ $ref: '#/components/schemas/DatosFiscalesCliente' }]
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+    put:
+      operationId: editarMisDatosFiscalesSuscripcion
+      tags: [Suscripción]
+      summary: La cuenta captura o corrige sus datos fiscales para el CFDI de la suscripción
+      description: Mismas reglas que la ruta de administración. Se audita `suscripcion.datos_fiscales`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DatosFiscalesEntrada' }
+      responses:
+        '200':
+          description: Datos guardados
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DatosFiscalesCliente' }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '422':
+          description: Dato inválido
+
+  /api/v1/suscripcion/pagos:
+    get:
+      operationId: misPagosSuscripcion
+      tags: [Suscripción]
+      summary: Pagos de mi suscripción registrados a mano, del más reciente al más antiguo (hasta 100)
+      responses:
+        '200':
+          description: Pagos
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/PagoSuscripcion' }
         '401':
           $ref: '#/components/responses/UnauthorizedError'
 
@@ -3701,6 +3877,7 @@ paths:
                     vigente_hasta: { type: string, format: date, nullable: true }
                     notas: { type: string, nullable: true }
                     uso_rfc: { type: integer }
+                    dias_para_vencer: { type: integer, nullable: true }
         '401':
           $ref: '#/components/responses/UnauthorizedError'
         '403':
@@ -3770,6 +3947,188 @@ paths:
           $ref: '#/components/responses/ForbiddenError'
         '404':
           $ref: '#/components/responses/NotFoundError'
+
+  /api/v1/suscripcion/admin/cuentas/{usuario_id}/datos-fiscales:
+    get:
+      operationId: datosFiscalesDeCuenta
+      tags: [Suscripción]
+      summary: Datos fiscales de una cuenta (solo admin de la plataforma; null si no hay)
+      parameters:
+        - { name: usuario_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Datos fiscales o null
+          content:
+            application/json:
+              schema:
+                nullable: true
+                allOf: [{ $ref: '#/components/schemas/DatosFiscalesCliente' }]
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+    put:
+      operationId: editarDatosFiscalesDeCuenta
+      tags: [Suscripción]
+      summary: Captura o corrige los datos fiscales de una cuenta (solo admin de la plataforma)
+      description: |
+        RFC válido; régimen del catálogo c_RegimenFiscal que corresponda a persona física
+        (RFC de 13) o moral (RFC de 12); código postal de 5 dígitos; uso del catálogo
+        c_UsoCFDI 4.0; correo opcional. Se audita `suscripcion.datos_fiscales`.
+      parameters:
+        - { name: usuario_id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DatosFiscalesEntrada' }
+      responses:
+        '200':
+          description: Datos guardados
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DatosFiscalesCliente' }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '422':
+          description: Dato inválido
+
+  /api/v1/suscripcion/admin/cuentas/{usuario_id}/pagos:
+    get:
+      operationId: pagosDeCuenta
+      tags: [Suscripción]
+      summary: Pagos registrados de una cuenta, con quién los registró (solo admin de la plataforma)
+      parameters:
+        - { name: usuario_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Pagos
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  allOf:
+                    - $ref: '#/components/schemas/PagoSuscripcion'
+                    - type: object
+                      properties:
+                        registrado_por: { type: string, nullable: true, description: Correo de quien lo registró }
+                        motivo_anulacion: { type: string, nullable: true }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+    post:
+      operationId: registrarPagoDeCuenta
+      tags: [Suscripción]
+      summary: Registra un pago recibido fuera de la plataforma y extiende la vigencia (D10, sin cobro en línea)
+      description: |
+        Fecha no futura; monto mayor que 0 con hasta dos decimales, como texto. En la misma
+        transacción extiende `vigente_hasta` `meses` meses: desde la vigencia si no había
+        vencido a la fecha del pago, si no desde la fecha del pago. 409 si la cuenta no
+        tiene plan asignado. Se audita `suscripcion.registrar_pago`.
+      parameters:
+        - { name: usuario_id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [fecha, monto]
+              properties:
+                fecha: { type: string, format: date }
+                monto: { type: string, example: '1499.00' }
+                referencia: { type: string, maxLength: 200, nullable: true }
+                folio_cfdi: { type: string, maxLength: 40, nullable: true, description: Folio del CFDI emitido por la suscripción }
+                uuid_cfdi: { type: string, nullable: true, description: UUID del CFDI emitido a mano }
+                meses: { type: integer, minimum: 1, maximum: 24, default: 1, description: Meses que extiende la vigencia }
+      responses:
+        '201':
+          description: Pago registrado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PagoSuscripcion' }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '409':
+          description: La cuenta no tiene plan asignado
+        '422':
+          description: Dato inválido
+
+  /api/v1/suscripcion/admin/cuentas/{usuario_id}/pagos/{pago_id}/anular:
+    post:
+      operationId: anularPagoDeCuenta
+      tags: [Suscripción]
+      summary: Anula un pago (no se borra) y revierte la vigencia si nada la cambió después
+      parameters:
+        - { name: usuario_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: pago_id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [motivo]
+              properties:
+                motivo: { type: string, maxLength: 500 }
+      responses:
+        '200':
+          description: Anulado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  vigencia_revertida: { type: boolean }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          description: La cuenta no existe, o no hay un pago activo con ese id en ella
+        '422':
+          description: Falta el motivo
+
+  /api/v1/suscripcion/admin/vencimientos:
+    get:
+      operationId: vencimientosSuscripcion
+      tags: [Suscripción]
+      summary: Cuentas activas que vencen en 15 días o menos, o ya vencidas (solo admin de la plataforma)
+      responses:
+        '200':
+          description: De la que vence antes a la que vence después (hasta 500)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    usuario_id: { type: string, format: uuid }
+                    email: { type: string }
+                    nombre: { type: string, nullable: true }
+                    plan_clave: { type: string }
+                    plan_nombre: { type: string }
+                    vigente_hasta: { type: string, format: date }
+                    dias_para_vencer: { type: integer, description: Negativo si ya venció }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
 
   /api/v1/suscripcion/admin/cuentas/{usuario_id}:
     put:
@@ -4222,6 +4581,27 @@ components:
             detail: "Error SAT: Servicio no disponible"
 
   schemas:
+    Declaracion:
+      type: object
+      properties:
+        periodo: { type: string }
+        impuesto: { type: string, enum: [iva, isr] }
+        secuencia: { type: integer, description: "1 = normal; 2, 3... = complementarias" }
+        declaraciones: { type: integer, description: "Solo en el listado del ejercicio: cuantas lleva el historial" }
+        tipo: { type: string, enum: [normal, complementaria] }
+        fecha_presentacion: { type: string, format: date, nullable: true }
+        numero_operacion: { type: string, nullable: true }
+        ingresos: { type: number, nullable: true }
+        deducciones: { type: number, nullable: true }
+        impuesto_trasladado: { type: number, nullable: true }
+        impuesto_acreditable: { type: number, nullable: true }
+        retenciones: { type: number, nullable: true }
+        retenciones_a_terceros: { type: number, nullable: true }
+        saldo_a_favor_aplicado: { type: number, nullable: true }
+        impuesto_a_cargo: { type: number, nullable: true }
+        monto_pagado: { type: number, nullable: true }
+        notas: { type: string }
+        updated_at: { type: string, format: date-time }
     Proveedor:
       type: object
       properties:
@@ -5226,6 +5606,41 @@ components:
         rol: { type: string, enum: [administrador, contador] }
         cuenta_creada: { type: string, format: date-time, nullable: true }
         aceptada: { type: string, format: date-time, nullable: true }
+
+    DatosFiscalesCliente:
+      type: object
+      properties:
+        rfc: { type: string }
+        razon_social: { type: string }
+        regimen_fiscal: { type: string }
+        codigo_postal: { type: string }
+        uso_cfdi: { type: string }
+        correo: { type: string, nullable: true }
+        actualizado: { type: string, format: date-time }
+
+    PagoSuscripcion:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        fecha: { type: string, format: date }
+        monto: { type: string, description: MXN, dos decimales }
+        referencia: { type: string, nullable: true }
+        folio_cfdi: { type: string, nullable: true }
+        uuid_cfdi: { type: string, nullable: true }
+        meses: { type: integer }
+        vigente_hasta_nueva: { type: string, format: date }
+        estado: { type: string, enum: [activo, anulado] }
+
+    DatosFiscalesEntrada:
+      type: object
+      required: [rfc, razon_social, regimen_fiscal, codigo_postal, uso_cfdi]
+      properties:
+        rfc: { type: string }
+        razon_social: { type: string, maxLength: 254 }
+        regimen_fiscal: { type: string, example: '601' }
+        codigo_postal: { type: string, pattern: '^[0-9]{5}$' }
+        uso_cfdi: { type: string, example: G03 }
+        correo: { type: string, nullable: true, description: Correo para enviar el CFDI }
 
     AsignacionPlan:
       type: object
