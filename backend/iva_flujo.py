@@ -11,7 +11,7 @@ importe es ``Decimal`` en pesos; el redondeo a centavos se hace solo al resumir.
 from __future__ import annotations
 
 from datetime import date, datetime
-from decimal import ROUND_FLOOR, ROUND_HALF_UP, Decimal
+from decimal import ROUND_CEILING, ROUND_FLOOR, ROUND_HALF_UP, Decimal
 from typing import Any, Optional
 from .flujo_pagos import (  # noqa: F401  (los alias privados siguen siendo la API interna de este módulo y de sus pruebas)
     TOLERANCIA_DESCUADRE,
@@ -798,18 +798,23 @@ class _Tercero:
 
 
 def _repartir_acreditable(terceros: list["_Tercero"], factor: Decimal, objetivo: Decimal) -> list[Decimal]:
-    """Acreditable de cada tercero (en centavos) tal que **la suma es exactamente** ``objetivo`` (el acreditable ajustado del
-    resumen). Cada uno parte de ``neto × factor`` truncado a centavos y el residuo se reparte de a un centavo por mayor
-    residuo, para que ningún redondeo individual desvíe el total."""
+    """Acreditable de cada tercero (en centavos) tal que la suma es ``objetivo`` (el acreditable ajustado del resumen).
+    Cada uno parte de ``neto × factor`` truncado a centavos y el residuo se reparte de a un centavo por mayor residuo,
+    **sin salirse de [piso, techo] de su cifra exacta**: ningún tercero acredita más de lo que tiene. Si ningún tercero
+    tiene margen (p. ej. REP prorrateados ya redondeados con factor 1), la suma queda en la de los netos y la diferencia
+    con el resumen se ve en ``cuadre_con_iva`` de la DIOT."""
     exactos = [t.neto * factor for t in terceros]
     pisos = [e.quantize(CENTAVOS, rounding=ROUND_FLOOR) for e in exactos]
+    techos = [e.quantize(CENTAVOS, rounding=ROUND_CEILING) for e in exactos]
     residuos = [e - p for e, p in zip(exactos, pisos)]
     unidades = int(((objetivo - sum(pisos, CERO)) / CENTAVOS).to_integral_value(rounding=ROUND_HALF_UP))
     orden = sorted(range(len(terceros)), key=lambda i: residuos[i], reverse=(unidades >= 0))
-    for j in range(abs(unidades)):
-        if not orden:
+    for i in orden:
+        if unidades == 0:
             break
-        pisos[orden[j % len(orden)]] += CENTAVOS if unidades > 0 else -CENTAVOS
+        if unidades > 0 and pisos[i] < techos[i]:
+            pisos[i] += CENTAVOS
+            unidades -= 1
     return pisos
 
 

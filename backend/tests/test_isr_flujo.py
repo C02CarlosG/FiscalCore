@@ -294,3 +294,36 @@ def test_b4_efectivo_no_deducible_conserva_la_retencion_a_cargo():
     r = res(recibido("R1", forma_pago="01", subtotal=D("5000"), total=D("5800"), isr_retenido=D("500")))["mes"]
 
     assert r["deducciones"]["total"] == D("0.00") and r["retenciones_a_cargo"]["proveedores"] == D("500.00")
+
+
+# ── menores de la re-revisión del #39 ────────────────────────────────────────
+
+def test_efectivo_hasta_el_umbral_solo_marca_pagos_de_2000_o_menos():
+    chico = res(recibido("R1", forma_pago="01", subtotal=D("1000"), total=D("1160")))
+    grande = res(recibido("R2", forma_pago="01", subtotal=D("5000"), total=D("5800")))
+
+    assert "efectivo_hasta_umbral" in [a["codigo"] for a in chico["advertencias"]]
+    assert "efectivo_hasta_umbral" not in [a["codigo"] for a in grande["advertencias"]]
+
+
+def test_en_pagos_con_rep_la_marca_de_efectivo_sigue_la_forma_de_pago_p():
+    d = recibido("R1", metodo_pago="PPD", forma_pago="99", subtotal=D("1000"), total=D("1160"))
+    con = res(d, pagos=[pago("R1", "1160", forma_pago_p="01")])
+    sin = res(d, pagos=[pago("R1", "1160", forma_pago_p="03")])
+
+    assert "efectivo_hasta_umbral" in [a["codigo"] for a in con["advertencias"]]
+    assert "efectivo_hasta_umbral" not in [a["codigo"] for a in sin["advertencias"]]
+
+
+def test_nomina_no_considerada_conserva_su_retencion_a_cargo():
+    n = nomina("N1", retenido="100")
+    r = res(nominas=[n], ajustes={("N1", "deduccion"): {"accion": "excluir", "motivo": "x"}})["mes"]
+
+    assert r["deducciones"]["nomina"]["deducible"] == D("0.00")
+    assert r["retenciones_a_cargo"]["trabajadores"] == D("100.00") and r["retenciones_a_cargo"]["total"] == D("100.00")
+
+
+def test_el_total_de_ingresos_es_la_suma_de_las_partes_redondeadas():
+    r = res(doc("U1", subtotal=D("0.125")), doc("U2", subtotal=D("0.125")))["mes"]["ingresos"]
+
+    assert r["contado"] == D("0.25") and r["total"] == r["contado"] + r["credito"] - r["devoluciones"]

@@ -248,6 +248,9 @@ def init_db() -> None:
         # 054 es idempotente — DIOT por flujo: tipo de tercero/operación por periodo y por CFDI (F6.2)
         _run_sql_file("054_diot.sql")
 
+        # 055 es idempotente — CHECK de motivo no vacío y de % de nómina exenta (47 o 53) para bases ya creadas (F7.1)
+        _run_sql_file("055_isr_checks.sql")
+
         # 060 es idempotente — documentos_fiscales: constancia y opinión de cumplimiento en PDF (F8, carril D)
         _run_sql_file("060_documentos_fiscales.sql")
 

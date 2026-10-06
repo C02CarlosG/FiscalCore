@@ -153,3 +153,16 @@ def test_los_actos_pagados_cuentan_aunque_el_iva_no_sea_acreditable():
     assert r["actos"]["16"] == D("7000.00") and r["iva_pagado"]["16"] == D("1120.00")
     assert r["iva_acreditable"] == D("160.00")
     assert r["iva_pagado"]["total"] == r["iva_acreditable"] + r["iva_no_acreditable"]["total"]
+
+
+class _T:
+    def __init__(self, neto):
+        self.neto = D(neto)
+
+
+def test_el_reparto_no_acredita_a_un_tercero_mas_que_su_neto():
+    # 3 REP prorrateados ya redondeados (53.33 c/u) con factor 1 mientras el resumen suma 160.00: nadie tiene margen
+    assert f._repartir_acreditable([_T("53.33")] * 3, D("1"), D("160.00")) == [D("53.33")] * 3
+    # con residuos reales el centavo sobrante sí se reparte, solo a quien tiene margen
+    assert sum(f._repartir_acreditable([_T("53.3333")] * 3, D("1"), D("160.00")), D("0")) == D("160.00")
+    assert max(f._repartir_acreditable([_T("53.3333")] * 3, D("1"), D("160.00"))) <= D("53.34")
