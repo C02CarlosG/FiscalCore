@@ -3009,6 +3009,199 @@ paths:
         '404':
           description: Sin operacion asignada a ese CFDI
 
+  /api/v1/empresas/{empresa_id}/isr-flujo/config/{ejercicio}:
+    get:
+      operationId: leerConfigIsrFlujo
+      tags: [ISR por flujo]
+      summary: Porcentaje deducible de la nomina exenta del ejercicio
+      description: 0.47 por defecto (LISR 28-XXX); 0.53 si la empresa acredita que las prestaciones exentas no disminuyeron.
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - { name: ejercicio, in: path, required: true, schema: { type: integer, minimum: 2000, maximum: 2099 } }
+      responses:
+        '200':
+          description: Configuracion
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ejercicio: { type: integer }
+                  pct_nomina_exenta: { type: number }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '422':
+          description: ejercicio invalido
+    put:
+      operationId: guardarConfigIsrFlujo
+      tags: [ISR por flujo]
+      summary: Cambia el porcentaje de nomina exenta del ejercicio (queda en la auditoria)
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - { name: ejercicio, in: path, required: true, schema: { type: integer, minimum: 2000, maximum: 2099 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [pct_nomina_exenta]
+              properties:
+                pct_nomina_exenta: { type: number, enum: [0.47, 0.53] }
+      responses:
+        '200':
+          description: Configuracion guardada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ejercicio: { type: integer }
+                  pct_nomina_exenta: { type: number }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '422':
+          description: porcentaje o ejercicio invalido
+
+  /api/v1/empresas/{empresa_id}/isr-flujo/ajustes:
+    get:
+      operationId: listarAjustesIsr
+      tags: [ISR por flujo]
+      summary: Ajustes "no considerar ISR" vigentes
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+      responses:
+        '200':
+          description: Ajustes, del mas reciente al mas antiguo
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: { type: array, items: { type: object, additionalProperties: true } }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+    put:
+      operationId: guardarAjusteIsr
+      tags: [ISR por flujo]
+      summary: No considerar un CFDI en el ISR (queda en la auditoria con su motivo)
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [uuid, lado, motivo]
+              properties:
+                uuid: { type: string, maxLength: 36 }
+                lado: { type: string, enum: [ingreso, deduccion] }
+                motivo: { type: string, maxLength: 500 }
+      responses:
+        '200':
+          description: Ajuste guardado
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          description: El CFDI no existe o no es de ese lado
+        '422':
+          description: Datos invalidos (el motivo es obligatorio)
+
+  /api/v1/empresas/{empresa_id}/isr-flujo/ajustes/{lado}/{uuid}:
+    delete:
+      operationId: quitarAjusteIsr
+      tags: [ISR por flujo]
+      summary: Retira un ajuste (el CFDI vuelve a considerarse)
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - { name: lado, in: path, required: true, schema: { type: string, enum: [ingreso, deduccion] } }
+        - { name: uuid, in: path, required: true, schema: { type: string } }
+      responses:
+        '204':
+          description: Ajuste retirado
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          description: Ajuste no encontrado
+
+  /api/v1/empresas/{empresa_id}/isr-flujo/{periodo}:
+    get:
+      operationId: resumenIsrFlujo
+      tags: [ISR por flujo]
+      summary: Flujo de ISR del mes y acumulado del ejercicio
+      description: |
+        Ingresos cobrados (contado y REP, menos devoluciones), deducciones pagadas (compras y gastos, nomina,
+        inversiones aparte), ISR retenido a favor y a cargo, y la utilidad fiscal estimada, para el mes y el acumulado
+        del ejercicio hasta el. `regimen.modulo` dice si el regimen de la empresa usa este modulo (`flujo`), el
+        coeficiente de utilidad (`coeficiente`) o no esta soportado; `regimen.avisos` lista las salvedades del regimen (p. ej. 606: deduccion opcional ciega del 35 %). No calcula el pago provisional.
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - { name: periodo, in: path, required: true, schema: { type: string, pattern: '^20[0-9]{2}-(0[1-9]|1[0-2])$' } }
+      responses:
+        '200':
+          description: Flujo de ISR
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  empresa_id: { type: string }
+                  periodo: { type: string }
+                  regimen: { type: object, additionalProperties: true }
+                  porcentaje_nomina_exenta: { type: number }
+                  mes: { type: object, additionalProperties: true }
+                  acumulado: { type: object, additionalProperties: true }
+                  advertencias: { type: array, items: { type: object, additionalProperties: true } }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '422':
+          description: periodo invalido
+
+  /api/v1/empresas/{empresa_id}/isr-flujo/{periodo}/detalle:
+    get:
+      operationId: detalleIsrFlujo
+      tags: [ISR por flujo]
+      summary: Los CFDI que componen una cifra del flujo de ISR
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - { name: periodo, in: path, required: true, schema: { type: string, pattern: '^20[0-9]{2}-(0[1-9]|1[0-2])$' } }
+        - { name: lado, in: query, required: true, schema: { type: string, enum: [ingreso, deduccion] } }
+        - { name: bloque, in: query, required: true, schema: { type: string, enum: [contado, credito, devoluciones, nomina, inversiones, no_considerados] } }
+        - { name: acumulado, in: query, schema: { type: boolean, default: false } }
+        - { name: pagina, in: query, schema: { type: integer, minimum: 1, default: 1 } }
+        - { name: por_pagina, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 50 } }
+      responses:
+        '200':
+          description: Una pagina de renglones
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: { type: array, items: { type: object, additionalProperties: true } }
+                  total: { type: integer }
+                  pagina: { type: integer }
+                  por_pagina: { type: integer }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '422':
+          description: Parametros invalidos
+
   /api/v1/empresas/{empresa_id}/cedula-iva/{periodo}:
     get:
       operationId: cedulaIva

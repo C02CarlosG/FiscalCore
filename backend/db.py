@@ -239,6 +239,9 @@ def init_db() -> None:
         # 050 es idempotente — ajustes manuales del IVA por flujo (no considerar / reasignar periodo)
         _run_sql_file("050_iva_ajustes.sql")
 
+        # 052 y 053 son idempotentes — ISR base flujo: ajustes "no considerar" y porcentaje de nómina exenta (F7.1)
+        _run_sql_file("052_isr_ajustes.sql")
+        _run_sql_file("053_isr_config_flujo.sql")
         # 051 es idempotente — catálogo de proveedores de la empresa (F6.1)
         _run_sql_file("051_proveedores.sql")
 
