@@ -485,3 +485,52 @@ export interface IvaDetalle {
   pagina: number;
   por_pagina: number;
 }
+
+// ── DIOT por flujo (F6.2) ─────────────────────────────────────────────────────
+
+export interface DiotTercero {
+  contraparte_rfc: string;
+  contraparte: string;
+  proveedor_id: string | null;
+  tipo_tercero: string | null;
+  tipo_operacion: string | null;
+  pais: string | null;
+  id_fiscal: string | null;
+  cfdi: number;
+  /** Valor de actos pagados por tasa; incluye «exento» y «no_objeto». */
+  actos: IvaBases;
+  iva_pagado: IvaMontos;
+  devoluciones: { base: number; iva: number };
+  iva_acreditable: number;
+  iva_no_acreditable: {
+    proporcion: number;
+    total: number;
+    por_motivo: Record<string, { cfdi: number; iva: number; base: number }>;
+  };
+  retenciones: number;
+  advertencias: string[];
+}
+
+export interface DiotTotales {
+  terceros: number;
+  cfdi: number;
+  valor_de_actos: number;
+  iva_pagado: number;
+  devoluciones_iva: number;
+  iva_acreditable: number;
+  iva_no_acreditable: number;
+  con_advertencias: number;
+}
+
+export interface DiotFlujo {
+  empresa_id: string;
+  periodo: string;
+  factor_prorrateo: number;
+  terceros: DiotTercero[];
+  totales: DiotTotales;
+  cuadre_con_iva: { iva_acreditable_diot: number; iva_acreditable_resumen: number; cuadra: boolean };
+  /** Avisos del periodo (p. ej. actos a 8 % sin región). */
+  advertencias: { codigo: string; mensaje: string }[];
+  advertencias_iva: InicioAdvertencia[];
+  operaciones_por_cfdi: number;
+}
