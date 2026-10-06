@@ -84,3 +84,12 @@ def test_plan_invalido_responde_422(monkeypatch, clave, cuerpo):
     _rol(monkeypatch, "admin")
     monkeypatch.setattr(datos, "guardar_plan", lambda *a: pytest.fail("no debe guardar"))
     assert client.put(f"/api/v1/suscripcion/admin/planes/{clave}", json=cuerpo).status_code == 422
+
+
+def test_catalogo_sin_plan_por_defecto_responde_409(monkeypatch):
+    sin_defecto = {k: {**v, "por_defecto": False} for k, v in PLANES.items()}
+    monkeypatch.setattr(datos, "planes", lambda: sin_defecto)
+    monkeypatch.setattr(datos, "suscripcion_de", lambda uid: None)
+    r = client.get("/api/v1/suscripcion")
+    assert r.status_code == 409
+    assert "plan marcado como por defecto" in r.json()["detail"]

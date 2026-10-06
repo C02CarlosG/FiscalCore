@@ -134,6 +134,9 @@ function PorAprobar({ empresaId, pendientes }: { empresaId: string; pendientes: 
                 <span>{p.email}</span> · {ETIQUETA_ROL_EMPRESA[p.rol]} · cuenta creada el {formatearFecha(p.cuenta_creada)}{" "}
                 · aceptó el {formatearFecha(p.aceptada)}
               </p>
+              {p.email.trim().toLowerCase() !== p.email_invitado && (
+                <p className="truncate text-xs text-muted-foreground">Invitación enviada a {p.email_invitado}</p>
+              )}
             </div>
             <div className="flex flex-none gap-2">
               <Button type="button" size="sm" disabled={resolver.isPending}

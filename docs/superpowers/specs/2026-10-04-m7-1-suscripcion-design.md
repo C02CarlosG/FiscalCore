@@ -106,7 +106,9 @@ se suelta al terminar la transacción.
 
 Validación de la administración: `plan_clave`, `estado`, `notas`, `nombre` que no son
 texto y `activo` que no es booleano dan 422 (antes, 500 o `bool("false") == True`). La
-búsqueda de cuentas trata `%` y `_` como literales. La siembra de la 063 no marca
+búsqueda de cuentas trata `%` y `_` como literales. `max_rfc` admite de 0 a 2,147,483,647
+(columna INTEGER). Un catálogo sin plan por defecto responde 409 en cualquier ruta, no
+500. Con `max_rfc = 0` el mensaje dice que el plan no incluye RFC. La siembra de la 063 no marca
 `prueba` como plan por defecto si al reinsertarla ya hay otro.
 
 ## API

@@ -70,6 +70,8 @@ def _base_falsa(monkeypatch, miembros, rol_plataforma="contador", aceptada=None)
                         "created_at": datetime(2026, 10, 4)}
             if "estado = 'aceptada_pendiente'" in self.ultimo:
                 return aceptada
+            if "COUNT(*)" in self.ultimo:
+                return {"n": 1}
             return None
 
     @contextmanager
@@ -190,7 +192,8 @@ def test_el_limite_de_invitar_es_por_usuario_y_no_por_ip(monkeypatch):
     assert client.post(url, headers=h_b, json={"email": "c@d.mx", "rol": "contador"}).status_code == 201
 
 
-PENDIENTE = {"id": "inv-1", "rol": "administrador", "respondida_por": OTRO}
+PENDIENTE = {"id": "inv-1", "rol": "administrador", "respondida_por": OTRO,
+             "email": "otro@x.mx", "email_cuenta": "Otro@x.mx"}
 APROBAR = f"/api/v1/cuenta/empresas/{EMPRESA}/invitaciones/{PENDIENTE['id'].replace('inv-1', '44444444-4444-4444-4444-444444444444')}"
 
 
@@ -264,4 +267,19 @@ def test_promover_a_administrador_revisa_el_plan(monkeypatch):
     monkeypatch.setattr(db, "query_all", lambda sql, params=(): [] if "invitaciones_empresa" in sql else
                         [_miembro(YO, "administrador", 1), _miembro(OTRO, "administrador", 2)])
     assert client.patch(f"{BASE}/{OTRO}", json={"rol": "administrador"}).status_code == 200
+    assert ("verificar_alta_rfc", (OTRO, True)) in ejecutado
+
+
+
+def test_aprobar_con_correo_de_cuenta_distinto_al_invitado_responde_409(monkeypatch):
+    ejecutado = _base_falsa(monkeypatch, [_miembro(YO, "administrador", 1)],
+                            aceptada={**PENDIENTE, "email_cuenta": "cambiado@x.mx"})
+    assert client.post(f"{APROBAR}/aprobar").status_code == 409
+    assert _escrituras(ejecutado) == []
+
+
+def test_primer_vinculo_como_contador_revisa_el_plan(monkeypatch):
+    """Empresa sin miembros: quien entra primero es administrador implícito."""
+    ejecutado = _base_falsa(monkeypatch, [], rol_plataforma="admin", aceptada={**PENDIENTE, "rol": "contador"})
+    assert client.post(f"{APROBAR}/aprobar").status_code == 204
     assert ("verificar_alta_rfc", (OTRO, True)) in ejecutado

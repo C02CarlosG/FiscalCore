@@ -103,7 +103,7 @@ def _cargar(empresa_id: str, rfc: str, desde: str, hasta: str, reasignados: list
         f"""
         SELECT pc.id AS pago_id, pc.uuid_cfdi_pago AS uuid_pago, pc.fecha_pago, pc.version_pago, pc.monto AS pago_monto,
                agg.suma_equivalente, agg.n_relaciones, np.n_pagos_rep,
-               pc.moneda AS pago_moneda, pc.tipo_cambio AS pago_tipo_cambio, rep.estado AS pago_estado,
+               pc.moneda AS pago_moneda, pc.tipo_cambio AS pago_tipo_cambio, pc.forma_pago AS forma_pago_p, rep.estado AS pago_estado,
                pr.cfdi_uuid, pr.parcialidad, pr.importe_pagado, pr.moneda_dr, pr.equivalencia_dr, pr.objeto_imp_dr,
                COALESCE(ri.impuestos, '[]'::json) AS impuestos_dr,
                COALESCE(ip.impuestos, '[]'::json) AS impuestos_p,

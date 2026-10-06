@@ -251,6 +251,9 @@ def init_db() -> None:
         # 054 es idempotente — DIOT por flujo: tipo de tercero/operación por periodo y por CFDI (F6.2)
         _run_sql_file("054_diot.sql")
 
+        # 055 es idempotente — CHECK de motivo no vacío y de % de nómina exenta (47 o 53) para bases ya creadas (F7.1)
+        _run_sql_file("055_isr_checks.sql")
+
         # 060 es idempotente — documentos_fiscales: constancia y opinión de cumplimiento en PDF (F8, carril D)
         _run_sql_file("060_documentos_fiscales.sql")
 
@@ -265,6 +268,9 @@ def init_db() -> None:
 
         # 064 es idempotente — CHECK de objeto en validaciones_cfdi_config para bases donde la tabla ya existía (V1)
         _run_sql_file("064_validaciones_config_check.sql")
+
+        # 065 es idempotente — historial de asignaciones de plan por cuenta (M7.2, carril D)
+        _run_sql_file("065_suscripciones_historial.sql")
 
         # Seed inicial: usuario admin si la base aún no tiene usuarios
         _seed_admin()

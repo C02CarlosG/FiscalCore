@@ -534,3 +534,86 @@ export interface DiotFlujo {
   advertencias_iva: InicioAdvertencia[];
   operaciones_por_cfdi: number;
 }
+
+// ── ISR base flujo (F7.2) ────────────────────────────────────────────────────
+
+export type IsrLado = "ingreso" | "deduccion";
+export type IsrBloque = "contado" | "credito" | "devoluciones" | "nomina" | "inversiones" | "no_considerados";
+
+export interface IsrFuera {
+  cfdi: number;
+  base: number;
+  por_motivo: Record<string, { cfdi: number; base: number }>;
+}
+
+export interface IsrIngresos {
+  contado: number;
+  credito: number;
+  devoluciones: number;
+  total: number;
+  cfdi: number;
+  retenciones_a_favor: number;
+  no_considerados: IsrFuera;
+}
+
+export interface IsrNomina {
+  gravado: number;
+  exento: number;
+  porcentaje_exento: number;
+  exento_deducible: number;
+  deducible: number;
+  excluido_ptu: number;
+  excluido_viaticos: number;
+}
+
+export interface IsrDeducciones {
+  contado: number;
+  credito: number;
+  devoluciones_recibidas: number;
+  compras_y_gastos: number;
+  nomina: IsrNomina;
+  total: number;
+  inversiones: { cfdi: number; base: number };
+  cfdi: number;
+  no_considerados: IsrFuera;
+}
+
+export interface IsrBloqueResumen {
+  ingresos: IsrIngresos;
+  deducciones: IsrDeducciones;
+  retenciones_a_cargo: { trabajadores: number; proveedores: number; total: number };
+  utilidad_fiscal_estimada: number;
+}
+
+export interface IsrFlujoResumen {
+  empresa_id: string;
+  periodo: string;
+  regimen: { codigo: string | null; modulo: "flujo" | "coeficiente" | "no_soportado"; avisos: string[] };
+  porcentaje_nomina_exenta: number;
+  mes: IsrBloqueResumen;
+  acumulado: IsrBloqueResumen;
+  advertencias: InicioAdvertencia[];
+}
+
+export interface IsrRenglon {
+  uuid: string;
+  tipo_comprobante: string;
+  fecha_emision: string | null;
+  fecha_efecto: string | null;
+  uuid_pago: string | null;
+  origen: string;
+  contraparte_rfc: string | null;
+  contraparte: string | null;
+  base: number;
+  retencion: number;
+  marcas: string[];
+  motivo: string | null;
+  nomina: { gravado: number; exento: number; ptu: number; viaticos: number } | null;
+}
+
+export interface IsrDetalle {
+  items: IsrRenglon[];
+  total: number;
+  pagina: number;
+  por_pagina: number;
+}

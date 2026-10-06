@@ -66,6 +66,11 @@ def test_mensaje_de_limite():
         "Tu plan Prueba permite 1 RFC y ya lo usaste. Pide un cambio de plan para agregar otra empresa."
     )
     assert "15 RFC y ya los usaste" in s.mensaje_limite({"nombre": "Despacho", "max_rfc": 15})
+    # Un plan sin RFC no dice "permite 0 RFC y ya los usaste".
+    assert s.mensaje_limite({"nombre": "Cerrado", "max_rfc": 0}) == (
+        "Tu plan Cerrado no incluye RFC. Pide un cambio de plan para agregar una empresa."
+    )
+    assert "de esa persona no incluye RFC" in s.mensaje_limite({"nombre": "Cerrado", "max_rfc": 0}, de_tercero=True)
     # Cuando el límite es de otra cuenta, el mensaje no le habla a quien actúa.
     assert s.mensaje_limite({"nombre": "Prueba", "max_rfc": 1}, de_tercero=True) == (
         "El plan Prueba de esa persona permite 1 RFC y ya lo usa. "
@@ -101,6 +106,7 @@ def test_validar_plan():
     p = s.validar_plan("basico", {"nombre": " Básico ", "precio_mensual": "499.5", "max_rfc": 3, "activo": True})
     assert p == {"clave": "basico", "nombre": "Básico", "precio_mensual": Decimal("499.50"), "max_rfc": 3, "activo": True}
     assert s.validar_plan("ilimitado", {"nombre": "Ilimitado", "precio_mensual": 3999, "max_rfc": None})["max_rfc"] is None
+    assert s.validar_plan("grande", {"nombre": "G", "precio_mensual": 1, "max_rfc": 2**31 - 1})["max_rfc"] == 2**31 - 1
 
 
 @pytest.mark.parametrize("clave,cuerpo", [
@@ -110,6 +116,7 @@ def test_validar_plan():
     ("basico", {"nombre": "B", "precio_mensual": "abc", "max_rfc": 1}),
     ("basico", {"nombre": "B", "precio_mensual": 1, "max_rfc": -1}),
     ("basico", {"nombre": "B", "precio_mensual": 1, "max_rfc": 1.5}),
+    ("basico", {"nombre": "B", "precio_mensual": 1, "max_rfc": 2**31}),
     ("basico", {"nombre": 5, "precio_mensual": 1, "max_rfc": 1}),
     ("basico", {"nombre": ["B"], "precio_mensual": 1, "max_rfc": 1}),
     ("basico", {"nombre": "B", "precio_mensual": 1, "max_rfc": 1, "activo": "false"}),
