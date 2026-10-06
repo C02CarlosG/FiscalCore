@@ -114,7 +114,7 @@ async def agregar_empresa(
                        "Solicita acceso a quien la administra.",
             )
         db.execute(
-            "INSERT INTO usuario_empresas (usuario_id, empresa_id) VALUES (%s, %s)",
+            "INSERT INTO usuario_empresas (usuario_id, empresa_id, rol) VALUES (%s, %s, 'administrador')",
             (current_user["user_id"], str(empresa["id"])),
         )
 

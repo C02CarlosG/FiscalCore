@@ -25,7 +25,7 @@ DATABASE_URL = os.getenv("DATABASE_URL", _LOCAL_DEFAULT)
 # ─── Seed admin inicial ───────────────────────────────────────
 # Credenciales del admin que se siembra cuando la base no tiene usuarios.
 # Configurables por entorno; el default solo es apto para desarrollo.
-_SEED_ADMIN_EMAIL = os.getenv("SEED_ADMIN_EMAIL", "admin@fiscalcore.mx")
+_SEED_ADMIN_EMAIL = os.getenv("SEED_ADMIN_EMAIL", "admin@fiscalcore.mx").strip().lower()
 _SEED_ADMIN_DEFAULT_PASSWORD = "Admin2024!"
 _SEED_ADMIN_PASSWORD = os.getenv("SEED_ADMIN_PASSWORD", _SEED_ADMIN_DEFAULT_PASSWORD)
 
@@ -227,6 +227,9 @@ def init_db() -> None:
 
         # 031 es idempotente — descarga automática del SAT: sat_solicitudes ampliada, índice de ventana activa y sat_sync_config
         _run_sql_file("031_sat_sync.sql")
+
+        # 032 es idempotente — correos únicos sin distinguir mayúsculas (falla si hay duplicados) y token_version
+        _run_sql_file("032_seguridad_usuarios.sql")
 
         # 040 es idempotente — extracción v2 del XML: Totales e ImpuestosP del REP, ObjetoImpDR,
         # ACuentaTerceros y nómina completa (percepciones por tipo, otros pagos, separación, jubilación)

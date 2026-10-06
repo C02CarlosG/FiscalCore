@@ -6,6 +6,7 @@
 import logging
 from typing import Optional
 
+import psycopg2.errors
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from .. import db
@@ -15,6 +16,8 @@ from ..schemas import RegisterRequest, LoginRequest, ActualizarPerfilRequest
 _log = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Auth"])
+
+_HASH_FICTICIO = hash_password("contrasena-ficticia-para-igualar-tiempos")
 
 
 @router.post("/api/v1/auth/register", status_code=status.HTTP_201_CREATED)
@@ -26,13 +29,17 @@ async def registrar(request: Request, data: RegisterRequest):
         raise HTTPException(status_code=409, detail="El correo ya está registrado")
 
     password_hash = hash_password(data.password)
-    usuario = db.execute(
-        "INSERT INTO usuarios (email, password_hash, nombre) VALUES (%s, %s, %s) RETURNING *",
-        (data.email, password_hash, data.nombre),
-        returning=True,
-    )
+    try:
+        usuario = db.execute(
+            "INSERT INTO usuarios (email, password_hash, nombre) VALUES (%s, %s, %s) RETURNING *",
+            (data.email, password_hash, data.nombre),
+            returning=True,
+        )
+    except psycopg2.errors.UniqueViolation:       # otro registro del mismo correo ganó la carrera
+        raise HTTPException(status_code=409, detail="El correo ya está registrado")
 
-    token = crear_token({"user_id": str(usuario["id"]), "email": data.email})
+    token = crear_token({"user_id": str(usuario["id"]), "email": data.email,
+                         "tv": usuario.get("token_version") or 0})
 
     return {
         "access_token": token,
@@ -50,12 +57,14 @@ async def registrar(request: Request, data: RegisterRequest):
 async def login(request: Request, data: LoginRequest):
     """Autentica un contador y retorna JWT + lista de empresas que administra."""
     try:
-        _log.info(f"Login attempt for {data.email}")
         usuario = db.query_one(
             "SELECT * FROM usuarios WHERE email = %s AND activo = TRUE",
             (data.email,),
         )
-        if not usuario or not verify_password(data.password, usuario["password_hash"]):
+        # Siempre se ejecuta bcrypt (contra un hash ficticio si no hay cuenta) para que
+        # el tiempo de respuesta no revele si el correo existe.
+        hash_a_verificar = usuario["password_hash"] if usuario else _HASH_FICTICIO
+        if not verify_password(data.password, hash_a_verificar) or not usuario:
             raise HTTPException(status_code=401, detail="Credenciales incorrectas")
 
         empresas = db.query_all(
@@ -69,7 +78,8 @@ async def login(request: Request, data: LoginRequest):
             (str(usuario["id"]),),
         )
 
-        token = crear_token({"user_id": str(usuario["id"]), "email": data.email})
+        token = crear_token({"user_id": str(usuario["id"]), "email": data.email,
+                         "tv": usuario.get("token_version") or 0})
 
         return {
             "access_token": token,
@@ -83,7 +93,7 @@ async def login(request: Request, data: LoginRequest):
         raise
     except Exception as e:
         _log.error(f"Login error: {type(e).__name__}: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Error interno al iniciar sesión")
 
 
 @router.get("/api/v1/auth/me")
