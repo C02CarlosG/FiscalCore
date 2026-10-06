@@ -70,7 +70,7 @@ def test_los_pagos_reales_reemplazan_a_la_estimacion():
 
 def test_ptu_y_perdidas_bajan_la_base_y_el_pago_nunca_es_negativo():
     por_mes = {1: ("100000", "50000", "0")}
-    con = p.pago_provisional_flujo("2026-01", resumen_falso(por_mes), ptu_pagada=D("10000"), perdidas_pendientes=D("5000"))
+    con = p.pago_provisional_flujo("2026-01", resumen_falso(por_mes), ptu_pagada=D("10000"), perdidas_pendientes=D("5000"), ptu_mes_pago=1)
     assert con["base_gravable"] == D("35000.00")                     # 100,000 − 50,000 − 10,000 − 5,000
     exceso = p.pago_provisional_flujo("2026-01", resumen_falso({1: ("100000", "50000", "99999")}))
     assert exceso["pago_del_mes"] == D("0.00") and exceso["exceso_de_pagos_y_retenciones"] == D("90891.18")
@@ -166,3 +166,38 @@ def test_arrendamiento_sin_tarifa_o_base_negativa():
     assert arrend({}, periodo="2027-03")["motivo"] == "sin_tarifa"
     r = arrend({9: (1000, 5000, 0)})
     assert r["base_gravable"] == D("0.00") and r["pago_del_periodo"] == D("0.00")
+
+
+# ── retenciones acumuladas, PTU por mes de pago, avisos y pesos ──────────────
+
+def test_las_retenciones_se_acreditan_acumuladas_no_solo_las_del_mes():
+    # enero: 9,107.82 − 1,000 de retención = 8,107.82 de pago. Febrero: 18,215.64 − 8,107.82 − (1,000 + 1,000) acumuladas = 8,107.82
+    def resumen(periodo):
+        k = int(periodo[5:7])
+        ing, ded = {1: (100000, 50000), 2: (200000, 100000)}[k]
+        acumulado = {"ingresos": {"total": D(ing), "retenciones_a_favor": D(1000 * k)}, "deducciones": {"total": D(ded)}}
+        return {"mes": {"ingresos": {"total": D(ing), "retenciones_a_favor": D(1000)}}, "acumulado": acumulado}
+
+    r = p.pago_provisional_flujo("2026-02", resumen)
+
+    assert r["pagos_provisionales_anteriores"] == D("8107.82") and r["isr_retenido_acumulado"] == D("2000.00")
+    assert r["pago_del_mes"] == D("8107.82")
+
+
+def test_la_ptu_solo_resta_desde_el_mes_en_que_se_pago():
+    por_mes = {k: (str(100000 * k), str(50000 * k), "0") for k in range(1, 7)}
+    antes = p.pago_provisional_flujo("2026-04", resumen_falso(por_mes), ptu_pagada=D("10000"), ptu_mes_pago=5)
+    desde = p.pago_provisional_flujo("2026-06", resumen_falso(por_mes), ptu_pagada=D("10000"), ptu_mes_pago=5)
+    sin_mes = p.pago_provisional_flujo("2026-06", resumen_falso(por_mes), ptu_pagada=D("10000"))
+
+    assert antes["ptu_pagada"] == D("0") and antes["base_gravable"] == D("200000.00")     # abril: la PTU aún no se paga
+    assert desde["ptu_pagada"] == D("10000") and desde["base_gravable"] == D("290000.00")  # junio: ya resta
+    assert sin_mes["ptu_pagada"] == D("0") and any("sin mes de pago" in a for a in sin_mes["avisos"])
+
+
+def test_las_perdidas_avisan_que_no_se_actualizan_y_el_pago_se_expone_a_pesos():
+    # base 100,000 − 50,000 − 1,000 = 49,000 → 5,665.16 + 13,637.16 × 23.52 % = 8,872.62 → $8,873
+    r = p.pago_provisional_flujo("2026-01", resumen_falso({1: ("100000", "50000", "0")}), perdidas_pendientes=D("1000"))
+
+    assert any("Art. 57" in a for a in r["avisos"])
+    assert r["pago_del_mes"] == D("8872.62") and r["pago_del_mes_a_pesos"] == D("8873.00")

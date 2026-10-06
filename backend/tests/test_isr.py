@@ -95,7 +95,10 @@ def test_retencion_de_mes_anterior_se_refleja_en_pagos_previos():
 
     Enero: ISR acumulado 25,500 - retención 5,000 -> pago real 20,500.
     Febrero: ISR acumulado 56,100 - pagos_previos (20,500 real, no 25,500 bruto)
-             -> pago del mes 35,600.
+             - retenciones acumuladas (5,000 de enero) -> pago del mes 30,600.
+
+    Las retenciones se acreditan acumuladas: 20,500 (enero) + 30,600 (febrero) + 5,000 retenidos = 56,100 de
+    ISR acumulado; con 35,600 se habría acreditado de menos la retención de enero (pago de más por 5,000).
     """
     res = isr_provisional(
         ingresos_por_mes={1: Decimal("1000000"), 2: Decimal("2200000")},
@@ -103,4 +106,5 @@ def test_retencion_de_mes_anterior_se_refleja_en_pagos_previos():
         retenciones_por_mes={1: Decimal("5000")},
     )
     assert res["pagos_previos"] == Decimal("20500.00")
-    assert res["pago_del_mes"] == Decimal("35600.00")
+    assert res["pago_del_mes"] == Decimal("30600.00")
+    assert res["isr_retenido_acumulado"] == Decimal("5000.00")

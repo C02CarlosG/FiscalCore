@@ -74,7 +74,7 @@ Un régimen vacío o desconocido muestra el aviso y deja ver el flujo sin conclu
 
 `utilidad_k = máx(0, ingresos acumulados − deducciones acumuladas − PTU pagada − pérdidas pendientes)`; `causado_k` = cuota fija +
 (utilidad − límite inferior) × % de la tarifa acumulada del mes *k*; `pago_k = máx(0, causado_k − Σ pagos anteriores − ISR retenido a
-favor del mes k)`. Los pagos anteriores restan ya netos de su retención (igual que `isr.py`). Si no se conoce lo realmente enterado
+favor **acumulado** hasta el mes k)` (Art. 106, último párrafo: las retenciones se acreditan acumuladas; los pagos anteriores ya salieron netos de la retención de su mes, así que no basta restar la del mes). La PTU resta solo desde el mes en que se pagó (`ptu_mes_pago`, migración 057); las pérdidas pendientes se restan sin actualizar (Art. 57 LISR) y se avisa. El mismo criterio de retenciones acumuladas aplica a `isr.py` (601, Art. 14). Si no se conoce lo realmente enterado
 se estima con la misma fórmula y se avisa (`meses_con_pago_estimado`); M5 podrá aportar los pagos reales. Se muestran el renglón de la
 tarifa, la fuente y la fecha de consulta. **Fuera de alcance:** estímulos y subsidio.
 

@@ -30,10 +30,9 @@ def _pago_sin_quantizar(
 ) -> Decimal:
     """Pago del mes dado, sin redondear (recursión sobre meses anteriores).
 
-    Cada mes anterior resta su propia retención (``retenciones_por_mes.get(m)``),
-    no la del mes que se está calculando: el pago real de un mes previo ya vino
-    reducido por lo que le retuvieron a él, y es ese pago real el que debe
-    descontarse como "pago previo" del mes actual (Art. 14 LISR, fracción III).
+    Se descuentan los pagos reales de los meses anteriores (ya netos de la retención de su mes) **y** las retenciones
+    acumuladas del ejercicio hasta este mes: restar solo la retención del mes dejaría sin acreditar las de los meses
+    anteriores (el pago previo salió neto, pero la retención previa sigue siendo un acreditamiento del impuesto acumulado).
     """
     isr_acumulado = _isr_acumulado(ingresos_por_mes[mes], cu, tasa, ptu, perdidas)
     pagos_previos = sum(
@@ -41,8 +40,8 @@ def _pago_sin_quantizar(
          for m in range(1, mes)),
         Decimal("0"),
     )
-    retencion_mes = retenciones_por_mes.get(mes, Decimal("0"))
-    return max(isr_acumulado - pagos_previos - retencion_mes, Decimal("0"))
+    retenciones_acumuladas = sum((retenciones_por_mes.get(m, Decimal("0")) for m in range(1, mes + 1)), Decimal("0"))
+    return max(isr_acumulado - pagos_previos - retenciones_acumuladas, Decimal("0"))
 
 
 def isr_provisional(
@@ -59,8 +58,8 @@ def isr_provisional(
     ``ingresos_por_mes`` mapea mes -> ingreso nominal acumulado del ejercicio a ese
     corte (enero..mes). ``retenciones_por_mes`` mapea mes -> ISR retenido ESE mes
     (no solo el mes declarado): se necesita el histórico completo porque
-    ``pagos_previos`` recalcula el pago real de cada mes anterior, y ese pago real
-    ya vino reducido por su propia retención.
+    ``pagos_previos`` recalcula el pago real de cada mes anterior (neto de su retención)
+    y las retenciones del ejercicio se acreditan acumuladas hasta el mes declarado.
     """
     q = lambda d: d.quantize(CENTAVOS)
 
@@ -75,7 +74,8 @@ def isr_provisional(
         Decimal("0"),
     )
     retencion_mes = retenciones_por_mes.get(mes, Decimal("0"))
-    pago_del_mes = max(isr_acumulado - pagos_previos - retencion_mes, Decimal("0"))
+    retenciones_acumuladas = sum((retenciones_por_mes.get(m, Decimal("0")) for m in range(1, mes + 1)), Decimal("0"))
+    pago_del_mes = max(isr_acumulado - pagos_previos - retenciones_acumuladas, Decimal("0"))
 
     return {
         "ingreso_nominal_acum": q(nominal_acum),
@@ -84,5 +84,6 @@ def isr_provisional(
         "isr_acumulado": q(isr_acumulado),
         "pagos_previos": q(pagos_previos),
         "isr_retenido": q(retencion_mes),
+        "isr_retenido_acumulado": q(retenciones_acumuladas),
         "pago_del_mes": q(pago_del_mes),
     }

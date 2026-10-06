@@ -106,4 +106,4 @@ def test_isr_provisional_retencion_de_mes_anterior_no_subestima_el_pago(monkeypa
     assert resp.status_code == 200
     body = resp.json()
     assert body["pagos_provisionales_anteriores"] == 20500.0
-    assert body["resultado"]["pago_del_mes"] == 35600.0
+    assert body["resultado"]["pago_del_mes"] == 30600.0

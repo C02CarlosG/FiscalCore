@@ -4,10 +4,11 @@ Puro: sobre los resúmenes de ``isr_flujo`` y la tarifa del Anexo 8. Para cada m
 
     utilidad_k      = máx(0, ingresos_acum_k − deducciones_acum_k − PTU pagada − pérdidas pendientes)
     causado_k       = cuota fija + (utilidad_k − límite inferior) × % de la tarifa acumulada del mes k
-    pago_k          = máx(0, causado_k − Σ pagos de los meses anteriores − ISR retenido a favor del mes k)
+    pago_k          = máx(0, causado_k − Σ pagos de los meses anteriores − ISR retenido a favor acumulado hasta el mes k)
 
-Los pagos anteriores restan ya netos de su propia retención (como en el Art. 14, ``isr.py``). Si no se conocen los pagos
-realmente enterados se estiman con esta misma fórmula y se avisa. No calcula Art. 116 (arrendamiento, 606), ni
+Las retenciones se acreditan **acumuladas** (Art. 106, último párrafo): los pagos anteriores ya salieron netos de la retención
+de su mes, así que restar solo la del mes k dejaría sin acreditar las retenciones de los meses anteriores. La PTU resta solo
+desde el mes en que se pagó (``ptu_mes_pago``). Si no se conocen los pagos realmente enterados se estiman con esta fórmula. No calcula Art. 116 (arrendamiento, 606), ni
 estímulos, ni la deducción opcional del 35 %. Ver ``docs/superpowers/specs/2026-10-04-f7-isr-base-flujo-design.md``."""
 from __future__ import annotations
 
@@ -22,6 +23,11 @@ CENTAVOS = Decimal("0.01")
 
 def _q(valor: Decimal) -> Decimal:
     return valor.quantize(CENTAVOS, rounding=ROUND_HALF_UP)
+
+
+def _a_pesos(valor: Decimal) -> Decimal:
+    """Monto a pesos enteros (medio hacia arriba), como se paga en la declaración."""
+    return valor.quantize(Decimal("1"), rounding=ROUND_HALF_UP).quantize(CENTAVOS)
 
 
 def aplicar_tarifa(utilidad: Decimal, tarifa: list) -> dict:
@@ -45,9 +51,11 @@ def pago_provisional_flujo(
     ptu_pagada: Decimal = CERO,
     perdidas_pendientes: Decimal = CERO,
     pagos_reales: Optional[dict[int, Decimal]] = None,
+    ptu_mes_pago: Optional[int] = None,
 ) -> dict:
     """Pago provisional del ``periodo`` (YYYY-MM). ``resumen_de(periodo_k)`` devuelve ``isr_flujo.resumen`` de ese mes;
-    ``pagos_reales`` = {mes: pago enterado} de los meses anteriores (si falta alguno, se estima)."""
+    ``pagos_reales`` = {mes: pago enterado} de los meses anteriores (si falta alguno, se estima). La PTU se resta desde
+    ``ptu_mes_pago`` (sin mes de pago no se resta y se avisa)."""
     ejercicio, mes = int(periodo[:4]), int(periodo[5:7])
     if tarifas_isr.tarifa_art_106(ejercicio, mes) is None:
         return {"calculado": False, "motivo": "sin_tarifa", "ejercicio": ejercicio,
@@ -60,18 +68,20 @@ def pago_provisional_flujo(
         bloque = resumen_de(f"{ejercicio:04d}-{k:02d}")
         acum, del_mes = bloque["acumulado"], bloque["mes"]
         utilidad_antes = acum["ingresos"]["total"] - acum["deducciones"]["total"]
-        utilidad = max(CERO, utilidad_antes - ptu_pagada - perdidas_pendientes)
+        ptu_k = ptu_pagada if ptu_mes_pago is not None and k >= ptu_mes_pago else CERO
+        utilidad = max(CERO, utilidad_antes - ptu_k - perdidas_pendientes)
         r = aplicar_tarifa(utilidad, tarifas_isr.tarifa_art_106(ejercicio, k))
         anteriores = sum((pagos_previos[m] for m in range(1, k)), CERO)
-        retencion = del_mes["ingresos"]["retenciones_a_favor"]
+        retencion = acum["ingresos"]["retenciones_a_favor"]
         crudo = r["impuesto_causado"] - anteriores - retencion
         pago = max(CERO, crudo)
         detalle_mes = {
             "ingresos_acumulados": acum["ingresos"]["total"], "deducciones_acumuladas": acum["deducciones"]["total"],
-            "utilidad_antes_de_ajustes": _q(utilidad_antes), "ptu_pagada": ptu_pagada, "perdidas_pendientes": perdidas_pendientes,
+            "utilidad_antes_de_ajustes": _q(utilidad_antes), "ptu_pagada": ptu_k, "perdidas_pendientes": perdidas_pendientes,
             "base_gravable": _q(utilidad), "tarifa": r, "impuesto_causado": r["impuesto_causado"],
-            "pagos_provisionales_anteriores": _q(anteriores), "isr_retenido_del_mes": retencion,
-            "pago_del_mes": _q(pago), "exceso_de_pagos_y_retenciones": _q(max(CERO, -crudo)),
+            "pagos_provisionales_anteriores": _q(anteriores), "isr_retenido_acumulado": _q(retencion),
+            "pago_del_mes": _q(pago), "pago_del_mes_a_pesos": _a_pesos(pago),
+            "exceso_de_pagos_y_retenciones": _q(max(CERO, -crudo)),
         }
         if k < mes:
             if k in pagos_reales:
@@ -79,7 +89,11 @@ def pago_provisional_flujo(
             else:
                 pagos_previos[k] = pago
                 estimados.append(k)
-    avisos = ["Estimación del flujo: no sustituye la declaración. No aplica estímulos ni la deducción opcional del 35 %."]
+    avisos = ["Estimación del flujo: no sustituye la declaración. No aplica estímulos."]
+    if perdidas_pendientes > CERO:
+        avisos.append("Las pérdidas pendientes se restan tal como se capturaron: no se actualizan por inflación (Art. 57 LISR).")
+    if ptu_pagada > CERO and ptu_mes_pago is None:
+        avisos.append("Hay PTU pagada sin mes de pago: no se resta. Captura el mes en que se pagó.")
     if estimados:
         avisos.append("Los pagos provisionales de " + ", ".join(f"{m:02d}" for m in estimados) +
                       " se estiman con el mismo cálculo porque no se capturó lo realmente pagado.")
@@ -141,5 +155,5 @@ def pago_provisional_arrendamiento(
             "deducciones_reales_del_periodo": _q(deducciones), "deduccion_opcional_35": deduccion_opcional,
             "deducciones_usadas": _q(deducciones_usadas), "predial": _q(predial), "base_gravable": _q(base),
             "tarifa": r, "impuesto_causado": r["impuesto_causado"], "isr_retenido_acreditado": _q(retenciones),
-            "pago_del_periodo": _q(pago), "exceso_de_retenciones": _q(max(CERO, retenciones - r["impuesto_causado"])),
+            "pago_del_periodo": _q(pago), "pago_del_periodo_a_pesos": _a_pesos(pago), "exceso_de_retenciones": _q(max(CERO, retenciones - r["impuesto_causado"])),
             "avisos": avisos}

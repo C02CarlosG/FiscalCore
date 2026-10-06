@@ -40,6 +40,7 @@ class AjusteIn(BaseModel):
 class ConfigIn(BaseModel):
     pct_nomina_exenta: Decimal = Field(..., description="0.47 por defecto; 0.53 si se acredita la no disminución")
     ptu_pagada: Optional[Decimal] = Field(None, ge=0, le=Decimal("9999999999999.99"), description="PTU pagada en el ejercicio")
+    ptu_mes_pago: Optional[int] = Field(None, ge=1, le=12, description="Mes en que se pagó la PTU: solo resta desde ese mes")
     perdidas_pendientes: Optional[Decimal] = Field(None, ge=0, le=Decimal("9999999999999.99"),
                                                    description="Pérdidas fiscales de ejercicios anteriores por aplicar")
 
@@ -101,7 +102,7 @@ async def guardar_config(empresa_id: str, ejercicio: int, datos: ConfigIn, curre
     _ejercicio_o_422(ejercicio)
     pct = datos.pct_nomina_exenta
     isr_flujo_datos.guardar_porcentaje(empresa_id, ejercicio, pct, current_user["user_id"], datos.ptu_pagada, datos.perdidas_pendientes,
-                                       datos.arrendamiento_periodicidad, datos.deduccion_opcional_35)
+                                       datos.arrendamiento_periodicidad, datos.deduccion_opcional_35, datos.ptu_mes_pago)
     return _json({"ejercicio": ejercicio, "pct_nomina_exenta": pct, **isr_flujo_datos.parametros_provisional(empresa_id, ejercicio)})
 
 
@@ -200,7 +201,8 @@ async def pago_provisional(
                       "mensaje": "El régimen de la empresa no está soportado para el pago provisional por flujo."})
     eventos = isr_flujo_datos.cargar_eventos(empresa_id, empresa["rfc"], periodo)
     resultado = isr_pago_provisional.pago_provisional_flujo(
-        periodo, lambda p: isr_flujo.resumen(eventos, p, ajustes, pct), parametros["ptu_pagada"], parametros["perdidas_pendientes"])
+        periodo, lambda p: isr_flujo.resumen(eventos, p, ajustes, pct), parametros["ptu_pagada"], parametros["perdidas_pendientes"],
+        ptu_mes_pago=parametros["ptu_mes_pago"])
     registrar_evento(current_user["user_id"], "reporte_generado", empresa_id=empresa_id,
                      metadata={"tipo": "isr_pago_provisional", "periodo": periodo})
     return _json({**base, **resultado})

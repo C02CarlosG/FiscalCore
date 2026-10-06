@@ -3033,6 +3033,7 @@ paths:
                   ejercicio: { type: integer }
                   pct_nomina_exenta: { type: number }
                   ptu_pagada: { type: number }
+                  ptu_mes_pago: { type: integer, nullable: true }
                   perdidas_pendientes: { type: number }
                   arrendamiento_periodicidad: { type: string, enum: [mensual, trimestral] }
                   deduccion_opcional_35: { type: boolean }
@@ -3059,6 +3060,7 @@ paths:
               properties:
                 pct_nomina_exenta: { type: number, enum: [0.47, 0.53] }
                 ptu_pagada: { type: number, minimum: 0, description: "PTU pagada en el ejercicio; si se omite se conserva lo guardado" }
+                ptu_mes_pago: { type: integer, minimum: 1, maximum: 12, description: "Mes en que se pago la PTU: solo resta del pago provisional desde ese mes" }
                 perdidas_pendientes: { type: number, minimum: 0, description: "Perdidas fiscales de ejercicios anteriores por aplicar; si se omite se conserva" }
                 arrendamiento_periodicidad: { type: string, enum: [mensual, trimestral], description: "606: pago provisional mensual o trimestral; si se omite se conserva" }
                 deduccion_opcional_35: { type: boolean, description: "606: deduccion opcional del 35 % (Art. 115); si se omite se conserva" }

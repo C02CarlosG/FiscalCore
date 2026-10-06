@@ -179,6 +179,6 @@ def test_e2e_isr_provisional_retencion_de_mes_anterior_no_subestima_el_pago():
         feb = r_feb.json()
 
         assert feb["pagos_provisionales_anteriores"] == 20500.0
-        assert feb["resultado"]["pago_del_mes"] == 35600.0
+        assert feb["resultado"]["pago_del_mes"] == 30600.0
     finally:
         _limpiar(db)

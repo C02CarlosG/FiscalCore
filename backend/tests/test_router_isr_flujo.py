@@ -100,7 +100,7 @@ def _preparar_provisional(monkeypatch, regimen):
     monkeypatch.setattr(router, "empresa_or_404", lambda eid: {"id": eid, "rfc": "AAA010101AAA", "regimen_fiscal": regimen})
     monkeypatch.setattr(isr_flujo_datos, "cargar_ajustes", lambda e: {})
     monkeypatch.setattr(isr_flujo_datos, "porcentaje_nomina_exenta", lambda e, ej: isr_flujo_datos.isr_flujo.PORCENTAJE_NOMINA_EXENTA)
-    monkeypatch.setattr(isr_flujo_datos, "parametros_provisional", lambda e, ej: {"ptu_pagada": 0, "perdidas_pendientes": 0, "arrendamiento_periodicidad": "mensual", "deduccion_opcional_35": False})
+    monkeypatch.setattr(isr_flujo_datos, "parametros_provisional", lambda e, ej: {"ptu_pagada": 0, "ptu_mes_pago": None, "perdidas_pendientes": 0, "arrendamiento_periodicidad": "mensual", "deduccion_opcional_35": False})
     monkeypatch.setattr(isr_flujo_datos, "cargar_eventos", lambda e, rfc, p: [])
     monkeypatch.setattr(router, "registrar_evento", lambda *a, **k: None)
 
@@ -166,9 +166,34 @@ def test_pago_provisional_rechaza_predial_negativo_o_con_mas_de_dos_decimales(co
 
 def test_config_acepta_periodicidad_y_opcion_del_35(con_acceso, monkeypatch):
     visto = {}
-    monkeypatch.setattr(isr_flujo_datos, "guardar_porcentaje", lambda e, ej, pct, u, ptu=None, per=None, pd=None, op=None: visto.update(pd=pd, op=op))
+    monkeypatch.setattr(isr_flujo_datos, "guardar_porcentaje", lambda e, ej, pct, u, ptu=None, per=None, pd=None, op=None, mes=None: visto.update(pd=pd, op=op))
     monkeypatch.setattr(isr_flujo_datos, "parametros_provisional", lambda e, ej: {})
 
     assert client.put(f"{BASE}/config/2026", json={"pct_nomina_exenta": 0.47, "arrendamiento_periodicidad": "trimestral", "deduccion_opcional_35": True}).status_code == 200
     assert visto == {"pd": "trimestral", "op": True}
     assert client.put(f"{BASE}/config/2026", json={"pct_nomina_exenta": 0.47, "arrendamiento_periodicidad": "anual"}).status_code == 422
+
+
+def test_pago_provisional_sin_acceso_es_403(monkeypatch):
+    from fastapi import HTTPException
+
+    main.app.dependency_overrides[get_current_user] = lambda: {"user_id": "u1"}
+
+    def sin_acceso(*a, **k):
+        raise HTTPException(status_code=403, detail="Sin acceso")
+    monkeypatch.setattr(router, "validar_acceso_empresa", sin_acceso)
+    try:
+        assert client.get(f"{BASE}/2026-09/pago-provisional").status_code == 403
+    finally:
+        main.app.dependency_overrides.clear()
+
+
+def test_config_acepta_el_mes_de_pago_de_la_ptu(con_acceso, monkeypatch):
+    visto = {}
+    monkeypatch.setattr(isr_flujo_datos, "guardar_porcentaje",
+                        lambda e, ej, pct, u, ptu=None, per=None, pd=None, op=None, mes=None: visto.update(mes=mes))
+    monkeypatch.setattr(isr_flujo_datos, "parametros_provisional", lambda e, ej: {})
+
+    assert client.put(f"{BASE}/config/2026", json={"pct_nomina_exenta": 0.47, "ptu_pagada": 100, "ptu_mes_pago": 5}).status_code == 200
+    assert visto == {"mes": 5}
+    assert client.put(f"{BASE}/config/2026", json={"pct_nomina_exenta": 0.47, "ptu_mes_pago": 13}).status_code == 422
