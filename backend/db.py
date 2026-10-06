@@ -266,6 +266,9 @@ def init_db() -> None:
         # 065 es idempotente — historial de asignaciones de plan por cuenta (M7.2, carril D)
         _run_sql_file("065_suscripciones_historial.sql")
 
+        # 066 es idempotente — datos fiscales y pagos manuales de la suscripción (M7.2, D10, carril D)
+        _run_sql_file("066_suscripciones_pagos.sql")
+
         # Seed inicial: usuario admin si la base aún no tiene usuarios
         _seed_admin()
 

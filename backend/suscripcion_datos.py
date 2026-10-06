@@ -14,6 +14,7 @@ from zoneinfo import ZoneInfo
 
 from . import db
 from . import suscripcion as s
+from . import suscripcion_pagos as sp
 
 _ZONA = ZoneInfo("America/Mexico_City")
 
@@ -90,6 +91,8 @@ def resumen(usuario_id: str) -> dict:
         "uso_rfc": uso,
         "puede_agregar_rfc": s.puede_agregar_rfc(plan, uso, admin),
         "es_admin_plataforma": admin,
+        # Días para el vencimiento si es próximo (aviso solo en la interfaz, D10).
+        "dias_para_vencer": sp.aviso_vencimiento(sus["vigente_hasta"] if sus else None, motivo, hoy()),
     }
 
 
@@ -206,3 +209,68 @@ def cuentas(busqueda: str, limite: int = 200) -> list[dict]:
         """,
         (patron, patron),
     )
+
+
+
+# ─── M7.2 (D10): datos fiscales y pagos registrados a mano ────────────────────
+
+def datos_fiscales(usuario_id: str) -> Optional[dict]:
+    fila = db.query_one(
+        "SELECT rfc, razon_social, regimen_fiscal, codigo_postal, uso_cfdi, updated_at "
+        "FROM suscripciones_datos_fiscales WHERE usuario_id = %s",
+        (usuario_id,),
+    )
+    if not fila:
+        return None
+    return {**{k: fila[k] for k in ("rfc", "razon_social", "regimen_fiscal", "codigo_postal", "uso_cfdi")},
+            "actualizado": fila["updated_at"].isoformat()}
+
+
+def guardar_datos_fiscales(usuario_id: str, datos: dict, admin_id: str) -> dict:
+    db.execute(
+        """
+        INSERT INTO suscripciones_datos_fiscales
+            (usuario_id, rfc, razon_social, regimen_fiscal, codigo_postal, uso_cfdi, actualizado_por, updated_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
+        ON CONFLICT (usuario_id) DO UPDATE SET
+            rfc = EXCLUDED.rfc, razon_social = EXCLUDED.razon_social, regimen_fiscal = EXCLUDED.regimen_fiscal,
+            codigo_postal = EXCLUDED.codigo_postal, uso_cfdi = EXCLUDED.uso_cfdi,
+            actualizado_por = EXCLUDED.actualizado_por, updated_at = NOW()
+        """,
+        (usuario_id, datos["rfc"], datos["razon_social"], datos["regimen_fiscal"], datos["codigo_postal"],
+         datos["uso_cfdi"], admin_id),
+    )
+    return datos_fiscales(usuario_id)
+
+
+def _pago(f: dict, con_internos: bool) -> dict:
+    pago = {"id": str(f["id"]), "fecha": f["fecha"].isoformat(), "monto": str(f["monto"].quantize(s.CENTAVOS)),
+            "referencia": f["referencia"], "folio_cfdi": f["folio_cfdi"]}
+    if con_internos:
+        pago["registrado_por"] = f.get("registrado_por")
+    return pago
+
+
+def pagos(usuario_id: str, con_internos: bool, limite: int = 100) -> list[dict]:
+    filas = db.query_all(
+        """
+        SELECT p.id, p.fecha, p.monto, p.referencia, p.folio_cfdi, a.email AS registrado_por
+        FROM suscripciones_pagos p
+        LEFT JOIN usuarios a ON a.id = p.registrado_por
+        WHERE p.usuario_id = %s
+        ORDER BY p.fecha DESC, p.creado_en DESC
+        LIMIT %s
+        """,
+        (usuario_id, limite),
+    )
+    return [_pago(f, con_internos) for f in filas]
+
+
+def registrar_pago(usuario_id: str, pago: dict, admin_id: str) -> dict:
+    fila = db.execute(
+        "INSERT INTO suscripciones_pagos (usuario_id, fecha, monto, referencia, folio_cfdi, registrado_por) "
+        "VALUES (%s, %s, %s, %s, %s, %s) RETURNING id, fecha, monto, referencia, folio_cfdi",
+        (usuario_id, pago["fecha"], pago["monto"], pago["referencia"], pago["folio_cfdi"], admin_id),
+        returning=True,
+    )
+    return _pago(fila, con_internos=False)

@@ -7,7 +7,10 @@ import type {
   AsignacionHistorial,
   CambioPlan,
   CuentaSuscripcion,
+  DatosFiscalesCliente,
   MiSuscripcionDatos,
+  PagoInput,
+  PagoSuscripcion,
   Plan,
 } from "@/components/suscripcion/tipos";
 
@@ -64,5 +67,56 @@ export function useEditarPlan() {
     mutationFn: ({ clave, cambio }: { clave: string; cambio: CambioPlan }) =>
       apiFetch<Plan>(`${BASE}/admin/planes/${clave}`, { method: "PUT", body: JSON.stringify(cambio) }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: CLAVE }),
+  });
+}
+
+export function useMisDatosFiscales() {
+  return useQuery({
+    queryKey: [...CLAVE, "datos-fiscales"],
+    queryFn: () => apiFetch<DatosFiscalesCliente | null>(`${BASE}/datos-fiscales`),
+  });
+}
+
+export function useMisPagos() {
+  return useQuery({ queryKey: [...CLAVE, "pagos"], queryFn: () => apiFetch<PagoSuscripcion[]>(`${BASE}/pagos`) });
+}
+
+export function useDatosFiscalesCuenta(usuarioId: string, habilitado: boolean) {
+  return useQuery({
+    queryKey: [...CLAVE, "datos-fiscales", usuarioId],
+    queryFn: () => apiFetch<DatosFiscalesCliente | null>(`${BASE}/admin/cuentas/${usuarioId}/datos-fiscales`),
+    enabled: habilitado,
+  });
+}
+
+export function usePagosCuenta(usuarioId: string, habilitado: boolean) {
+  return useQuery({
+    queryKey: [...CLAVE, "pagos", usuarioId],
+    queryFn: () => apiFetch<PagoSuscripcion[]>(`${BASE}/admin/cuentas/${usuarioId}/pagos`),
+    enabled: habilitado,
+  });
+}
+
+export function useGuardarDatosFiscales(usuarioId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (datos: DatosFiscalesCliente) =>
+      apiFetch<DatosFiscalesCliente>(`${BASE}/admin/cuentas/${usuarioId}/datos-fiscales`, {
+        method: "PUT",
+        body: JSON.stringify(datos),
+      }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: [...CLAVE, "datos-fiscales", usuarioId] }),
+  });
+}
+
+export function useRegistrarPago(usuarioId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (pago: PagoInput) =>
+      apiFetch<PagoSuscripcion>(`${BASE}/admin/cuentas/${usuarioId}/pagos`, {
+        method: "POST",
+        body: JSON.stringify(pago),
+      }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: [...CLAVE, "pagos", usuarioId] }),
   });
 }
