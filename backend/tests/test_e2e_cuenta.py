@@ -17,7 +17,7 @@ SEGUNDO = "u1-segundo@test.local"
 ATACANTE = "U1-Existente@Test.local"  # mismo correo que EXISTENTE con otras mayúsculas
 VICTIMA = "u1-victima@test.local"  # invitada sin cuenta; alguien más se registra con su correo
 PLATAFORMA = "u1-plataforma@test.local"
-CORREOS = (DUENO, NUEVO, EXISTENTE, SEGUNDO, ATACANTE, "U1-Victima@Test.local", PLATAFORMA)
+CORREOS = (DUENO, NUEVO, EXISTENTE, SEGUNDO, ATACANTE, VICTIMA, "U1-Victima@Test.local", PLATAFORMA)
 CLAVE = "Clave-Duena-1"
 
 
@@ -165,7 +165,7 @@ def test_aceptar_no_da_acceso_hasta_que_un_administrador_aprueba(entorno):
     assert lista["invitaciones"] == []
     [pendiente] = lista["por_aprobar"]
     assert (pendiente["id"], pendiente["nombre"], pendiente["rol"]) == (inv_id, "Impostor", "administrador")
-    assert pendiente["email"] == "U1-Victima@Test.local"  # el de la cuenta, tal como se registró
+    assert pendiente["email"] == VICTIMA  # el de la cuenta; el registro normaliza el correo a minúsculas
     assert pendiente["cuenta_creada"] and pendiente["aceptada"]
     assert client.get(f"{base}/usuarios", headers=h_contador).json()["por_aprobar"] == []
 
@@ -286,24 +286,19 @@ def test_cambio_de_contrasena(entorno):
     assert _login(client, DUENO, "Nueva-Clave-1").status_code == 200
 
 
-def test_cuenta_con_el_mismo_correo_en_otras_mayusculas_no_toma_la_invitacion(entorno):
-    """B1: usuarios.email distingue mayúsculas; con dos cuentas para el mismo correo en
-    minúsculas nadie ve ni acepta la invitación hasta que se resuelva la duplicidad."""
-    from backend.deps import hash_password
+def test_no_puede_existir_otra_cuenta_con_el_mismo_correo_en_otras_mayusculas(entorno):
+    """B1: la migración 032 (índice único sobre lower(email)) impide la duplicidad por mayúsculas,
+    así que nadie puede quedarse con una invitación creando una cuenta gemela."""
+    import psycopg2
+    from backend.deps import hash_password, limiter
 
     db, client, headers, empresa_id = entorno
     assert _invitar(client, headers, empresa_id, EXISTENTE).status_code == 201
-    db.execute("INSERT INTO usuarios (email, password_hash) VALUES (%s, %s)", (ATACANTE, hash_password("Clave-Atacante-1")))
-    h_atacante = _headers(client, ATACANTE, "Clave-Atacante-1")
-    h_victima = _headers(client, EXISTENTE, "Clave-Existente-1")
-
-    assert client.get("/api/v1/cuenta/invitaciones", headers=h_atacante).json() == []
-    assert client.get("/api/v1/cuenta/invitaciones", headers=h_victima).json() == []
-    inv_id = db.query_one("SELECT id FROM invitaciones_empresa WHERE empresa_id = %s AND email = %s",
-                          (empresa_id, EXISTENTE))["id"]
-    assert client.post(f"/api/v1/cuenta/invitaciones/{inv_id}/aceptar", headers=h_atacante).status_code == 404
-    assert client.get(f"/api/v1/empresas/{empresa_id}", headers=h_atacante).status_code == 403
-    assert db.query_one("SELECT COUNT(*) AS n FROM auditoria WHERE accion = 'cuenta.correo_ambiguo'")["n"] >= 1
+    with pytest.raises(psycopg2.errors.UniqueViolation):
+        db.execute("INSERT INTO usuarios (email, password_hash) VALUES (%s, %s)", (ATACANTE, hash_password("Clave-Atacante-1")))
+    limiter.reset()
+    r = client.post("/api/v1/auth/register", json={"email": ATACANTE, "password": "Clave-Atacante-1"})
+    assert r.status_code == 409
 
 
 def test_invitacion_vencida_no_se_lista_ni_se_acepta(entorno):
@@ -388,21 +383,9 @@ def test_reinvitar_sobre_una_aceptacion_pendiente_responde_409(entorno):
     assert (pendiente["email"], pendiente["email_invitado"]) == (EXISTENTE, EXISTENTE)
 
 
-def test_no_se_aprueba_si_el_correo_se_volvio_ambiguo(entorno):
-    """B1 al aprobar: después de aceptar aparece otra cuenta con el mismo correo en
-    otras mayúsculas; la aprobación se niega y nadie entra."""
-    from backend.deps import hash_password
-
-    db, client, headers, empresa_id = entorno
-    assert _invitar(client, headers, empresa_id, EXISTENTE).status_code == 201
-    h = _headers(client, EXISTENTE, "Clave-Existente-1")
-    inv_id = _aceptar(client, h)
-    db.execute("INSERT INTO usuarios (email, password_hash) VALUES (%s, %s)", (ATACANTE, hash_password("Clave-Atacante-1")))
-    assert client.post(f"{_base(empresa_id)}/invitaciones/{inv_id}/aprobar", headers=headers).status_code == 409
-    assert client.get(f"/api/v1/empresas/{empresa_id}", headers=h).status_code == 403
-    assert db.query_one("SELECT estado FROM invitaciones_empresa WHERE id = %s", (inv_id,))["estado"] == "aceptada_pendiente"
-    assert db.query_one("SELECT COUNT(*) AS n FROM auditoria WHERE accion = 'cuenta.correo_ambiguo' "
-                        "AND entidad_id = %s", (inv_id,))["n"] == 1
+# B1 al aprobar ("el correo se volvió ambiguo después de aceptar") ya no puede ocurrir: el índice
+# único sobre lower(email) de la migración 032 impide la cuenta gemela; ver
+# test_no_puede_existir_otra_cuenta_con_el_mismo_correo_en_otras_mayusculas.
 
 
 def test_empresa_sin_miembros_el_primer_vinculo_cuenta_para_el_plan(entorno):

@@ -74,7 +74,7 @@ echo "[3/4] Iniciando backend (FastAPI puerto 8000)..."
 if port_busy 8000; then
   echo "       (puerto 8000 ya en uso — se reutiliza el proceso existente)"
 else
-  "$PYTHON" -m uvicorn backend.main_api:app --reload --port 8000 &
+  "$PYTHON" -m uvicorn backend.main_api:app --reload --port 8000 --no-proxy-headers &
   BACKEND_PID=$!
 fi
 

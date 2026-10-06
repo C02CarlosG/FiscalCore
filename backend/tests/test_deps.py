@@ -73,7 +73,35 @@ def test_get_current_user_sin_credenciales_da_401():
     assert exc.value.status_code == 401
 
 
-def test_get_current_user_con_token_valido():
+def _creds(**extra):
+    token = crear_token({"user_id": "u1", "email": "a@b.com", **extra})
+    return HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
+
+
+@pytest.mark.parametrize("fila, extra", [
+    (None, {}),                                              # usuario borrado
+    ({"activo": False, "token_version": 0}, {}),             # desactivado
+    ({"activo": True, "token_version": 2}, {"tv": 1}),       # token de una versión anterior
+    ({"activo": True, "token_version": 1}, {}),              # token viejo sin tv tras invalidar sesiones
+])
+def test_get_current_user_rechaza_sesiones_no_validas(monkeypatch, fila, extra):
+    monkeypatch.setattr(db, "query_one", lambda *a, **k: fila)
+    with pytest.raises(HTTPException) as exc:
+        get_current_user(_creds(**extra))
+    assert exc.value.status_code == 401
+
+
+def test_invalidar_sesiones_incrementa_la_version(monkeypatch):
+    from backend.deps import invalidar_sesiones
+
+    llamadas = []
+    monkeypatch.setattr(db, "execute", lambda sql, params=None, **k: llamadas.append((sql, params)))
+    invalidar_sesiones("u1")
+    assert "token_version = token_version + 1" in llamadas[0][0] and llamadas[0][1] == ("u1",)
+
+
+def test_get_current_user_con_token_valido(monkeypatch):
+    monkeypatch.setattr(db, "query_one", lambda *a, **k: {"activo": True, "token_version": 0})
     token = crear_token({"user_id": "u1", "email": "a@b.com"})
     creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
     payload = get_current_user(creds)
