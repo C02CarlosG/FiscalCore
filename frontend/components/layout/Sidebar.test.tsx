@@ -61,6 +61,10 @@ describe("Sidebar", () => {
       "href",
       "/empresas/e1/iva-flujo",
     );
+    expect(screen.getByRole("link", { name: /ISR base flujo/ })).toHaveAttribute(
+      "href",
+      "/empresas/e1/isr-flujo",
+    );
     expect(screen.getByRole("link", { name: /Conexión SAT/ })).toHaveAttribute(
       "href",
       "/empresas/e1/sat",
