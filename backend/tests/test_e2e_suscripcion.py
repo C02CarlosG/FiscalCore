@@ -284,12 +284,14 @@ def test_pagos_extienden_la_vigencia_y_anular_la_revierte(entorno):
     assert client.post(url_primero, headers=h_admin, json={}).status_code == 422
     assert client.post(url_primero, headers=h_otro, json={"motivo": "x"}).status_code == 403
     r = client.post(url_primero, headers=h_admin, json={"motivo": "duplicado"})
-    assert (r.status_code, r.json()) == (200, {"vigencia_revertida": False})
+    assert (r.status_code, r.json()) == (200, {"vigencia_revertida": False,
+                                               "vigente_hasta": segundo["vigente_hasta_nueva"]})
     assert client.post(url_primero, headers=h_admin, json={"motivo": "otra vez"}).status_code == 404
-    # Anular el segundo sí revierte a la vigencia anterior a ese pago.
+    # Anular el segundo revierte en cadena: su anterior es la que dejó el primero, que ya
+    # está anulado, así que la vigencia vuelve a la de antes de los dos pagos.
     r = client.post(f"{base}/pagos/{segundo['id']}/anular", headers=h_admin, json={"motivo": "rebotó"})
-    assert r.json() == {"vigencia_revertida": True}
-    assert _mia(client, h_titular)["vigente_hasta"] == primero["vigente_hasta_nueva"]
+    assert r.json() == {"vigencia_revertida": True, "vigente_hasta": vence.isoformat()}
+    assert _mia(client, h_titular)["vigente_hasta"] == vence.isoformat()
     estados = {p["id"]: (p["estado"], p["motivo_anulacion"]) for p in client.get(f"{base}/pagos", headers=h_admin).json()}
     assert estados == {primero["id"]: ("anulado", "duplicado"), segundo["id"]: ("anulado", "rebotó")}
     # La cuenta ve el estado pero no el motivo interno.
@@ -338,3 +340,59 @@ def test_avisos_y_lista_de_vencimientos(entorno):
     # Una suspendida no aparece (se explica con su estado).
     asignar(otro, 2, estado="suspendida")
     assert all(v["email"] != OTRO for v in client.get(url, headers=h_admin).json())
+
+
+def test_anular_solo_el_ultimo_vuelve_al_pago_activo_anterior(entorno):
+    """Sin pagos anulados antes, anular el último regresa a la vigencia que dejó el pago
+    anterior (que sigue activo), no más atrás."""
+    from datetime import timedelta
+
+    from backend import suscripcion_datos
+    from backend.suscripcion_pagos import sumar_meses
+
+    db, client, _h_titular, h_admin, _h_otro = entorno
+    base = f"/api/v1/suscripcion/admin/cuentas/{_id(db, TITULAR)}"
+    hoy = suscripcion_datos.hoy()
+    vence = hoy + timedelta(days=10)
+    assert client.put(base, headers=h_admin, json={"plan_clave": "basico", "vigente_hasta": vence.isoformat()}).status_code == 200
+    pagos = [client.post(f"{base}/pagos", headers=h_admin, json={"fecha": hoy.isoformat(), "monto": "499"}).json()
+             for _ in range(2)]
+    r = client.post(f"{base}/pagos/{pagos[1]['id']}/anular", headers=h_admin, json={"motivo": "error"})
+    assert r.json() == {"vigencia_revertida": True, "vigente_hasta": sumar_meses(vence, 1).isoformat()}
+
+
+def test_dos_pagos_simultaneos_se_suman(entorno):
+    """La suscripción se bloquea al pagar: dos pagos al mismo tiempo extienden uno después
+    del otro (dos meses), no los dos desde la misma vigencia."""
+    import threading
+    from datetime import timedelta
+
+    from fastapi.testclient import TestClient
+
+    import backend.main_api as main
+    from backend import suscripcion_datos
+    from backend.suscripcion_pagos import sumar_meses
+
+    db, client, h_titular, h_admin, _h_otro = entorno
+    base = f"/api/v1/suscripcion/admin/cuentas/{_id(db, TITULAR)}"
+    hoy = suscripcion_datos.hoy()
+    vence = hoy + timedelta(days=10)
+    assert client.put(base, headers=h_admin, json={"plan_clave": "basico", "vigente_hasta": vence.isoformat()}).status_code == 200
+
+    barrera = threading.Barrier(2)
+    resultados = []
+
+    def pagar():
+        propio = TestClient(main.app)
+        barrera.wait()
+        resultados.append(propio.post(f"{base}/pagos", headers=h_admin,
+                                      json={"fecha": hoy.isoformat(), "monto": "499"}).json()["vigente_hasta_nueva"])
+
+    hilos = [threading.Thread(target=pagar) for _ in range(2)]
+    for h in hilos:
+        h.start()
+    for h in hilos:
+        h.join()
+    uno, dos = sumar_meses(vence, 1).isoformat(), sumar_meses(sumar_meses(vence, 1), 1).isoformat()
+    assert sorted(resultados) == [uno, dos]
+    assert _mia(client, h_titular)["vigente_hasta"] == dos

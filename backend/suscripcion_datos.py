@@ -129,10 +129,12 @@ def verificar_alta_rfc(cur, usuario_id: str, de_tercero: bool = False) -> None:
 
 
 def asignar(usuario_id: str, asignacion: dict, admin_id: str) -> None:
-    """Guarda la asignación vigente y la agrega al historial en la misma transacción."""
+    """Guarda la asignación vigente y la agrega al historial en la misma transacción, con la
+    suscripción bloqueada: no se cruza con un pago o una anulación simultáneos."""
     valores = (usuario_id, asignacion["plan_clave"], asignacion["estado"], asignacion["vigente_hasta"],
                asignacion["notas"], admin_id)
     with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute("SELECT 1 FROM suscripciones WHERE usuario_id = %s FOR UPDATE", (usuario_id,))
         cur.execute(
             """
             INSERT INTO suscripciones (usuario_id, plan_clave, estado, vigente_hasta, notas, asignada_por, updated_at)
@@ -316,8 +318,9 @@ def registrar_pago(usuario_id: str, pago: dict, admin_id: str) -> dict:
 
 def anular_pago(usuario_id: str, pago_id: str, motivo: str, admin_id: str) -> dict:
     """Marca el pago como anulado (no se borra). Si la vigencia sigue siendo la que dejó
-    este pago, vuelve a la anterior; si otro pago o una asignación la cambió después, se
-    queda y lo dice ``vigencia_revertida``."""
+    este pago, vuelve a la anterior, y sigue hacia atrás mientras esa anterior sea la que
+    dejó otro pago ya anulado de la cuenta (A y B anulados → la vigencia previa a A). Si
+    otro pago o una asignación la cambió después, se queda y lo dice ``vigencia_revertida``."""
     with db.get_conn() as conn, conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
         cur.execute("SELECT plan_clave, estado, vigente_hasta FROM suscripciones WHERE usuario_id = %s FOR UPDATE",
                     (usuario_id,))
@@ -337,10 +340,27 @@ def anular_pago(usuario_id: str, pago_id: str, motivo: str, admin_id: str) -> di
         )
         revertida = bool(sus) and sus["vigente_hasta"] == fila["vigente_hasta_nueva"]
         if revertida:
+            destino = fila["vigente_hasta_anterior"]
+            vistos = {pago_id}
+            while destino is not None:
+                # ¿La vigencia a la que se vuelve la dejó otro pago que ya está anulado?
+                cur.execute(
+                    "SELECT id, vigente_hasta_anterior FROM suscripciones_pagos "
+                    "WHERE usuario_id = %s AND estado = 'anulado' AND vigente_hasta_nueva = %s "
+                    "ORDER BY creado_en DESC LIMIT 1",
+                    (usuario_id, destino),
+                )
+                previo = cur.fetchone()
+                if previo is None or str(previo["id"]) in vistos:
+                    break
+                vistos.add(str(previo["id"]))
+                destino = previo["vigente_hasta_anterior"]
             cur.execute("UPDATE suscripciones SET vigente_hasta = %s, updated_at = NOW() WHERE usuario_id = %s",
-                        (fila["vigente_hasta_anterior"], usuario_id))
-            _historial_por_pago(cur, usuario_id, sus, fila["vigente_hasta_anterior"], "Pago anulado", admin_id)
-    return {"vigencia_revertida": revertida}
+                        (destino, usuario_id))
+            _historial_por_pago(cur, usuario_id, sus, destino, "Pago anulado", admin_id)
+            return {"vigencia_revertida": True, "vigente_hasta": destino.isoformat() if destino else None}
+    return {"vigencia_revertida": False, "vigente_hasta": sus["vigente_hasta"].isoformat()
+            if sus and sus["vigente_hasta"] else None}
 
 
 def vencimientos(hoy_: date, dias: int = sp.DIAS_AVISO) -> list[dict]:

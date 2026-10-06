@@ -64,7 +64,8 @@ async def editar_mis_datos_fiscales(cuerpo: dict = Body(...), current_user: dict
 
 @router.get("/pagos")
 async def mis_pagos(current_user: dict = Depends(get_current_user)):
-    """Pagos de mi suscripción registrados por el administrador, del más reciente al más antiguo."""
+    """Pagos de mi suscripción que registró el administrador (también los anulados, con su
+    estado), del más reciente al más antiguo; sin quién los registró ni el motivo de anulación."""
     return datos.pagos(current_user["user_id"], con_internos=False)
 
 

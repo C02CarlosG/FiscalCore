@@ -50,7 +50,7 @@ function renderCon(ui: React.ReactElement, datos: MiSuscripcionDatos = mia()) {
                 uuid_cfdi: "6F9619FF-8B86-D011-B42D-00C04FC964FF", meses: 1, vigente_hasta_nueva: "2026-11-01",
                 estado: "activo", registrado_por: "admin@despacho.mx", motivo_anulacion: null }];
     }
-    if (ruta.endsWith("/anular")) return { vigencia_revertida: true };
+    if (ruta.endsWith("/anular")) return { vigencia_revertida: true, vigente_hasta: "2026-10-31" };
     if (opciones?.method === "POST") return { vigente_hasta_nueva: "2026-11-01" };
     if (ruta === "/api/v1/suscripcion/admin/cuentas/u9/historial") {
       return [{ fecha: "2026-10-01T12:00:00+00:00", plan_clave: "basico", plan_nombre: "Básico", estado: "suspendida",
@@ -206,7 +206,7 @@ describe("AdminSuscripciones", () => {
         body: JSON.stringify({ motivo: "duplicado" }),
       }),
     );
-    expect(await screen.findByText(/la vigencia volvió a la anterior/)).toBeInTheDocument();
+    expect(await screen.findByText(/la vigencia volvió a 31\/10\/2026/)).toBeInTheDocument();
   });
 
   it("asigna un plan a una cuenta", async () => {
@@ -243,5 +243,33 @@ describe("AdminSuscripciones", () => {
     vi.mocked(apiFetch).mockRejectedValueOnce(new ApiError(422, "precio_mensual debe ser un importe de 0 o más"));
     await user.click(within(fila).getByRole("button", { name: "Guardar despacho" }));
     expect(await screen.findByText("precio_mensual debe ser un importe de 0 o más")).toBeInTheDocument();
+  });
+
+  it("avisa antes de pagar una suscripción sin vencimiento", async () => {
+    const user = userEvent.setup();
+    // Una cuenta con plan y sin vencimiento.
+    vi.mocked(apiFetch).mockImplementation(async (ruta: string, opciones?: RequestInit) => {
+      if (ruta.startsWith("/api/v1/suscripcion/admin/cuentas?")) {
+        return [{ usuario_id: "u9", email: "ana@despacho.mx", nombre: "Ana", es_admin_plataforma: false,
+                  plan_clave: "basico", estado: "activa", vigente_hasta: null, notas: null, uso_rfc: 1,
+                  dias_para_vencer: null }];
+      }
+      if (ruta === "/api/v1/suscripcion/planes") return planes;
+      if (ruta.endsWith("/historial") || ruta.endsWith("/pagos") || ruta.endsWith("/vencimientos")) return [];
+      if (ruta.endsWith("/datos-fiscales")) return null;
+      if (opciones?.method) return {};
+      return mia({ es_admin_plataforma: true });
+    });
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<QueryClientProvider client={queryClient}><AdminSuscripciones /></QueryClientProvider>);
+    await user.click(await screen.findByRole("button", { name: "Detalle de ana@despacho.mx" }));
+    const pago = await screen.findByRole("form", { name: "Registrar pago de ana@despacho.mx" });
+    expect(within(pago).getByText(/no tiene vencimiento/)).toBeInTheDocument();
+    await user.type(within(pago).getByLabelText("Fecha"), "2026-10-01");
+    await user.type(within(pago).getByLabelText("Monto (MXN)"), "499");
+    const boton = within(pago).getByRole("button", { name: "Registrar pago" });
+    expect(boton).toBeDisabled();
+    await user.click(within(pago).getByLabelText("Entiendo que la suscripción tendrá vencimiento"));
+    expect(boton).toBeEnabled();
   });
 });
