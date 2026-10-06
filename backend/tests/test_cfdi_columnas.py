@@ -75,3 +75,64 @@ def test_columnas_de_concepto():
         "clave_prod_serv", "cantidad", "clave_unidad", "descripcion", "valor_unitario",
         "importe", "descuento", "iva_traslado_base", "iva_traslado_importe",
     ]
+
+
+# ─── Nómina y Pago tienen su propio juego de columnas (F3.5b) ─────────────────
+
+import re
+
+from backend.cfdi_columnas import columnas, laterales
+
+_TIPOS = ("I", "E", "T", "N", "P")
+_ALIAS_DE_LATERALES = {"I": {"imp", "pag"}, "E": {"imp", "pag"}, "T": {"imp", "pag"},
+                       "N": {"nom", "sub"}, "P": {"ptot", "pgo", "rel"}}
+
+
+@pytest.mark.parametrize("direccion", ["emitidos", "recibidos"])
+@pytest.mark.parametrize("tipo", _TIPOS)
+def test_cada_tipo_tiene_claves_unicas_y_columnas_visibles(direccion, tipo):
+    claves = [c.clave for c in columnas(direccion, tipo)]
+    assert len(claves) == len(set(claves))
+    assert any(c.visible for c in columnas(direccion, tipo))
+    assert {"fecha_emision", "rfc_contraparte", "contraparte", "estado", "uuid"} <= set(claves)
+
+
+@pytest.mark.parametrize("tipo", _TIPOS)
+def test_las_columnas_solo_usan_los_alias_que_su_tipo_define(tipo):
+    """Una columna que apunta a un alias que el tipo no une rompería la consulta del listado."""
+    permitidos = {"c"} | _ALIAS_DE_LATERALES[tipo]
+    for col in columnas("emitidos", tipo):
+        if col.sql is None:
+            continue
+        usados = set(re.findall(r"\b([a-z]{1,4})\.[a-z_]+", col.sql))
+        usados -= {"r", "u", "i", "n", "k", "p", "pr", "e"}   # alias internos de subconsultas propias
+        assert usados <= permitidos, (tipo, col.clave, usados)
+
+
+@pytest.mark.parametrize("tipo", _TIPOS)
+def test_las_columnas_ordenables_y_filtrables_solo_dependen_de_la_tabla_cfdi(tipo):
+    """Orden y filtro corren sobre toda la tabla, antes de recortar la página: no pueden usar
+    las subconsultas LATERAL (que solo se calculan sobre la página)."""
+    for col in columnas("emitidos", tipo):
+        if col.ordenable:
+            assert not re.search(r"\b(nom|sub|ptot|pgo|rel|imp|pag)\.", col.sql), (tipo, col.clave)
+
+
+def test_laterales_por_tipo():
+    assert "cfdi_nominas" in laterales("N") and "cfdi_pagos_totales" not in laterales("N")
+    assert "cfdi_pagos_totales" in laterales("P") and "cfdi_nominas" not in laterales("P")
+    assert laterales("I") == laterales("E") == laterales("T")
+    assert "pagos_relaciones" in laterales("I")
+
+
+def test_nomina_y_pago_no_publican_las_columnas_de_comprobante():
+    nomina = {c.clave for c in columnas("emitidos", "N")}
+    pago = {c.clave for c in columnas("emitidos", "P")}
+    assert not ({"subtotal", "saldo", "metodo_pago", "categoria", "pagos_relacionados"} & nomina)
+    assert not ({"subtotal", "saldo", "metodo_pago", "categoria"} & pago)
+    assert "ajuste_isr_retenido" not in nomina
+
+
+def test_la_contraparte_de_nomina_y_pago_sigue_la_direccion():
+    assert {c.clave: c.sql for c in columnas("emitidos", "N")}["rfc_contraparte"] == "c.rfc_receptor"
+    assert {c.clave: c.sql for c in columnas("recibidos", "P")}["rfc_contraparte"] == "c.rfc_emisor"

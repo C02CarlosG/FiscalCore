@@ -254,10 +254,11 @@ Avisos para los cálculos que consumen esto:
   separarlos con `cfdi_conceptos.impuestos` y las columnas de terceros.
 - En `pagos_impuestos` y `pagos_relaciones_impuestos`, la `base` de una retención no es un
   dato (el XML no la trae; queda 0).
-- Dos pagos del mismo REP con la misma fecha y monto comparten fila en `pagos_cfdi`
-  (`UNIQUE cfdi_id, fecha_pago, monto`): sus `ImpuestosP` se acumulan, pero sus documentos
-  relacionados idénticos colapsan. La solución de fondo (agregar el orden del nodo a la
-  llave) queda para F3.5b.
+- Cada nodo `pago:Pago` de un REP tiene su fila en `pagos_cfdi`, identificada por su orden en
+  el XML (`nodo`, migración 041); dos pagos con la misma fecha y monto ya no comparten fila
+  ni pierden sus `ImpuestosP` ni sus documentos relacionados. `nodo = 0` marca una fila
+  anterior a la 041: el reproceso (`DETALLE_VERSION` 3) la reclama por fecha y monto.
+  `pagos_cfdi.forma_pago` guarda la `FormaDePagoP` de cada pago (NULL si no viene).
 - `ObjetoImpDR` se guarda crudo: el catálogo c_ObjetoImp puede traer códigos nuevos además
   de 01 a 04.
 
@@ -411,8 +412,13 @@ pausa.
 |---|---|---|---|
 | 2026-10-04 | D → B | Agregar `"informacion-fiscal": "Información fiscal"` al mapa del breadcrumb de `layout/Header.tsx` (hoy muestra "Empresas" en `/empresas/{id}/informacion-fiscal`) y `"informacion-fiscal"` a `SUB_RUTAS` de `layout/EmpresaSwitcher.tsx` (para conservar la pantalla al cambiar de empresa) | Hecho en el PR #30 (F2.3) |
 | 2026-10-04 | D → B | Lo mismo para la pantalla de V1: `"validaciones": "Validaciones de CFDI"` en el breadcrumb de `Header.tsx` y `"validaciones"` en `SUB_RUTAS` de `EmpresaSwitcher.tsx` | Pendiente |
+| 2026-10-04 | D → B | U1: (1) `POST /mis-empresas` (`empresas.py`) vincula al creador con `rol = 'administrador'` (hoy usa el valor por defecto; U1 lo compensa al leer). (2) Breadcrumb de `Header.tsx` para `/perfil` ("Mi perfil") y `usuarios` ("Usuarios"); `"usuarios"` en `SUB_RUTAS` de `EmpresaSwitcher.tsx`. (3) Ya no aplica: U1 da acceso por invitación y no crea contraseñas temporales | Pendiente |
 | 2026-10-04 | D → B | Requisito de U1: normalizar correos a minúsculas al registrar e iniciar sesión, e índice único sobre `lower(email)`; la migración detecta duplicados y falla con mensaje claro, sin borrar cuentas | Autorizado por Carlos; después de F2.4 |
+| 2026-10-05 | A → B | Al marcar un REP como cancelado (`sat_sync.marcar_cancelados`), llamar después de la transacción a `cfdi_store.recalcular_cobrado_de_rep(empresa_id, uuid_rep)` por cada CFDI tipo P que pasó a cancelado: `recalcular_cobrado` ya excluye a los REP no vigentes (F3.5b, PR #41), pero alguien tiene que volver a correrlo sobre las facturas que ese REP había cobrado. Hoy `marcar_cancelados` documenta que no recalcula | Pendiente (lo hace B) |
+| 2026-10-05 | A → B | Descarga manual de **cancelados** (spec F3, "Cancelados"): que "Conexión SAT" (`routers/sat.py`, `components/sat/`) acepte el estado a pedir (vigentes o cancelados) y que al importar un paquete pedido como cancelado cada CFDI quede con `estado = 'cancelado'`, sea nuevo o ya existente. Lo que el SAT permite descargar de cancelados (XML o solo metadatos) se verifica al implementar; si solo entrega metadatos, va con F2.4. El listado ya filtra por `estado`, así que no necesita cambios | Pendiente (se hace con F2.4) |
 | 2026-10-04 | Coordinación → B | Verificación de correo con enlace y recuperación de contraseña (requiere servicio de envío de correo) antes de abrir producción a clientes externos (D9) | Pendiente |
+| 2026-10-05 | D → B | U1 (m5): `registrar_evento` (`auditoria.py`) acepta un cursor opcional para escribir la auditoría en la misma transacción que el cambio; hoy abre su propia conexión y U1 audita justo después del commit | Pendiente |
+| 2026-10-04 | D → B | M7.1: en `POST /mis-empresas` (`empresas.py`), dentro de la transacción que crea la empresa y su vínculo, y antes de esos INSERT, llamar a `suscripcion_datos.verificar_alta_rfc(cur, current_user["user_id"])` con el cursor de esa transacción (toma un candado por cuenta hasta el commit) y responder 403 con el mensaje de `LimiteRfcAlcanzado`. Contrato completo en la spec de M7.1, "Contrato del límite". Mientras no esté, el límite de RFC no bloquea la creación de empresas | Pendiente |
 
 ## Riesgos
 

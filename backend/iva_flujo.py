@@ -13,6 +13,15 @@ from __future__ import annotations
 from datetime import date, datetime
 from decimal import ROUND_FLOOR, ROUND_HALF_UP, Decimal
 from typing import Any, Optional
+from .flujo_pagos import (  # noqa: F401  (los alias privados siguen siendo la API interna de este módulo y de sus pruebas)
+    TOLERANCIA_DESCUADRE,
+    TOLERANCIA_RELATIVA_MONTO,
+    equivalencia_invertida as _equivalencia_invertida,
+    factor_a_pesos,
+    factor_del_pago as _factor_del_pago,
+    forma_pago_del_cobro,
+    tc_documento as _tc_documento,
+)
 
 CENTAVOS = Decimal("0.01")
 CERO = Decimal("0")
@@ -21,10 +30,8 @@ IVA = "002"
 
 UMBRAL_EFECTIVO = Decimal("2000")                       # LIVA 5-III / LISR 27-III: efectivo mayor a $2,000
 USOS_NO_ACREDITABLES = frozenset({"S01", "CP01", "CN01"})   # D-F5-3
-TOLERANCIA_RELATIVA_MONTO = Decimal("0.01")              # 1 % del Monto del pago al validar equivalencias
 OBJETOS_SIN_IVA = frozenset({"01", "04"})                # ObjetoImpDR: no objeto / sí objeto y no causa impuesto
 PAGOS_V1_MODO = "aproximar"                             # D-F5-1: "aproximar" | "excluir"
-TOLERANCIA_DESCUADRE = Decimal("0.01")
 
 CLAVES_TASA = ("16", "8", "0", "exento", "otras", "no_objeto")
 _TASA_A_CLAVE = {Decimal("0.16"): "16", Decimal("0.08"): "8", Decimal("0"): "0"}
@@ -52,15 +59,6 @@ def _mes(fecha: Any) -> str:
 def llave(uuid: Any) -> str:
     """Los XML traen el UUID con caja distinta según el emisor: el cruce no debe depender de eso."""
     return str(uuid or "").upper()
-
-
-def _tc_documento(doc: dict) -> Optional[Decimal]:
-    """Tipo de cambio a pesos del comprobante. En MXN (o XXX, sin moneda) es 1; en moneda
-    extranjera sin tipo de cambio no se adivina: devuelve ``None``."""
-    if (doc.get("moneda") or "MXN") in ("MXN", "XXX"):
-        return UNO
-    tc = _dec(doc.get("tipo_cambio"))
-    return tc if tc > 0 else None
 
 
 # ── desglose por tasa ─────────────────────────────────────────────────────────
@@ -112,29 +110,6 @@ def escalar(d: dict, k: Decimal) -> dict:
         "iva": {c: v * k for c, v in d["iva"].items()},
         "retencion": d["retencion"] * k,
     }
-
-
-def factor_a_pesos(moneda_dr: Optional[str], equivalencia_dr: Any, pago_moneda: Optional[str], pago_tc: Any) -> Optional[Decimal]:
-    """Factor que lleva un importe del documento relacionado a pesos.
-
-    ``importe_en_moneda_del_pago = importe_dr / equivalencia_dr``; a pesos con el tipo de
-    cambio del pago (1 si es en MXN). Con equivalencia nula solo se asume 1 si el documento
-    está en la misma moneda del pago; con monedas distintas no se adivina: devuelve ``None``.
-    """
-    pago_moneda = pago_moneda or "MXN"
-    eq = _dec(equivalencia_dr)
-    if eq <= 0:
-        if moneda_dr in (None, pago_moneda):
-            eq = UNO
-        else:
-            return None
-    if pago_moneda == "MXN":
-        tc = UNO
-    else:
-        tc = _dec(pago_tc)
-        if tc <= 0:
-            return None
-    return tc / eq
 
 
 # ── eventos ───────────────────────────────────────────────────────────────────
@@ -294,31 +269,6 @@ def eventos_de_documento(doc: dict, rfc: str) -> list[dict]:
     return eventos
 
 
-def _factor_del_pago(pago: dict, doc: dict) -> Optional[Decimal]:
-    """Factor a pesos de un cobro. Si el pago no trae ``moneda_dr`` (filas anteriores al detalle
-    fiscal) se usa la moneda del documento: un CFDI en USD con un REP en MXN y sin equivalencia
-    queda sin dato, no se suma como si fueran pesos."""
-    return factor_a_pesos(pago.get("moneda_dr") or doc.get("moneda"), pago.get("equivalencia_dr"),
-                          pago.get("pago_moneda"), pago.get("pago_tipo_cambio"))
-
-
-def _equivalencia_invertida(pago: dict) -> bool:
-    """``True`` si la equivalencia del documento no cuadra con lo que el propio REP declara.
-
-    El Anexo 20 (Pagos 2.0) exige ``Σ importe pagado / equivalencia ≤ Monto`` del pago, en la moneda del pago: un
-    ``Monto`` mayor es válido (remanente sin aplicar a documentos). Por eso solo se sospecha cuando la suma **excede** el
-    ``Monto`` (más la tolerancia) o es **menos de la mitad** de él: una equivalencia invertida (20 en lugar de 0.05) rompe
-    esa relación por órdenes de magnitud, un redondeo o un remanente no. Sin ``Monto`` o sin la suma no hay con qué
-    comparar y se da por buena. Nota: una equivalencia mala excluye todo el cobro de ese documento (y, si el REP trae varios
-    documentos con la misma equivalencia mala, todos)."""
-    monto, suma = _dec(pago.get("pago_monto")), pago.get("suma_equivalente")
-    if monto <= 0 or suma is None:
-        return False
-    suma = _dec(suma)
-    tolerancia = max(TOLERANCIA_DESCUADRE * max(1, int(pago.get("n_relaciones") or 1)), monto * TOLERANCIA_RELATIVA_MONTO)
-    return suma > monto + tolerancia or suma < monto / 2
-
-
 def _doc_tiene_iva(doc: dict) -> bool:
     """El CFDI pagado declara IVA trasladado: en el encabezado, o con cualquier renglón de traslado de IVA (incluidos los de
     tasa 0 % y exento: un ObjetoImpDR 01/03 sobre ellos es una contradicción, no «no objeto»)."""
@@ -393,12 +343,6 @@ def iva_de_pago(pago: dict, doc: dict) -> tuple[dict, Decimal, set]:
     if pago.get("version_pago") == "1.0":
         marcas.add("pago_v1")
     return d, iva_total, marcas
-
-
-def forma_pago_del_cobro(pago: dict) -> Optional[str]:
-    """``FormaDePagoP`` del REP (``forma_pago_p``), o ``None`` si no se guardó. Es el único lugar que la
-    lee: en cuanto la extracción la guarde, la exclusión por efectivo de un cobro a crédito se activa sola."""
-    return pago.get("forma_pago_p")
 
 
 def cuadre_rep(pago: dict, iva_calculado: Decimal) -> bool:

@@ -25,13 +25,16 @@ from slowapi.middleware import SlowAPIMiddleware
 from . import db
 from .proxy import instalar_proxy
 from .deps import limiter  # importar deps.py valida JWT_SECRET al arrancar
-from .routers import auth, empresas, ingesta, riesgos, scoring, conciliacion, emitidos, dashboard, sat, admin, reportes, movimientos, cfdi, cfdis, preferencias
+from .routers import auth, empresas, ingesta, riesgos, scoring, conciliacion, dashboard, sat, admin, reportes, movimientos, cfdis, preferencias
 from .routers import inicio
 from .routers import informacion_fiscal
 from .routers import iva_flujo
+from .routers import isr_flujo as isr_flujo_router
 from .routers import diot as diot_router
 from .routers import proveedores as proveedores_router
 from .routers import validaciones_cfdi
+from .routers import cuenta
+from .routers import suscripcion
 
 logging.basicConfig(
     level=logging.INFO,
@@ -76,21 +79,22 @@ app.include_router(ingesta.router)
 app.include_router(riesgos.router)
 app.include_router(scoring.router)
 app.include_router(conciliacion.router)
-app.include_router(emitidos.router)
 app.include_router(dashboard.router)
 app.include_router(sat.router)
 app.include_router(admin.router)
 app.include_router(reportes.router)
 app.include_router(movimientos.router)
-app.include_router(cfdi.router)
 app.include_router(cfdis.router)
 app.include_router(preferencias.router)
 app.include_router(inicio.router)
 app.include_router(informacion_fiscal.router)
 app.include_router(iva_flujo.router)
+app.include_router(isr_flujo_router.router)
 app.include_router(diot_router.router)
 app.include_router(proveedores_router.router)
 app.include_router(validaciones_cfdi.router)
+app.include_router(cuenta.router)
+app.include_router(suscripcion.router)
 
 
 @app.on_event("startup")

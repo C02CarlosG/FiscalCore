@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { CfdiPantalla } from "./CfdiPantalla";
 import { useCfdiColumnas, useCfdiDetalle, useCfdiListado, useCfdiResumen } from "@/hooks/useCfdis";
 import { periodoRecordado } from "@/lib/periodo";
-import type { CfdiColumna, CfdiResumenResponse, CfdiTotalesBloque } from "@/types/api";
+import type { CfdiCifra, CfdiColumna, CfdiResumenResponse, CfdiTotalesBloque } from "@/types/api";
 
 const replaceMock = vi.fn();
 let busqueda = "";
@@ -50,6 +50,13 @@ const catalogo = {
   concepto: [{ ...col("descripcion", "Descripción", "texto"), grupo: "concepto" as const }],
 };
 
+const cifras: CfdiCifra[] = [
+  ["conteo", "CFDI", "entero"], ["retencion_iva", "Ret. IVA", "moneda"], ["retencion_ieps", "Ret. IEPS", "moneda"],
+  ["retencion_isr", "Ret. ISR", "moneda"], ["traslado_iva", "Tras. IVA", "moneda"], ["traslado_ieps", "Tras. IEPS", "moneda"],
+  ["traslado_isr", "Tras. ISR", "moneda"], ["total_retenciones", "Total ret.", "moneda"], ["subtotal", "Subtotal", "moneda"],
+  ["descuento", "Descuento", "moneda"], ["neto", "Neto", "moneda"], ["total", "Total", "moneda"],
+].map(([clave, etiqueta, formato]) => ({ clave, etiqueta, formato }) as CfdiCifra);
+
 const bloque = (conteo: number, total: number | null): CfdiTotalesBloque => ({
   conteo, retencion_iva: null, retencion_ieps: null, retencion_isr: null, traslado_iva: null, traslado_ieps: null,
   traslado_isr: null, total_retenciones: null, subtotal: null, descuento: null, neto: null, total,
@@ -57,6 +64,7 @@ const bloque = (conteo: number, total: number | null): CfdiTotalesBloque => ({
 
 const resumen = (extra: Partial<CfdiResumenResponse> = {}): CfdiResumenResponse => ({
   conteos: { I: 507, E: 12, T: 0, N: 33, P: 80 },
+  cifras,
   totales: { periodo: bloque(507, 11100), acumulado: bloque(4200, 99000) },
   advertencias: [],
   ...extra,
@@ -359,6 +367,55 @@ describe("CfdiPantalla", () => {
 
       await user.click(screen.getByRole("button", { name: "Cerrar" }));
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
+  });
+
+  describe("Nómina y Pago (F3.5b)", () => {
+    const cifrasNomina: CfdiCifra[] = [
+      ["conteo", "CFDI", "entero"], ["empleados", "Empleados", "entero"], ["sueldos", "Sueldos", "moneda"],
+    ].map(([clave, etiqueta, formato]) => ({ clave, etiqueta, formato }) as CfdiCifra);
+
+    it("la pestaña de Nómina muestra las cifras que manda el servidor y su editor de totales las lista", async () => {
+      busqueda = "periodo=2026-09&tipo=N";
+      preparar({ res: consulta(resumen({
+        cifras: cifrasNomina,
+        totales: { periodo: { conteo: 33, empleados: 31, sueldos: 250000 }, acumulado: { conteo: 90, empleados: 40, sueldos: 900000 } },
+      })) });
+      const user = userEvent.setup();
+      render(<CfdiPantalla direccion="emitidos" />);
+
+      expect(within(screen.getByRole("row", { name: /^Periodo/ })).getByText("31")).toBeInTheDocument();
+      expect(screen.getByRole("columnheader", { name: "Empleados" })).toBeInTheDocument();
+
+      await user.click(screen.getByRole("button", { name: "Columnas de totales" }));
+      const dialogo = screen.getByRole("dialog", { name: "Columnas de totales" });
+      expect(within(dialogo).getByLabelText("Sueldos")).toBeInTheDocument();
+      expect(within(dialogo).queryByLabelText("Ret. IVA")).not.toBeInTheDocument();     // las de comprobante no aplican
+      expect(within(dialogo).queryByLabelText("CFDI")).not.toBeInTheDocument();         // el conteo siempre va primero
+    });
+
+    it("la preferencia de totales es de cada pestaña", () => {
+      busqueda = "periodo=2026-09&tipo=N";
+      preferencias["cfdi-emitidos-N-totales"] = [{ clave: "sueldos", visible: false }];
+      preparar({ res: consulta(resumen({
+        cifras: cifrasNomina,
+        totales: { periodo: { conteo: 1, empleados: 1, sueldos: 5 }, acumulado: { conteo: 1, empleados: 1, sueldos: 5 } },
+      })) });
+      render(<CfdiPantalla direccion="emitidos" />);
+
+      expect(screen.queryByRole("columnheader", { name: "Sueldos" })).not.toBeInTheDocument();
+      expect(screen.getByRole("columnheader", { name: "Empleados" })).toBeInTheDocument();
+    });
+
+    it("la pestaña de Pago avisa que los REP 1.0 no traen bases de IVA", () => {
+      busqueda = "periodo=2026-09&tipo=P";
+      render(<CfdiPantalla direccion="emitidos" />);
+      expect(screen.getByText(/complemento de pago versión 2\.0/)).toBeInTheDocument();
+    });
+
+    it("las demás pestañas no muestran ese aviso", () => {
+      render(<CfdiPantalla direccion="emitidos" />);
+      expect(screen.queryByText(/complemento de pago versión 2\.0/)).not.toBeInTheDocument();
     });
   });
 });

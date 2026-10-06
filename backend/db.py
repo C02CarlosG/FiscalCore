@@ -235,9 +235,16 @@ def init_db() -> None:
         # ACuentaTerceros y nómina completa (percepciones por tipo, otros pagos, separación, jubilación)
         _run_sql_file("040_extraccion_v2.sql")
 
+        # 041 es idempotente — pagos_cfdi: orden del nodo en la llave (dos pagos idénticos del mismo REP
+        # ya no colapsan) y forma de pago de cada pago
+        _run_sql_file("041_pagos_nodo_forma_pago.sql")
+
         # 050 es idempotente — ajustes manuales del IVA por flujo (no considerar / reasignar periodo)
         _run_sql_file("050_iva_ajustes.sql")
 
+        # 052 y 053 son idempotentes — ISR base flujo: ajustes "no considerar" y porcentaje de nómina exenta (F7.1)
+        _run_sql_file("052_isr_ajustes.sql")
+        _run_sql_file("053_isr_config_flujo.sql")
         # 051 es idempotente — catálogo de proveedores de la empresa (F6.1)
         _run_sql_file("051_proveedores.sql")
 
@@ -249,6 +256,12 @@ def init_db() -> None:
 
         # 061 es idempotente — configuración por empresa de las validaciones de CFDI (V1, carril D)
         _run_sql_file("061_validaciones_cfdi_config.sql")
+
+        # 062 es idempotente — roles por empresa: administrador (el creador) y contador (U1, carril D)
+        _run_sql_file("062_roles_usuario_empresa.sql")
+
+        # 063 es idempotente — planes (con valores de ejemplo) y suscripciones por cuenta (M7.1, carril D)
+        _run_sql_file("063_suscripciones.sql")
 
         # 064 es idempotente — CHECK de objeto en validaciones_cfdi_config para bases donde la tabla ya existía (V1)
         _run_sql_file("064_validaciones_config_check.sql")

@@ -259,21 +259,15 @@ export interface CfdiListadoResponse {
   por_pagina: number;
 }
 
-/** Cifras en pesos. Sin CFDI en el periodo, `conteo` es 0 y las demás van en null. */
-export interface CfdiTotalesBloque {
-  conteo: number;
-  retencion_iva: number | null;
-  retencion_ieps: number | null;
-  retencion_isr: number | null;
-  traslado_iva: number | null;
-  traslado_ieps: number | null;
-  traslado_isr: number | null;
-  total_retenciones: number | null;
-  subtotal: number | null;
-  descuento: number | null;
-  neto: number | null;
-  total: number | null;
+/** Una cifra de la tabla de totales: cada tipo de comprobante trae las suyas. */
+export interface CfdiCifra {
+  clave: string;
+  etiqueta: string;
+  formato: "entero" | "moneda";
 }
+
+/** Cifras en pesos del periodo o del acumulado, por clave. Sin CFDI, `conteo` es 0 y las demás van en null. */
+export type CfdiTotalesBloque = { conteo: number } & Record<string, number | null>;
 
 export interface CfdiAdvertencia {
   tipo: string;
@@ -283,6 +277,8 @@ export interface CfdiAdvertencia {
 
 export interface CfdiResumenResponse {
   conteos: Record<CfdiTipoComprobante, number>;
+  /** Cifras del tipo activo, en el orden en que se muestran (la primera es el conteo). */
+  cifras: CfdiCifra[];
   totales: { periodo: CfdiTotalesBloque; acumulado: CfdiTotalesBloque };
   advertencias: CfdiAdvertencia[];
 }
@@ -488,4 +484,53 @@ export interface IvaDetalle {
   total: number;
   pagina: number;
   por_pagina: number;
+}
+
+// ── DIOT por flujo (F6.2) ─────────────────────────────────────────────────────
+
+export interface DiotTercero {
+  contraparte_rfc: string;
+  contraparte: string;
+  proveedor_id: string | null;
+  tipo_tercero: string | null;
+  tipo_operacion: string | null;
+  pais: string | null;
+  id_fiscal: string | null;
+  cfdi: number;
+  /** Valor de actos pagados por tasa; incluye «exento» y «no_objeto». */
+  actos: IvaBases;
+  iva_pagado: IvaMontos;
+  devoluciones: { base: number; iva: number };
+  iva_acreditable: number;
+  iva_no_acreditable: {
+    proporcion: number;
+    total: number;
+    por_motivo: Record<string, { cfdi: number; iva: number; base: number }>;
+  };
+  retenciones: number;
+  advertencias: string[];
+}
+
+export interface DiotTotales {
+  terceros: number;
+  cfdi: number;
+  valor_de_actos: number;
+  iva_pagado: number;
+  devoluciones_iva: number;
+  iva_acreditable: number;
+  iva_no_acreditable: number;
+  con_advertencias: number;
+}
+
+export interface DiotFlujo {
+  empresa_id: string;
+  periodo: string;
+  factor_prorrateo: number;
+  terceros: DiotTercero[];
+  totales: DiotTotales;
+  cuadre_con_iva: { iva_acreditable_diot: number; iva_acreditable_resumen: number; cuadra: boolean };
+  /** Avisos del periodo (p. ej. actos a 8 % sin región). */
+  advertencias: { codigo: string; mensaje: string }[];
+  advertencias_iva: InicioAdvertencia[];
+  operaciones_por_cfdi: number;
 }

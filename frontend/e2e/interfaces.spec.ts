@@ -123,8 +123,31 @@ const bloqueCfdi = (conteo: number, total: number) => ({
   conteo, retencion_iva: 0, retencion_ieps: 0, retencion_isr: 0, traslado_iva: 600, traslado_ieps: 0,
   traslado_isr: 0, total_retenciones: 0, subtotal: total - 600, descuento: 0, neto: total - 600, total,
 });
+const cifrasCfdi = [
+  ["conteo", "CFDI", "entero"], ["retencion_iva", "Ret. IVA", "moneda"], ["retencion_ieps", "Ret. IEPS", "moneda"],
+  ["retencion_isr", "Ret. ISR", "moneda"], ["traslado_iva", "Tras. IVA", "moneda"], ["traslado_ieps", "Tras. IEPS", "moneda"],
+  ["traslado_isr", "Tras. ISR", "moneda"], ["total_retenciones", "Total ret.", "moneda"], ["subtotal", "Subtotal", "moneda"],
+  ["descuento", "Descuento", "moneda"], ["neto", "Neto", "moneda"], ["total", "Total", "moneda"],
+].map(([clave, etiqueta, formato]) => ({ clave, etiqueta, formato }));
+// Nómina tiene sus propias cifras y columnas (el servidor las manda según el tipo pedido).
+const resumenNomina = {
+  conteos: { I: 2, E: 0, T: 0, N: 1, P: 0 },
+  cifras: [["conteo", "CFDI", "entero"], ["empleados", "Empleados", "entero"], ["sueldos", "Sueldos", "moneda"]]
+    .map(([clave, etiqueta, formato]) => ({ clave, etiqueta, formato })),
+  totales: { periodo: { conteo: 1, empleados: 1, sueldos: 10000 }, acumulado: { conteo: 4, empleados: 2, sueldos: 40000 } },
+  advertencias: [],
+};
+const columnasNomina = {
+  encabezado: [
+    columna("fecha_emision", "Fecha expedición", "fecha", true),
+    columna("fecha_pago", "Fecha de pago", "fecha", false),
+    columna("sueldos", "Sueldos", "moneda", false),
+  ],
+  concepto: [],
+};
 const resumenCfdi = {
   conteos: { I: 2, E: 0, T: 0, N: 1, P: 0 },
+  cifras: cifrasCfdi,
   totales: { periodo: bloqueCfdi(2, 3750), acumulado: bloqueCfdi(9, 21000) },
   advertencias: [],
 };
@@ -281,9 +304,9 @@ test.beforeEach(async ({ page }) => {
     } else if (/\/cfdis\/cfdi-demo-\d+$/.test(path)) {
       body = detalleCfdi(path.split("/").pop()!);
     } else if (path.endsWith("/cfdis/columnas")) {
-      body = columnasCfdi;
+      body = new URL(route.request().url()).searchParams.get("tipo") === "N" ? columnasNomina : columnasCfdi;
     } else if (path.endsWith("/cfdis/resumen")) {
-      body = resumenCfdi;
+      body = new URL(route.request().url()).searchParams.get("tipo") === "N" ? resumenNomina : resumenCfdi;
     } else if (path.endsWith("/cfdis")) {
       // El servidor ordena: el mock respeta `orden` y `dir` para probar que viajan.
       const consulta = new URL(route.request().url()).searchParams;
@@ -668,6 +691,21 @@ test("si el servidor rechaza la exportación se muestra el motivo", async ({ pag
   await page.goto(`/empresas/${empresaId}/cfdi/emitidos?periodo=2026-09`);
   await page.getByRole("button", { name: "Exportar a Excel" }).click();
   await expect(page.getByRole("alert").filter({ hasText: "60,000 CFDI" })).toBeVisible();
+});
+
+test("la pestaña de Nómina trae sus propias cifras y columnas", async ({ page }) => {
+  await page.goto(`/empresas/${empresaId}/cfdi/emitidos?periodo=2026-09&tipo=N`);
+  const totales = page.getByRole("table").first();
+  await expect(totales.getByRole("columnheader", { name: "Empleados" })).toBeVisible();
+  await expect(totales.getByRole("row", { name: /^Periodo/ })).toContainText("$10,000.00");
+  await expect(totales.getByRole("columnheader", { name: "Ret. IVA" })).toHaveCount(0);   // las de comprobante no aplican
+  await page.getByRole("button", { name: "Columnas", exact: true }).click();
+  await expect(page.getByRole("dialog").getByRole("checkbox", { name: "Fecha de pago" })).toBeVisible();
+});
+
+test("la pestaña de Pago avisa que los REP 1.0 no traen bases de IVA", async ({ page }) => {
+  await page.goto(`/empresas/${empresaId}/cfdi/emitidos?periodo=2026-09&tipo=P`);
+  await expect(page.getByText(/complemento de pago versión 2\.0/)).toBeVisible();
 });
 
 test("Nómina es una pestaña del listado, no una pantalla aparte", async ({ page }) => {

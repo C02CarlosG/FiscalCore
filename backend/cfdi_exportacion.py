@@ -74,15 +74,19 @@ def construir(cols: list[Columna], items: list[dict], resumen: dict) -> bytes:
     for i, ancho in enumerate(anchos, start=1):
         ws.column_dimensions[get_column_letter(i)].width = ancho + 2
 
+    # Las cifras de la hoja de totales vienen del resumen (cambian con el tipo de comprobante:
+    # Nómina y Pago tienen las suyas); sin ellas se usan las de comprobante.
+    cifras = resumen.get("cifras") or [{"clave": k, "etiqueta": e, "formato": "entero" if k == "conteo" else "moneda"}
+                                       for k, e in _TOTALES]
     wt = wb.create_sheet("Totales")
-    _encabezados(wt, ["", *[etiqueta for _, etiqueta in _TOTALES]])
+    _encabezados(wt, ["", *[c["etiqueta"] for c in cifras]])
     for nombre, bloque in (("Periodo", resumen["totales"]["periodo"]), ("Acumulado", resumen["totales"]["acumulado"])):
-        wt.append([nombre, *[bloque.get(clave) for clave, _ in _TOTALES]])
-        for celda, (clave, _) in zip(wt[wt.max_row][1:], _TOTALES):
-            if clave != "conteo":
+        wt.append([nombre, *[bloque.get(c["clave"]) for c in cifras]])
+        for celda, cifra in zip(wt[wt.max_row][1:], cifras):
+            if cifra["formato"] == "moneda":
                 celda.number_format = FORMATO_MONEDA
     wt.column_dimensions["A"].width = 14
-    for i in range(2, len(_TOTALES) + 2):
+    for i in range(2, len(cifras) + 2):
         wt.column_dimensions[get_column_letter(i)].width = 18
 
     salida = BytesIO()
