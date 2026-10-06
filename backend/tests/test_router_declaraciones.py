@@ -26,6 +26,9 @@ def test_comparativo_junta_lo_declarado_y_lo_calculado(con_acceso, monkeypatch):
     monkeypatch.setattr(isr_flujo_datos, "cargar_ajustes", lambda e: {})
     monkeypatch.setattr(isr_flujo_datos, "porcentaje_nomina_exenta", lambda e, ej: isr_flujo_datos.isr_flujo.PORCENTAJE_NOMINA_EXENTA)
     monkeypatch.setattr(isr_flujo_datos, "cargar_eventos", lambda e, rfc, p: [])
+    monkeypatch.setattr(isr_flujo_datos, "parametros_provisional", lambda e, ej: {
+        "ptu_pagada": 0, "ptu_mes_pago": None, "perdidas_pendientes": 0, "arrendamiento_periodicidad": "mensual", "deduccion_opcional_35": False})
+    monkeypatch.setattr(declaraciones_datos, "pagos_del_ejercicio", lambda e, ej, i: {})
     monkeypatch.setattr(declaraciones_datos, "cadena",
                         lambda e, p, i: [{"impuesto_trasladado": 10, "impuesto_a_cargo": 0}] if i == "iva" else [])
 
@@ -84,3 +87,21 @@ def test_estado_del_ejercicio_pide_ejercicio_valido(con_acceso, monkeypatch):
     assert client.get(BASE).status_code == 422
     assert client.get(BASE, params={"ejercicio": 1999}).status_code == 422
     assert client.get(BASE, params={"ejercicio": 2026}).json() == {"ejercicio": 2026, "items": []}
+
+
+def test_comparativo_compara_el_pago_provisional_del_isr_en_612(con_acceso, monkeypatch):
+    monkeypatch.setattr(iva_flujo_datos, "cargar_ajustes", lambda e: {})
+    monkeypatch.setattr(iva_flujo_datos, "cargar_eventos", lambda e, rfc, p, a: [])
+    monkeypatch.setattr(isr_flujo_datos, "cargar_ajustes", lambda e: {})
+    monkeypatch.setattr(isr_flujo_datos, "porcentaje_nomina_exenta", lambda e, ej: isr_flujo_datos.isr_flujo.PORCENTAJE_NOMINA_EXENTA)
+    monkeypatch.setattr(isr_flujo_datos, "cargar_eventos", lambda e, rfc, p: [])
+    monkeypatch.setattr(isr_flujo_datos, "parametros_provisional", lambda e, ej: {
+        "ptu_pagada": 0, "ptu_mes_pago": None, "perdidas_pendientes": 0, "arrendamiento_periodicidad": "mensual", "deduccion_opcional_35": False})
+    monkeypatch.setattr(declaraciones_datos, "pagos_del_ejercicio", lambda e, ej, i: {})
+    monkeypatch.setattr(declaraciones_datos, "cadena", lambda e, p, i: [{"impuesto_a_cargo": 50}] if i == "isr" else [])
+
+    d = client.get(f"{BASE}/2026-09").json()
+    a_cargo = {x["clave"]: x for x in d["isr"]["renglones"]}["impuesto_a_cargo"]
+
+    assert a_cargo["calculado"] == 0.0 and a_cargo["declarado"] == 50.0 and a_cargo["estado"] == "diferencia"   # sin movimientos: pago 0
+    assert "612" in d["aviso"]

@@ -54,13 +54,14 @@ def calculado_de_iva(resumen: dict) -> dict:
     }
 
 
-def calculado_de_isr(resumen: dict) -> dict:
-    """Los renglones del ISR del mes que calcula ``isr_flujo.resumen``. El pago provisional no se calcula (F7.3)."""
+def calculado_de_isr(resumen: dict, pago_provisional: Optional[Any] = None) -> dict:
+    """Los renglones del ISR del mes que calcula ``isr_flujo.resumen``. ``pago_provisional`` es el pago del periodo a pesos
+    (``isr_pago_provisional.monto_a_pesos``); sin él (601, régimen no soportado o sin tarifa) el renglón queda sin cálculo."""
     mes = resumen["mes"]
     return {
         "ingresos": mes["ingresos"]["total"], "deducciones": mes["deducciones"]["total"],
         "retenciones": mes["ingresos"]["retenciones_a_favor"],
-        "retenciones_a_terceros": mes["retenciones_a_cargo"]["total"], "impuesto_a_cargo": None,
+        "retenciones_a_terceros": mes["retenciones_a_cargo"]["total"], "impuesto_a_cargo": pago_provisional,
     }
 
 

@@ -159,3 +159,23 @@ def pago_provisional_arrendamiento(
             "tarifa": r, "impuesto_causado": r["impuesto_causado"], "isr_retenido_acreditado": _q(retenciones),
             "pago_del_periodo": _q(pago), "pago_del_periodo_a_pesos": _a_pesos(pago), "exceso_de_retenciones": _q(max(CERO, retenciones - r["impuesto_causado"])),
             "avisos": avisos}
+
+
+def por_regimen(codigo: Optional[str], periodo: str, resumen_de: Callable[[str], dict], parametros: dict,
+                pagos_reales: Optional[dict[int, Decimal]] = None, predial: Decimal = CERO) -> Optional[dict]:
+    """Pago provisional que corresponde al régimen: 612 (Art. 106) o 606 (Art. 116). ``None`` si el régimen no se calcula
+    por flujo (601 usa el coeficiente de utilidad; otros no están soportados). ``parametros`` = ``parametros_provisional``."""
+    if codigo == "612":
+        return pago_provisional_flujo(periodo, resumen_de, parametros["ptu_pagada"], parametros["perdidas_pendientes"],
+                                      pagos_reales, parametros.get("ptu_mes_pago"))
+    if codigo == "606":
+        return pago_provisional_arrendamiento(periodo, resumen_de, parametros["arrendamiento_periodicidad"],
+                                              parametros["deduccion_opcional_35"], predial)
+    return None
+
+
+def monto_a_pesos(resultado: Optional[dict]) -> Optional[Decimal]:
+    """El pago del periodo a pesos enteros, o ``None`` si no se calculó."""
+    if not resultado or not resultado.get("calculado"):
+        return None
+    return resultado.get("pago_del_mes_a_pesos", resultado.get("pago_del_periodo_a_pesos"))

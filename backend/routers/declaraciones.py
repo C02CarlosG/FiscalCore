@@ -10,7 +10,7 @@ from typing import Literal, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, field_validator
 
-from .. import declaraciones, declaraciones_datos, isr_flujo, isr_flujo_datos, iva_flujo, iva_flujo_datos
+from .. import declaraciones, declaraciones_datos, isr_flujo, isr_flujo_datos, isr_pago_provisional, iva_flujo, iva_flujo_datos
 from ..deps import empresa_or_404, get_current_user, validar_acceso_empresa
 from .iva_flujo import _factor_o_422
 
@@ -92,15 +92,24 @@ async def comparativo(empresa_id: str, periodo: str,
     iva = iva_flujo.resumen(iva_flujo_datos.cargar_eventos(empresa_id, rfc, periodo, ajustes_iva), periodo, ajustes_iva, factor_dec)
     ajustes_isr = isr_flujo_datos.cargar_ajustes(empresa_id)
     pct = isr_flujo_datos.porcentaje_nomina_exenta(empresa_id, int(periodo[:4]))
-    isr = isr_flujo.resumen(isr_flujo_datos.cargar_eventos(empresa_id, rfc, periodo), periodo, ajustes_isr, pct)
+    eventos_isr = isr_flujo_datos.cargar_eventos(empresa_id, rfc, periodo)
+    isr = isr_flujo.resumen(eventos_isr, periodo, ajustes_isr, pct)
+    # pago provisional que calcula F7.3 (612 y 606; lo realmente pagado de meses anteriores sale de las declaraciones)
+    regimen = isr_flujo.aplicabilidad(empresa.get("regimen_fiscal"))
+    ejercicio = int(periodo[:4])
+    provisional = isr_pago_provisional.por_regimen(
+        regimen["codigo"], periodo, lambda p: isr_flujo.resumen(eventos_isr, p, ajustes_isr, pct),
+        isr_flujo_datos.parametros_provisional(empresa_id, ejercicio),
+        declaraciones_datos.pagos_del_ejercicio(empresa_id, ejercicio, "isr"))
 
     return _json({
         "empresa_id": empresa_id, "periodo": periodo, "factor_prorrateo": factor_dec,
         "iva": declaraciones.comparar("iva", declaraciones_datos.cadena(empresa_id, periodo, "iva"),
                                       declaraciones.calculado_de_iva(iva)),
         "isr": declaraciones.comparar("isr", declaraciones_datos.cadena(empresa_id, periodo, "isr"),
-                                      declaraciones.calculado_de_isr(isr)),
-        "aviso": "El pago provisional del ISR no se calcula: se muestra solo lo declarado.",
+                                      declaraciones.calculado_de_isr(isr, isr_pago_provisional.monto_a_pesos(provisional))),
+        "aviso": ("El pago provisional del ISR se calcula para 612 (Art. 106) y 606 (Art. 116); en otros regímenes se muestra solo lo declarado."
+                  if provisional else "El pago provisional del ISR no se calcula para este régimen: se muestra solo lo declarado."),
     })
 
 

@@ -3311,7 +3311,7 @@ paths:
         declarado, calculado (a peso) y diferencia (hasta $1.00 es `cuadra`: las declaraciones van en pesos) y `pendiente_de_pago`
         (a cargo de la vigente menos lo pagado de toda la cadena). `sin_comparar` = no hay nada capturado contra nada calculado.
         En IVA el saldo a favor aplicado resta de lo calculado a cargo; en ISR son cifras del mes.
-        El pago provisional del ISR no se calcula (F7.3): se muestra solo lo declarado (`sin_calculo`).
+        El pago provisional del ISR se compara con el que calcula F7.3 para 612 (Art. 106) y 606 (Art. 116), a pesos; en otros regimenes (601, no soportados) se muestra solo lo declarado (`sin_calculo`).
       parameters:
         - $ref: '#/components/parameters/EmpresaId'
         - { name: periodo, in: path, required: true, schema: { type: string, pattern: '^20[0-9]{2}-(0[1-9]|1[0-2])$' } }

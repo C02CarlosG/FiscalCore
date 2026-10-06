@@ -116,3 +116,17 @@ def test_el_calculado_sale_de_los_resumenes_de_los_motores():
     assert d.calculado_de_iva(iva)["retenciones_a_terceros"] == iva["retenciones_a_enterar"]
     assert d.calculado_de_isr(isr)["ingresos"] == D("1000.00") and d.calculado_de_isr(isr)["impuesto_a_cargo"] is None
     assert d.calculado_de_isr(isr)["retenciones_a_terceros"] == isr["mes"]["retenciones_a_cargo"]["total"]
+
+
+def test_el_pago_provisional_calculado_alimenta_el_a_cargo_del_isr():
+    from backend import isr_flujo
+    from backend.tests.test_isr_flujo import doc, todos
+
+    isr = isr_flujo.resumen(todos(doc("U1")), "2026-09", {}, isr_flujo.PORCENTAJE_NOMINA_EXENTA)
+    calc = d.calculado_de_isr(isr, D("120.00"))
+    r = d.comparar("isr", [{"impuesto_a_cargo": D("120")}], calc)
+
+    assert calc["impuesto_a_cargo"] == D("120.00")
+    assert por_clave(r)["impuesto_a_cargo"]["estado"] == "cuadra" and r["estado"] == "cuadra"
+    diferente = d.comparar("isr", [{"impuesto_a_cargo": D("200")}], calc)
+    assert por_clave(diferente)["impuesto_a_cargo"]["diferencia"] == D("80.00") and diferente["estado"] == "con_diferencias"

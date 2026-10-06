@@ -201,3 +201,18 @@ def test_las_perdidas_avisan_que_no_se_actualizan_y_el_pago_se_expone_a_pesos():
 
     assert any("Art. 57" in a for a in r["avisos"])
     assert r["pago_del_mes"] == D("8872.62") and r["pago_del_mes_a_pesos"] == D("8873.00")
+
+
+def test_por_regimen_despacha_612_y_606_y_deja_fuera_el_resto():
+    parametros = {"ptu_pagada": D("0"), "ptu_mes_pago": None, "perdidas_pendientes": D("0"),
+                  "arrendamiento_periodicidad": "mensual", "deduccion_opcional_35": False}
+    por_mes = {1: ("100000", "50000", "0")}
+
+    r612 = p.por_regimen("612", "2026-01", resumen_falso(por_mes), parametros)
+    r606 = p.por_regimen("606", "2026-01", resumen_falso_mes({1: (100000, 40000, 0)}), parametros)
+
+    assert r612["pago_del_mes"] == D("9107.82") and p.monto_a_pesos(r612) == D("9108.00")
+    assert r606["articulo"] == "116" and p.monto_a_pesos(r606) == D("11736.00")
+    assert p.por_regimen("601", "2026-01", resumen_falso(por_mes), parametros) is None
+    assert p.por_regimen(None, "2026-01", resumen_falso(por_mes), parametros) is None
+    assert p.monto_a_pesos(None) is None and p.monto_a_pesos({"calculado": False}) is None
