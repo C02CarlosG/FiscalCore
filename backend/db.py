@@ -254,6 +254,9 @@ def init_db() -> None:
         # 061 es idempotente — configuración por empresa de las validaciones de CFDI (V1, carril D)
         _run_sql_file("061_validaciones_cfdi_config.sql")
 
+        # 062 es idempotente — roles por empresa: administrador (el creador) y contador (U1, carril D)
+        _run_sql_file("062_roles_usuario_empresa.sql")
+
         # 063 es idempotente — planes (con valores de ejemplo) y suscripciones por cuenta (M7.1, carril D)
         _run_sql_file("063_suscripciones.sql")
 
