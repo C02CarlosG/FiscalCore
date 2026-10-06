@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api-client";
 import type {
   Asignacion,
+  AsignacionHistorial,
   CambioPlan,
   CuentaSuscripcion,
   MiSuscripcionDatos,
@@ -15,6 +16,22 @@ const CLAVE = ["suscripcion"];
 
 export function useMiSuscripcion() {
   return useQuery({ queryKey: [...CLAVE, "mia"], queryFn: () => apiFetch<MiSuscripcionDatos>(BASE) });
+}
+
+export function useMiHistorial() {
+  return useQuery({
+    queryKey: [...CLAVE, "historial"],
+    queryFn: () => apiFetch<AsignacionHistorial[]>(`${BASE}/historial`),
+  });
+}
+
+/** Historial completo de una cuenta (administrador de la plataforma); se pide al abrirlo. */
+export function useHistorialCuenta(usuarioId: string, habilitado: boolean) {
+  return useQuery({
+    queryKey: [...CLAVE, "historial", usuarioId],
+    queryFn: () => apiFetch<AsignacionHistorial[]>(`${BASE}/admin/cuentas/${usuarioId}/historial`),
+    enabled: habilitado,
+  });
 }
 
 export function usePlanes() {

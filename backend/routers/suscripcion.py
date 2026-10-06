@@ -27,6 +27,12 @@ async def mi_suscripcion(current_user: dict = Depends(get_current_user)):
     return datos.resumen(current_user["user_id"])
 
 
+@router.get("/historial")
+async def mi_historial(current_user: dict = Depends(get_current_user)):
+    """Mis asignaciones de plan (sin las notas internas ni quién las hizo)."""
+    return datos.historial(current_user["user_id"], con_notas=False)
+
+
 @router.get("/planes")
 async def planes_activos(current_user: dict = Depends(get_current_user)):
     return [datos.plan_publico(p) for p in datos.planes().values() if p["activo"]]
@@ -44,6 +50,13 @@ async def cuentas(q: str = Query("", max_length=100), admin: dict = Depends(requ
         }
         for f in datos.cuentas(q)
     ]
+
+
+@router.get("/admin/cuentas/{usuario_id}/historial")
+async def historial_de_cuenta(usuario_id: uuid.UUID, _admin: dict = Depends(require_admin)):
+    if not db.query_one("SELECT id FROM usuarios WHERE id = %s", (str(usuario_id),)):
+        raise HTTPException(status_code=404, detail="Cuenta no encontrada")
+    return datos.historial(str(usuario_id), con_notas=True)
 
 
 @router.put("/admin/cuentas/{usuario_id}")

@@ -184,3 +184,28 @@ def test_dos_altas_simultaneas_no_pasan_el_limite(entorno):
 
     assert sorted(resultados) == ["limite", "ok"]
     assert _mia(client, h_titular)["uso_rfc"] == 1
+
+
+def test_historial_de_asignaciones(entorno):
+    """M7.2: cada asignación queda en el historial; la cuenta lo ve sin notas internas
+    ni quién asignó, el administrador de la plataforma lo ve completo."""
+    db, client, h_titular, h_admin, h_otro = entorno
+    titular = _id(db, TITULAR)
+    url = f"/api/v1/suscripcion/admin/cuentas/{titular}"
+    assert client.get("/api/v1/suscripcion/historial", headers=h_titular).json() == []
+
+    assert client.put(url, headers=h_admin, json={"plan_clave": "basico", "notas": "pago SPEI 01/10"}).status_code == 200
+    assert client.put(url, headers=h_admin, json={"plan_clave": "despacho", "vigente_hasta": "2099-12-31"}).status_code == 200
+
+    mio = client.get("/api/v1/suscripcion/historial", headers=h_titular).json()
+    assert [(f["plan_clave"], f["plan_nombre"], f["vigente_hasta"]) for f in mio] == [
+        ("despacho", "Despacho", "2099-12-31"), ("basico", "Básico", None)]
+    assert all(set(f) == {"fecha", "plan_clave", "plan_nombre", "estado", "vigente_hasta"} for f in mio)
+
+    completo = client.get(f"{url}/historial", headers=h_admin).json()
+    assert [(f["notas"], f["asignada_por"]) for f in completo] == [(None, ADMIN), ("pago SPEI 01/10", ADMIN)]
+    assert client.get(f"{url}/historial", headers=h_otro).status_code == 403
+    assert client.get("/api/v1/suscripcion/admin/cuentas/00000000-0000-0000-0000-000000000000/historial",
+                      headers=h_admin).status_code == 404
+    # Una cuenta no ve el historial de otra.
+    assert client.get("/api/v1/suscripcion/historial", headers=h_otro).json() == []

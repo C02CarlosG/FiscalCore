@@ -124,17 +124,53 @@ def verificar_alta_rfc(cur, usuario_id: str, de_tercero: bool = False) -> None:
 
 
 def asignar(usuario_id: str, asignacion: dict, admin_id: str) -> None:
-    db.execute(
+    """Guarda la asignación vigente y la agrega al historial en la misma transacción."""
+    valores = (usuario_id, asignacion["plan_clave"], asignacion["estado"], asignacion["vigente_hasta"],
+               asignacion["notas"], admin_id)
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO suscripciones (usuario_id, plan_clave, estado, vigente_hasta, notas, asignada_por, updated_at)
+            VALUES (%s, %s, %s, %s, %s, %s, NOW())
+            ON CONFLICT (usuario_id) DO UPDATE SET
+                plan_clave = EXCLUDED.plan_clave, estado = EXCLUDED.estado, vigente_hasta = EXCLUDED.vigente_hasta,
+                notas = EXCLUDED.notas, asignada_por = EXCLUDED.asignada_por, updated_at = NOW()
+            """,
+            valores,
+        )
+        cur.execute(
+            "INSERT INTO suscripciones_historial (usuario_id, plan_clave, estado, vigente_hasta, notas, asignada_por) "
+            "VALUES (%s, %s, %s, %s, %s, %s)",
+            valores,
+        )
+
+
+def historial(usuario_id: str, con_notas: bool, limite: int = 50) -> list[dict]:
+    """Asignaciones de plan de la cuenta, de la más reciente a la más antigua. Las notas
+    y quién asignó son internas del administrador de la plataforma."""
+    filas = db.query_all(
         """
-        INSERT INTO suscripciones (usuario_id, plan_clave, estado, vigente_hasta, notas, asignada_por, updated_at)
-        VALUES (%s, %s, %s, %s, %s, %s, NOW())
-        ON CONFLICT (usuario_id) DO UPDATE SET
-            plan_clave = EXCLUDED.plan_clave, estado = EXCLUDED.estado, vigente_hasta = EXCLUDED.vigente_hasta,
-            notas = EXCLUDED.notas, asignada_por = EXCLUDED.asignada_por, updated_at = NOW()
+        SELECT h.creada_en, h.plan_clave, p.nombre AS plan_nombre, h.estado, h.vigente_hasta, h.notas,
+               a.email AS asignada_por
+        FROM suscripciones_historial h
+        JOIN planes p ON p.clave = h.plan_clave
+        LEFT JOIN usuarios a ON a.id = h.asignada_por
+        WHERE h.usuario_id = %s
+        ORDER BY h.creada_en DESC, h.id
+        LIMIT %s
         """,
-        (usuario_id, asignacion["plan_clave"], asignacion["estado"], asignacion["vigente_hasta"],
-         asignacion["notas"], admin_id),
+        (usuario_id, limite),
     )
+    salida = []
+    for f in filas:
+        fila = {
+            "fecha": f["creada_en"].isoformat(), "plan_clave": f["plan_clave"], "plan_nombre": f["plan_nombre"],
+            "estado": f["estado"], "vigente_hasta": f["vigente_hasta"].isoformat() if f["vigente_hasta"] else None,
+        }
+        if con_notas:
+            fila.update(notas=f["notas"], asignada_por=f["asignada_por"])
+        salida.append(fila)
+    return salida
 
 
 def guardar_plan(plan: dict) -> dict:

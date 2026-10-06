@@ -4,9 +4,9 @@ import { AlertTriangle } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ErrorState } from "@/components/shared/ErrorState";
 import { LoadingState } from "@/components/shared/LoadingState";
-import { useMiSuscripcion, usePlanes } from "@/hooks/useSuscripcion";
+import { useMiHistorial, useMiSuscripcion, usePlanes } from "@/hooks/useSuscripcion";
 import { formatearFecha, formatearMoneda } from "@/lib/formato";
-import type { MiSuscripcionDatos, Plan } from "./tipos";
+import { ETIQUETA_ESTADO, type AsignacionHistorial, type MiSuscripcionDatos, type Plan } from "./tipos";
 
 const MOTIVO: Record<NonNullable<MiSuscripcionDatos["motivo"]>, string> = {
   sin_suscripcion: "Aún no tienes un plan asignado: aplica el plan por defecto.",
@@ -47,9 +47,44 @@ function Uso({ datos }: { datos: MiSuscripcionDatos }) {
   );
 }
 
+export function HistorialPlan({ filas, conNotas = false }: { filas: AsignacionHistorial[]; conNotas?: boolean }) {
+  if (filas.length === 0) {
+    return <p className="text-sm text-muted-foreground">Aún no hay cambios de plan.</p>;
+  }
+  return (
+    <div className="overflow-x-auto rounded-md border border-border">
+      <table aria-label="Historial de plan" className="w-full text-sm">
+        <thead className="bg-muted/50 text-left text-xs text-muted-foreground">
+          <tr>
+            <th className="px-3 py-2 font-semibold">Fecha</th>
+            <th className="px-3 py-2 font-semibold">Plan</th>
+            <th className="px-3 py-2 font-semibold">Estado</th>
+            <th className="px-3 py-2 font-semibold">Vigente hasta</th>
+            {conNotas && <th className="px-3 py-2 font-semibold">Notas</th>}
+            {conNotas && <th className="px-3 py-2 font-semibold">Asignó</th>}
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-border">
+          {filas.map((f, i) => (
+            <tr key={`${f.fecha}-${i}`}>
+              <td className="px-3 py-2">{formatearFecha(f.fecha)}</td>
+              <td className="px-3 py-2 font-medium">{f.plan_nombre}</td>
+              <td className="px-3 py-2">{ETIQUETA_ESTADO[f.estado]}</td>
+              <td className="px-3 py-2">{f.vigente_hasta ? formatearFecha(f.vigente_hasta) : "Sin vencimiento"}</td>
+              {conNotas && <td className="px-3 py-2">{f.notas ?? "—"}</td>}
+              {conNotas && <td className="px-3 py-2">{f.asignada_por ?? "—"}</td>}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 export function MiSuscripcion() {
   const mia = useMiSuscripcion();
   const planes = usePlanes();
+  const historial = useMiHistorial();
 
   if (mia.isLoading) return <LoadingState label="Consultando suscripción" />;
   if (mia.isError || !mia.data) {
@@ -107,6 +142,18 @@ export function MiSuscripcion() {
                 </tbody>
               </table>
             </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {historial.data && (
+        <Card>
+          <CardHeader className="px-5 py-5 sm:px-6">
+            <CardTitle className="font-display text-base">Historial de tu plan</CardTitle>
+            <CardDescription>Cada cambio de plan, estado o vigencia, del más reciente al más antiguo.</CardDescription>
+          </CardHeader>
+          <CardContent className="px-5 pb-5 sm:px-6">
+            <HistorialPlan filas={historial.data} />
           </CardContent>
         </Card>
       )}

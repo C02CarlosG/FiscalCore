@@ -46,3 +46,21 @@ export interface CambioPlan {
   max_rfc: number | null;
   activo: boolean;
 }
+
+/** Una asignación de plan del historial (M7.2). */
+export interface AsignacionHistorial {
+  fecha: string;
+  plan_clave: string;
+  plan_nombre: string;
+  estado: EstadoSuscripcion;
+  vigente_hasta: string | null;
+  /** Solo en la vista del administrador de la plataforma. */
+  notas?: string | null;
+  asignada_por?: string | null;
+}
+
+export const ETIQUETA_ESTADO: Record<EstadoSuscripcion, string> = {
+  activa: "Activa",
+  suspendida: "Suspendida",
+  cancelada: "Cancelada",
+};
