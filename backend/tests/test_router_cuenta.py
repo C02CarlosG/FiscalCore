@@ -37,6 +37,8 @@ def _base_falsa(monkeypatch, miembros, rol_plataforma="contador", aceptada=None)
     ejecutado = []
 
     def _one(sql, params=()):
+        if "token_version" in sql:          # validación de sesión de get_current_user (tests con token real)
+            return {"activo": True, "token_version": 0}
         if "SELECT rol FROM usuarios" in sql:
             return {"rol": rol_plataforma}
         if "FROM empresas" in sql:
