@@ -617,3 +617,41 @@ export interface IsrDetalle {
   pagina: number;
   por_pagina: number;
 }
+
+// ── Proveedores (F6.1) ────────────────────────────────────────────────────────
+
+export interface Proveedor {
+  id: string;
+  rfc: string;
+  nombre: string;
+  nombre_editado: boolean;
+  tipo_tercero: string | null;
+  tipo_operacion: string | null;
+  pais: string | null;
+  jurisdiccion_detalle: string | null;
+  id_fiscal: string | null;
+  efectos_fiscales: boolean | null;
+  origen: "cfdi" | "manual";
+  /** Extranjero sin país o sin ID fiscal. */
+  pendiente: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProveedoresLista {
+  total: number;
+  agregados: number;
+  omitidos: number;
+  items: Proveedor[];
+}
+
+export interface ProveedorIn {
+  rfc: string;
+  nombre?: string;
+  tipo_tercero?: string | null;
+  tipo_operacion?: string | null;
+  pais?: string | null;
+  id_fiscal?: string | null;
+}
+
+export type ProveedorPatch = Partial<Omit<ProveedorIn, "rfc">>;
