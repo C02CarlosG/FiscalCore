@@ -103,6 +103,7 @@ def _preparar_provisional(monkeypatch, regimen):
     monkeypatch.setattr(isr_flujo_datos, "parametros_provisional", lambda e, ej: {"ptu_pagada": 0, "ptu_mes_pago": None, "perdidas_pendientes": 0, "arrendamiento_periodicidad": "mensual", "deduccion_opcional_35": False})
     monkeypatch.setattr(isr_flujo_datos, "cargar_eventos", lambda e, rfc, p: [])
     monkeypatch.setattr(router, "registrar_evento", lambda *a, **k: None)
+    monkeypatch.setattr(router.declaraciones_datos, "pagos_del_ejercicio", lambda e, ej, i: {})
 
 
 def test_pago_provisional_612_se_calcula_con_la_tarifa(con_acceso, monkeypatch):

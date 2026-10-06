@@ -4,6 +4,7 @@ Historial por (empresa, periodo, impuesto): ``secuencia`` 1 es la normal y 2, 3�
 última. Una complementaria se agrega, nunca pisa a la anterior."""
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import Optional
 
 import psycopg2.extras
@@ -45,6 +46,17 @@ def del_ejercicio(empresa_id: str, ejercicio: int) -> list[dict]:
            ORDER BY periodo, impuesto, secuencia DESC""",
         (empresa_id, f"{ejercicio:04d}-%", empresa_id, f"{ejercicio:04d}-%"))
     return [{**_publica(f), "declaraciones": f["total"]} for f in filas]
+
+
+def pagos_del_ejercicio(empresa_id: str, ejercicio: int, impuesto: str) -> dict[int, "Decimal"]:
+    """Lo realmente pagado por mes: suma de ``monto_pagado`` de toda la cadena (normal y complementarias) de los meses que
+    lo capturaron. Un mes sin declaración, o sin monto pagado capturado, no aparece."""
+    filas = db.query_all(
+        """SELECT periodo, SUM(monto_pagado) AS pagado FROM declaraciones
+           WHERE empresa_id = %s AND impuesto = %s AND periodo LIKE %s AND monto_pagado IS NOT NULL
+           GROUP BY periodo""",
+        (empresa_id, impuesto, f"{ejercicio:04d}-%"))
+    return {int(f["periodo"][5:7]): Decimal(str(f["pagado"])) for f in filas}
 
 
 def _auditar(cur, usuario_id: str, accion: str, empresa_id: str, metadata: dict) -> None:

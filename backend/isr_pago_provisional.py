@@ -62,6 +62,7 @@ def pago_provisional_flujo(
                 "mensaje": f"No hay tarifa del Anexo 8 cargada para el ejercicio {ejercicio}: no se calcula el pago provisional."}
     pagos_reales = pagos_reales or {}
     estimados: list[int] = []
+    reales: list[int] = []
     pagos_previos: dict[int, Decimal] = {}
     detalle_mes: dict = {}
     for k in range(1, mes + 1):
@@ -86,6 +87,7 @@ def pago_provisional_flujo(
         if k < mes:
             if k in pagos_reales:
                 pagos_previos[k] = Decimal(str(pagos_reales[k]))
+                reales.append(k)
             else:
                 pagos_previos[k] = pago
                 estimados.append(k)
@@ -98,7 +100,7 @@ def pago_provisional_flujo(
         avisos.append("Los pagos provisionales de " + ", ".join(f"{m:02d}" for m in estimados) +
                       " se estiman con el mismo cálculo porque no se capturó lo realmente pagado.")
     return {"calculado": True, "ejercicio": ejercicio, "mes": mes, "fuente": tarifas_isr.fuente(ejercicio),
-            **detalle_mes, "meses_con_pago_estimado": estimados, "avisos": avisos}
+            **detalle_mes, "meses_con_pago_estimado": estimados, "meses_con_pago_real": reales, "avisos": avisos}
 
 
 MESES_DE_PAGO_TRIMESTRAL = (3, 6, 9, 12)
