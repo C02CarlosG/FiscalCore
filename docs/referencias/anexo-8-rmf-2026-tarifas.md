@@ -7,7 +7,7 @@
 - **Vigencia:** el listado del SAT del 2026-10-06 no muestra una versión posterior del Anexo 8 (las modificaciones recientes
   de la RMF 2026 listan otros anexos). Revisar de nuevo antes de usar en un ejercicio distinto o tras una modificación.
 - **No incluye subsidio al empleo:** el Anexo 8 de 2026 no trae tabla de subsidio; no se inventa.
-- Los importes de cada mes del Art. 106 son acumulados del ejercicio hasta ese mes (el mes *n* es *n* veces la tarifa de enero).
+- Los importes de cada mes del Art. 106 son acumulados del ejercicio hasta ese mes: de enero a noviembre el mes *n* es *n* veces la tarifa de enero (verificado, diferencia máxima de $0.02). **Diciembre difiere** de 12 × enero en los límites y cuotas (p. ej. 10,135.11 contra 10,135.08): son las cifras tal como las publica el SAT y es lo que debe usarse.
 - Datos para código: `docs/referencias/anexo-8-rmf-2026-tarifas.json` (cadenas decimales; `null` = «En adelante»).
 
 ## Art. 96 LISR — pagos provisionales mensuales (fracción V del Anexo 8)
