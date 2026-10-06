@@ -3539,7 +3539,7 @@ paths:
                   motivo: { type: string, nullable: true, enum: [sin_suscripcion, suspendida, cancelada, vencida, plan_no_disponible, null] }
                   uso_rfc: { type: integer }
                   puede_agregar_rfc: { type: boolean }
-                  dias_para_vencer: { type: integer, nullable: true, description: "Días para el vencimiento si es en 15 días o menos (aviso solo en la interfaz, D10)" }
+                  dias_para_vencer: { type: integer, nullable: true, description: "Días para el vencimiento si es en 15 días o menos; negativo si ya venció (aviso solo en la interfaz, D10)" }
                   es_admin_plataforma: { type: boolean }
         '401':
           $ref: '#/components/responses/UnauthorizedError'
@@ -3577,6 +3577,27 @@ paths:
                 allOf: [{ $ref: '#/components/schemas/DatosFiscalesCliente' }]
         '401':
           $ref: '#/components/responses/UnauthorizedError'
+
+    put:
+      operationId: editarMisDatosFiscalesSuscripcion
+      tags: [Suscripción]
+      summary: La cuenta captura o corrige sus datos fiscales para el CFDI de la suscripción
+      description: Mismas reglas que la ruta de administración. Se audita `suscripcion.datos_fiscales`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DatosFiscalesEntrada' }
+      responses:
+        '200':
+          description: Datos guardados
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DatosFiscalesCliente' }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '422':
+          description: Dato inválido
 
   /api/v1/suscripcion/pagos:
     get:
@@ -3733,22 +3754,14 @@ paths:
       description: |
         RFC válido; régimen del catálogo c_RegimenFiscal que corresponda a persona física
         (RFC de 13) o moral (RFC de 12); código postal de 5 dígitos; uso del catálogo
-        c_UsoCFDI 4.0. Se audita `suscripcion.datos_fiscales`.
+        c_UsoCFDI 4.0; correo opcional. Se audita `suscripcion.datos_fiscales`.
       parameters:
         - { name: usuario_id, in: path, required: true, schema: { type: string, format: uuid } }
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              type: object
-              required: [rfc, razon_social, regimen_fiscal, codigo_postal, uso_cfdi]
-              properties:
-                rfc: { type: string }
-                razon_social: { type: string, maxLength: 254 }
-                regimen_fiscal: { type: string, example: '601' }
-                codigo_postal: { type: string, pattern: '^[0-9]{5}$' }
-                uso_cfdi: { type: string, example: G03 }
+            schema: { $ref: '#/components/schemas/DatosFiscalesEntrada' }
       responses:
         '200':
           description: Datos guardados
@@ -3784,6 +3797,7 @@ paths:
                     - type: object
                       properties:
                         registrado_por: { type: string, nullable: true, description: Correo de quien lo registró }
+                        motivo_anulacion: { type: string, nullable: true }
         '401':
           $ref: '#/components/responses/UnauthorizedError'
         '403':
@@ -3793,8 +3807,12 @@ paths:
     post:
       operationId: registrarPagoDeCuenta
       tags: [Suscripción]
-      summary: Registra un pago recibido fuera de la plataforma (D10, sin cobro en línea)
-      description: Fecha no futura; monto mayor que 0 con hasta dos decimales, como texto. Se audita `suscripcion.registrar_pago`.
+      summary: Registra un pago recibido fuera de la plataforma y extiende la vigencia (D10, sin cobro en línea)
+      description: |
+        Fecha no futura; monto mayor que 0 con hasta dos decimales, como texto. En la misma
+        transacción extiende `vigente_hasta` `meses` meses: desde la vigencia si no había
+        vencido a la fecha del pago, si no desde la fecha del pago. 409 si la cuenta no
+        tiene plan asignado. Se audita `suscripcion.registrar_pago`.
       parameters:
         - { name: usuario_id, in: path, required: true, schema: { type: string, format: uuid } }
       requestBody:
@@ -3809,6 +3827,8 @@ paths:
                 monto: { type: string, example: '1499.00' }
                 referencia: { type: string, maxLength: 200, nullable: true }
                 folio_cfdi: { type: string, maxLength: 40, nullable: true, description: Folio del CFDI emitido por la suscripción }
+                uuid_cfdi: { type: string, nullable: true, description: UUID del CFDI emitido a mano }
+                meses: { type: integer, minimum: 1, maximum: 24, default: 1, description: Meses que extiende la vigencia }
       responses:
         '201':
           description: Pago registrado
@@ -3821,8 +3841,72 @@ paths:
           $ref: '#/components/responses/ForbiddenError'
         '404':
           $ref: '#/components/responses/NotFoundError'
+        '409':
+          description: La cuenta no tiene plan asignado
         '422':
           description: Dato inválido
+
+  /api/v1/suscripcion/admin/cuentas/{usuario_id}/pagos/{pago_id}/anular:
+    post:
+      operationId: anularPagoDeCuenta
+      tags: [Suscripción]
+      summary: Anula un pago (no se borra) y revierte la vigencia si nada la cambió después
+      parameters:
+        - { name: usuario_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: pago_id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [motivo]
+              properties:
+                motivo: { type: string, maxLength: 500 }
+      responses:
+        '200':
+          description: Anulado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  vigencia_revertida: { type: boolean }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          description: La cuenta no existe, o no hay un pago activo con ese id en ella
+        '422':
+          description: Falta el motivo
+
+  /api/v1/suscripcion/admin/vencimientos:
+    get:
+      operationId: vencimientosSuscripcion
+      tags: [Suscripción]
+      summary: Cuentas activas que vencen en 15 días o menos, o ya vencidas (solo admin de la plataforma)
+      responses:
+        '200':
+          description: De la que vence antes a la que vence después (hasta 500)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    usuario_id: { type: string, format: uuid }
+                    email: { type: string }
+                    nombre: { type: string, nullable: true }
+                    plan_clave: { type: string }
+                    plan_nombre: { type: string }
+                    vigente_hasta: { type: string, format: date }
+                    dias_para_vencer: { type: integer, description: Negativo si ya venció }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
 
   /api/v1/suscripcion/admin/cuentas/{usuario_id}:
     put:
@@ -5288,6 +5372,7 @@ components:
         regimen_fiscal: { type: string }
         codigo_postal: { type: string }
         uso_cfdi: { type: string }
+        correo: { type: string, nullable: true }
         actualizado: { type: string, format: date-time }
 
     PagoSuscripcion:
@@ -5298,6 +5383,21 @@ components:
         monto: { type: string, description: MXN, dos decimales }
         referencia: { type: string, nullable: true }
         folio_cfdi: { type: string, nullable: true }
+        uuid_cfdi: { type: string, nullable: true }
+        meses: { type: integer }
+        vigente_hasta_nueva: { type: string, format: date }
+        estado: { type: string, enum: [activo, anulado] }
+
+    DatosFiscalesEntrada:
+      type: object
+      required: [rfc, razon_social, regimen_fiscal, codigo_postal, uso_cfdi]
+      properties:
+        rfc: { type: string }
+        razon_social: { type: string, maxLength: 254 }
+        regimen_fiscal: { type: string, example: '601' }
+        codigo_postal: { type: string, pattern: '^[0-9]{5}$' }
+        uso_cfdi: { type: string, example: G03 }
+        correo: { type: string, nullable: true, description: Correo para enviar el CFDI }
 
     AsignacionPlan:
       type: object

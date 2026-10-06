@@ -12,6 +12,7 @@ import type {
   PagoInput,
   PagoSuscripcion,
   Plan,
+  Vencimiento,
 } from "@/components/suscripcion/tipos";
 
 const BASE = "/api/v1/suscripcion";
@@ -117,6 +118,37 @@ export function useRegistrarPago(usuarioId: string) {
         method: "POST",
         body: JSON.stringify(pago),
       }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: [...CLAVE, "pagos", usuarioId] }),
+    // El pago extiende la vigencia: se refrescan pagos, historial, cuentas y vencimientos.
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: CLAVE }),
+  });
+}
+
+export function useGuardarMisDatosFiscales() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (datos: DatosFiscalesCliente) =>
+      apiFetch<DatosFiscalesCliente>(`${BASE}/datos-fiscales`, { method: "PUT", body: JSON.stringify(datos) }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: [...CLAVE, "datos-fiscales"] }),
+  });
+}
+
+export function useAnularPago(usuarioId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ pagoId, motivo }: { pagoId: string; motivo: string }) =>
+      apiFetch<{ vigencia_revertida: boolean }>(`${BASE}/admin/cuentas/${usuarioId}/pagos/${pagoId}/anular`, {
+        method: "POST",
+        body: JSON.stringify({ motivo }),
+      }),
+    // Anular puede revertir la vigencia: se refrescan pagos, historial y cuentas.
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: CLAVE }),
+  });
+}
+
+export function useVencimientos(habilitado: boolean) {
+  return useQuery({
+    queryKey: [...CLAVE, "vencimientos"],
+    queryFn: () => apiFetch<Vencimiento[]>(`${BASE}/admin/vencimientos`),
+    enabled: habilitado,
   });
 }

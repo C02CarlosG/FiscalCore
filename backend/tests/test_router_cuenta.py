@@ -281,3 +281,18 @@ def test_primer_vinculo_como_contador_revisa_el_plan(monkeypatch):
     ejecutado = _base_falsa(monkeypatch, [], rol_plataforma="admin", aceptada={**PENDIENTE, "rol": "contador"})
     assert client.post(f"{APROBAR}/aprobar").status_code == 204
     assert ("verificar_alta_rfc", (OTRO, True)) in ejecutado
+
+
+
+def test_catalogo_sin_plan_por_defecto_al_aprobar_responde_409(monkeypatch):
+    from backend import suscripcion
+
+    ejecutado = _base_falsa(monkeypatch, [_miembro(YO, "administrador", 1)], aceptada=PENDIENTE)
+
+    def _sin_defecto(cur, uid, de_tercero=False):
+        raise suscripcion.ConfiguracionInvalida("No hay un plan marcado como por defecto")
+
+    monkeypatch.setattr(cuenta.suscripcion_datos, "verificar_alta_rfc", _sin_defecto)
+    r = client.post(f"{APROBAR}/aprobar")
+    assert r.status_code == 409 and "plan marcado como por defecto" in r.json()["detail"]
+    assert _escrituras(ejecutado) == []

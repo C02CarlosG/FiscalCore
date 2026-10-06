@@ -75,6 +75,8 @@ export interface DatosFiscalesCliente {
   regimen_fiscal: string;
   codigo_postal: string;
   uso_cfdi: string;
+  /** Correo para enviar el CFDI (opcional). */
+  correo: string | null;
   actualizado?: string;
 }
 
@@ -86,13 +88,41 @@ export interface PagoSuscripcion {
   monto: string;
   referencia: string | null;
   folio_cfdi: string | null;
+  uuid_cfdi: string | null;
+  /** Meses que extendió la vigencia. */
+  meses: number;
+  vigente_hasta_nueva: string;
+  estado: "activo" | "anulado";
   /** Solo en la vista del administrador. */
   registrado_por?: string | null;
+  motivo_anulacion?: string | null;
 }
 
 export interface PagoInput {
   fecha: string;
   monto: string;
+  meses: number;
   referencia: string | null;
   folio_cfdi: string | null;
+  uuid_cfdi: string | null;
+}
+
+/** Cuenta activa por vencer o vencida (lista del administrador). */
+export interface Vencimiento {
+  usuario_id: string;
+  email: string;
+  nombre: string | null;
+  plan_clave: string;
+  plan_nombre: string;
+  vigente_hasta: string;
+  /** Negativo si ya venció. */
+  dias_para_vencer: number;
+}
+
+/** Texto del aviso de vencimiento: «vence hoy», «vence en N días» o «venció hace N días». */
+export function textoVencimiento(dias: number): string {
+  if (dias === 0) return "vence hoy";
+  const n = Math.abs(dias);
+  const unidad = n === 1 ? "día" : "días";
+  return dias > 0 ? `vence en ${n} ${unidad}` : `venció hace ${n} ${unidad}`;
 }
