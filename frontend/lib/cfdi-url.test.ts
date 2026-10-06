@@ -12,6 +12,7 @@ describe("leerEstado", () => {
       metodo: "todos",
       pago: "todos",
       q: "",
+      etiqueta: "",
       filtros: "",
       orden: "fecha_emision",
       dir: "asc",
@@ -134,5 +135,23 @@ describe("consultaApi", () => {
 
     expect(consulta.has("q")).toBe(false);
     expect(consulta.has("filtros")).toBe(false);
+  });
+});
+
+describe("etiqueta", () => {
+  const id = "11111111-1111-4111-8111-111111111111";
+
+  it("se lee solo si tiene forma de UUID y viaja a la API", () => {
+    expect(leerEstado(params(`etiqueta=${id}`), "2026-09").etiqueta).toBe(id);
+    expect(leerEstado(params("etiqueta=x"), "2026-09").etiqueta).toBe("");
+    expect(consultaApi(leerEstado(params(`etiqueta=${id}`), "2026-09"), "emitidos").get("etiqueta")).toBe(id);
+    expect(consultaApi(leerEstado(params(), "2026-09"), "emitidos").has("etiqueta")).toBe(false);
+  });
+
+  it("un cambio de etiqueta regresa a la página 1 y su valor por defecto se quita de la URL", () => {
+    const con = escribirEstado(params("pagina=3"), { etiqueta: id });
+    expect(con.get("etiqueta")).toBe(id);
+    expect(con.has("pagina")).toBe(false);
+    expect(escribirEstado(con, { etiqueta: "" }).has("etiqueta")).toBe(false);
   });
 });

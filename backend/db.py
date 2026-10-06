@@ -239,6 +239,10 @@ def init_db() -> None:
         # ya no colapsan) y forma de pago de cada pago
         _run_sql_file("041_pagos_nodo_forma_pago.sql")
 
+        # 042 y 043 son idempotentes — etiquetas, comentarios y evidencias por CFDI (F3.6)
+        _run_sql_file("042_etiquetas_comentarios.sql")
+        _run_sql_file("043_cfdi_evidencias.sql")
+
         # 050 es idempotente — ajustes manuales del IVA por flujo (no considerar / reasignar periodo)
         _run_sql_file("050_iva_ajustes.sql")
 

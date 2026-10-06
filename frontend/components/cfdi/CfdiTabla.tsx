@@ -48,6 +48,8 @@ export function CfdiTabla({
   onReintentar,
   onLimpiar,
   onVer,
+  seleccion,
+  onSeleccion,
 }: {
   empresaId: string;
   columnas: CfdiColumna[] | undefined;
@@ -67,6 +69,9 @@ export function CfdiTabla({
   onReintentar: () => void;
   onLimpiar: () => void;
   onVer: (uuid: string) => void;
+  /** UUID de las filas marcadas para una acción en lote. */
+  seleccion?: ReadonlySet<string>;
+  onSeleccion?: (uuids: ReadonlySet<string>) => void;
 }) {
   // Filas con los conceptos desplegados (por uuid; se conserva al paginar y volver).
   const [abiertas, setAbiertas] = useState<ReadonlySet<string>>(new Set());
@@ -95,6 +100,22 @@ export function CfdiTabla({
   }
 
   const visibles = columnasVisibles(columnas, preferencia);
+  const seleccionable = Boolean(seleccion && onSeleccion);
+  const uuidsPagina = datos.items.map((f) => String(f.uuid));
+  const marcadas = uuidsPagina.filter((u) => seleccion?.has(u)).length;
+  const alternarSeleccion = (uuid: string) => {
+    const siguientes = new Set(seleccion);
+    if (!siguientes.delete(uuid)) siguientes.add(uuid);
+    onSeleccion?.(siguientes);
+  };
+  const alternarPagina = () => {
+    const siguientes = new Set(seleccion);
+    for (const u of uuidsPagina) {
+      if (marcadas === uuidsPagina.length) siguientes.delete(u);
+      else siguientes.add(u);
+    }
+    onSeleccion?.(siguientes);
+  };
   const totalPaginas = Math.max(1, Math.ceil(datos.total / porPagina));
   const desde = (pagina - 1) * porPagina + 1;
   const hasta = Math.min(datos.total, pagina * porPagina);
@@ -107,6 +128,20 @@ export function CfdiTabla({
         <Table aria-busy={cargando}>
           <TableHeader>
             <TableRow>
+              {seleccionable && (
+                <TableHead className="w-0">
+                  <input
+                    type="checkbox"
+                    aria-label="Seleccionar la página"
+                    className="h-4 w-4"
+                    checked={marcadas > 0 && marcadas === uuidsPagina.length}
+                    ref={(el) => {
+                      if (el) el.indeterminate = marcadas > 0 && marcadas < uuidsPagina.length;
+                    }}
+                    onChange={alternarPagina}
+                  />
+                </TableHead>
+              )}
               <TableHead className="w-0">
                 <span className="sr-only">Acciones</span>
               </TableHead>
@@ -145,7 +180,18 @@ export function CfdiTabla({
               const abierta = abiertas.has(uuid);
               return (
                 <Fragment key={uuid}>
-                  <TableRow>
+                  <TableRow data-state={seleccion?.has(uuid) ? "selected" : undefined}>
+                    {seleccionable && (
+                      <TableCell className="py-1">
+                        <input
+                          type="checkbox"
+                          aria-label={`Seleccionar CFDI ${uuid}`}
+                          className="h-4 w-4"
+                          checked={seleccion!.has(uuid)}
+                          onChange={() => alternarSeleccion(uuid)}
+                        />
+                      </TableCell>
+                    )}
                     <TableCell className="whitespace-nowrap py-1">
                       <div className="flex items-center gap-0.5">
                         <Button
@@ -176,13 +222,13 @@ export function CfdiTabla({
                         key={columna.clave}
                         className={`whitespace-nowrap ${alineadaALaDerecha(columna) ? "text-right font-mono tabular-nums" : ""}`}
                       >
-                        <CfdiCelda columna={columna} fila={fila} />
+                        <CfdiCelda columna={columna} fila={fila} onAbrir={() => onVer(uuid)} />
                       </TableCell>
                     ))}
                   </TableRow>
                   {abierta && (
                     <TableRow className="bg-muted/30 hover:bg-muted/30">
-                      <TableCell colSpan={visibles.length + 1} className="p-3">
+                      <TableCell colSpan={visibles.length + (seleccionable ? 2 : 1)} className="p-3">
                         <CfdiConceptos empresaId={empresaId} uuid={uuid} columnas={columnasConcepto} />
                       </TableCell>
                     </TableRow>

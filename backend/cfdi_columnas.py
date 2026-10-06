@@ -76,6 +76,24 @@ def laterales(tipo: str) -> str:
     return {"N": LATERALES_NOMINA, "P": LATERALES_PAGO}.get(tipo, LATERALES)
 
 
+# Anotaciones del usuario (F3.6): etiquetas, comentarios y evidencias de cada CFDI. Son
+# subconsultas escalares por fila, así que no necesitan laterales y valen para todo tipo.
+_SQL_ETIQUETAS = """(SELECT COALESCE(jsonb_agg(jsonb_build_object('id', e.id, 'nombre', e.nombre, 'color', e.color)
+                                               ORDER BY lower(e.nombre)), '[]'::jsonb)
+        FROM cfdi_etiquetas ce JOIN etiquetas e ON e.id = ce.etiqueta_id
+        WHERE ce.cfdi_id = c.id)"""
+
+
+def _anotaciones() -> list[Columna]:
+    return [
+        Columna("etiquetas", "Etiquetas", "lista", _SQL_ETIQUETAS, visible=True, simple=False),
+        Columna("comentarios", "Comentarios", "numero",
+                "(SELECT COUNT(*) FROM cfdi_comentarios k WHERE k.cfdi_id = c.id)", visible=True, simple=False),
+        Columna("evidencias", "Evidencias", "numero",
+                "(SELECT COUNT(*) FROM cfdi_evidencias v WHERE v.cfdi_id = c.id)", visible=True, simple=False),
+    ]
+
+
 # Filtros que ya viven en la barra del listado (pestaña de tipo, estado, método).
 _FILTROS_DE_BARRA = {"tipo_comprobante", "estado", "metodo_pago"}
 
@@ -172,6 +190,7 @@ def _cierre() -> list[Columna]:
         Columna("fecha_timbrado", "Fecha timbrado", "fecha_hora", "c.fecha_timbrado"),
         Columna("no_certificado", "No. certificado", "texto", "c.no_certificado"),
         Columna("lugar_expedicion", "Lugar de expedición", "texto", "c.lugar_expedicion"),
+        *_anotaciones(),
     ]
 
 
@@ -306,6 +325,7 @@ def _columnas_comprobante(direccion: str) -> list[Columna]:
         Columna("estado", "Estado", "catalogo", "c.estado", visible=True,
                 opciones=("vigente", "cancelado", "sustituido")),
         Columna("estado_pago", "Estado de pago", "texto", "c.estado_pago"),
+        *_anotaciones(),
     ]
 
 

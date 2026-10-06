@@ -264,3 +264,54 @@ describe("CfdiTabla", () => {
     });
   });
 });
+
+describe("CfdiTabla — etiquetas y selección en lote", () => {
+  const etiqueta = { id: "t1", nombre: "Revisar", color: "#ef4444" };
+  const colsNotas = [
+    ...columnas,
+    col("etiquetas", "Etiquetas", "lista", { ordenable: false }),
+    col("comentarios", "Comentarios", "numero", { ordenable: false }),
+  ];
+
+  function conSeleccion(items: CfdiFila[], seleccion: string[] = []) {
+    const onSeleccion = vi.fn();
+    const onVer = vi.fn();
+    vi.mocked(useCfdiDetalle).mockReturnValue({ data: undefined, isError: false, refetch: vi.fn() } as never);
+    render(
+      <CfdiTabla
+        empresaId="e1" columnas={colsNotas} columnasConcepto={columnasConcepto} datos={datos(items)}
+        cargando={false} error={false} orden="fecha_emision" dir="asc" pagina={1} porPagina={30}
+        onOrdenar={vi.fn()} onPagina={vi.fn()} onPorPagina={vi.fn()} onReintentar={vi.fn()} onLimpiar={vi.fn()}
+        onVer={onVer} seleccion={new Set(seleccion)} onSeleccion={onSeleccion}
+      />,
+    );
+    return { onSeleccion, onVer };
+  }
+
+  it("muestra las etiquetas como chips y «Agregar» donde no hay; abre el visor", async () => {
+    const { onVer } = conSeleccion([fila({ etiquetas: [etiqueta], comentarios: 2 }), fila({ uuid: "U2", etiquetas: [], comentarios: 0 })]);
+
+    expect(screen.getByText("Revisar")).toBeInTheDocument();
+    await userEvent.setup().click(screen.getAllByRole("button", { name: "Agregar" })[0]);
+    expect(onVer).toHaveBeenCalledWith("U2");
+    expect(screen.getByRole("button", { name: /Comentarios: 2/ })).toBeInTheDocument();
+  });
+
+  it("marca una fila y la página completa", async () => {
+    const user = userEvent.setup();
+    const { onSeleccion } = conSeleccion([fila(), fila({ uuid: "U2" })], ["U1"]);
+
+    await user.click(screen.getByRole("checkbox", { name: "Seleccionar CFDI U2" }));
+    expect([...onSeleccion.mock.calls[0][0]].sort()).toEqual(["U1", "U2"]);
+
+    await user.click(screen.getByRole("checkbox", { name: "Seleccionar la página" }));
+    expect([...onSeleccion.mock.calls[1][0]].sort()).toEqual(["U1", "U2"]);
+  });
+
+  it("con toda la página marcada, el encabezado la desmarca", async () => {
+    const { onSeleccion } = conSeleccion([fila(), fila({ uuid: "U2" })], ["U1", "U2"]);
+
+    await userEvent.setup().click(screen.getByRole("checkbox", { name: "Seleccionar la página" }));
+    expect([...onSeleccion.mock.calls[0][0]]).toEqual([]);
+  });
+});

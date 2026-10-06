@@ -3,10 +3,13 @@
 import { useEffect, useState } from "react";
 import { Search } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useEtiquetas } from "@/hooks/useNotasCfdi";
 import { PeriodSelector } from "@/components/shared/PeriodSelector";
 import type { CfdiEstadoUrl } from "@/lib/cfdi-url";
 
 const ESPERA_BUSQUEDA_MS = 300;
+const TODAS = "todas";
 
 function Segmentado<T extends string>({
   etiqueta,
@@ -43,15 +46,18 @@ function Segmentado<T extends string>({
 
 /** Barra de filtros del listado. No guarda estado de filtros: cada cambio sube como parche. */
 export function CfdiToolbar({
+  empresaId,
   estado,
   periodosConDatos,
   onCambio,
 }: {
+  empresaId: string;
   estado: CfdiEstadoUrl;
   periodosConDatos: string[];
   onCambio: (parche: Partial<CfdiEstadoUrl>) => void;
 }) {
   const [texto, setTexto] = useState(estado.q);
+  const etiquetas = useEtiquetas(empresaId);
 
   // La búsqueda de la URL manda (p. ej. al limpiar los filtros).
   useEffect(() => setTexto(estado.q), [estado.q]);
@@ -84,6 +90,21 @@ export function CfdiToolbar({
           className="h-10 bg-background pl-8"
         />
       </div>
+
+      <Select
+        value={estado.etiqueta || TODAS}
+        onValueChange={(valor) => onCambio({ etiqueta: valor === TODAS ? "" : valor })}
+      >
+        <SelectTrigger aria-label="Etiqueta" className="h-10 w-44 bg-background">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value={TODAS}>Todas las etiquetas</SelectItem>
+          {(etiquetas.data ?? []).map((e) => (
+            <SelectItem key={e.id} value={e.id}>{e.nombre}</SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
 
       <Segmentado
         etiqueta="Estado"

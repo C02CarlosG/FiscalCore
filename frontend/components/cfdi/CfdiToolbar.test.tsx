@@ -2,12 +2,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { CfdiToolbar } from "./CfdiToolbar";
+
+vi.mock("@/hooks/useNotasCfdi", () => ({
+  useEtiquetas: () => ({ data: [{ id: "11111111-1111-4111-8111-111111111111", nombre: "Revisar", color: "#ff0000", cfdis: 2 }] }),
+}));
 import { leerEstado } from "@/lib/cfdi-url";
 
 const estado = (texto = "") => leerEstado(new URLSearchParams(texto), "2026-09");
 
 function renderBarra(texto = "", onCambio = vi.fn()) {
-  render(<CfdiToolbar estado={estado(texto)} periodosConDatos={["2026-09"]} onCambio={onCambio} />);
+  render(<CfdiToolbar empresaId="e1" estado={estado(texto)} periodosConDatos={["2026-09"]} onCambio={onCambio} />);
   return onCambio;
 }
 

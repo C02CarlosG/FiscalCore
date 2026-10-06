@@ -57,6 +57,7 @@ async def exportar_cfdi(
     metodo: str = Query("todos"),
     pago: str = Query("todos"),
     q: Optional[str] = Query(None),
+    etiqueta: Optional[str] = Query(None, description="Id de una etiqueta de la empresa"),
     filtros: Optional[str] = Query(None, description="JSON: lista de {campo, op, valor}"),
     orden: str = Query("fecha_emision"),
     direccion_orden: str = Query("asc", alias="dir"),
@@ -67,7 +68,7 @@ async def exportar_cfdi(
     pedidas en su orden y una hoja de totales. Máximo 50,000 filas."""
     validar_acceso_empresa(empresa_id, current_user)
     consulta = _consulta(direccion=direccion, periodo=periodo, tipo=tipo, estado=estado,
-                         metodo=metodo, pago=pago, q=q, filtros=filtros, orden=orden, dir=direccion_orden)
+                         metodo=metodo, pago=pago, q=q, etiqueta=etiqueta, filtros=filtros, orden=orden, dir=direccion_orden)
     claves = [k.strip() for k in columnas.split(",") if k.strip()] if columnas else None
     empresa = empresa_or_404(empresa_id)
     try:
@@ -99,13 +100,14 @@ async def resumen_cfdi(
     metodo: str = Query("todos"),
     pago: str = Query("todos"),
     q: Optional[str] = Query(None),
+    etiqueta: Optional[str] = Query(None, description="Id de una etiqueta de la empresa"),
     filtros: Optional[str] = Query(None, description="JSON: lista de {campo, op, valor}"),
     current_user: dict = Depends(get_current_user),
 ):
     """Conteos por tipo de comprobante y totales (periodo y acumulado del ejercicio)."""
     validar_acceso_empresa(empresa_id, current_user)
     consulta = _consulta(direccion=direccion, periodo=periodo, tipo=tipo, estado=estado,
-                         metodo=metodo, pago=pago, q=q, filtros=filtros)
+                         metodo=metodo, pago=pago, q=q, etiqueta=etiqueta, filtros=filtros)
     empresa = empresa_or_404(empresa_id)
     return cfdi_listado.resumen(empresa_id, empresa["rfc"], consulta)
 
@@ -120,6 +122,7 @@ async def listar_cfdi(
     metodo: str = Query("todos"),
     pago: str = Query("todos"),
     q: Optional[str] = Query(None),
+    etiqueta: Optional[str] = Query(None, description="Id de una etiqueta de la empresa"),
     filtros: Optional[str] = Query(None, description="JSON: lista de {campo, op, valor}"),
     orden: str = Query("fecha_emision"),
     direccion_orden: str = Query("asc", alias="dir"),
@@ -130,7 +133,7 @@ async def listar_cfdi(
     """Una página del listado de CFDI con todas las columnas del catálogo."""
     validar_acceso_empresa(empresa_id, current_user)
     consulta = _consulta(direccion=direccion, periodo=periodo, tipo=tipo, estado=estado,
-                         metodo=metodo, pago=pago, q=q, filtros=filtros, orden=orden,
+                         metodo=metodo, pago=pago, q=q, etiqueta=etiqueta, filtros=filtros, orden=orden,
                          dir=direccion_orden, pagina=pagina, por_pagina=por_pagina)
     empresa = empresa_or_404(empresa_id)
     return cfdi_listado.listar(empresa_id, empresa["rfc"], consulta)
