@@ -32,6 +32,7 @@ from .routers import isr_flujo as isr_flujo_router
 from .routers import diot as diot_router
 from .routers import proveedores as proveedores_router
 from .routers import validaciones_cfdi
+from .routers import suscripcion
 
 logging.basicConfig(
     level=logging.INFO,
@@ -88,6 +89,7 @@ app.include_router(isr_flujo_router.router)
 app.include_router(diot_router.router)
 app.include_router(proveedores_router.router)
 app.include_router(validaciones_cfdi.router)
+app.include_router(suscripcion.router)
 
 
 @app.on_event("startup")

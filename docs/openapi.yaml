@@ -25,6 +25,8 @@ tags:
     description: Constancia de situación fiscal y opinión de cumplimiento por empresa (F8)
   - name: Validaciones de CFDI
     description: CFDI con posibles situaciones incorrectas, por periodo y acumulado (V1)
+  - name: Suscripción
+    description: Planes, límite de RFC y asignación manual (M7.1)
   - name: Preferencias
     description: Orden y visibilidad de columnas de las tablas, por usuario
   - name: Sistema
@@ -3464,6 +3466,18 @@ paths:
       responses:
         '200':
           description: Tarjetas por dirección
+  /api/v1/suscripcion:
+    get:
+      operationId: miSuscripcion
+      tags: [Suscripción]
+      summary: Plan efectivo de la cuenta, uso de RFC y si puede agregar otro
+      description: |
+        Sin suscripción vigente (no asignada, suspendida, cancelada o vencida) aplica el plan
+        por defecto; `motivo` dice por qué. El uso cuenta las empresas activas que la cuenta
+        administra. El administrador de la plataforma no tiene límite. M7.1, carril D.
+      responses:
+        '200':
+          description: Suscripción de la cuenta
           content:
             application/json:
               schema:
@@ -3516,6 +3530,56 @@ paths:
                         forma_pago: { type: string, nullable: true }
                         metodo_pago: { type: string, nullable: true }
                         tipo_comprobante: { type: string }
+                  plan: { $ref: '#/components/schemas/Plan' }
+                  estado: { type: string, nullable: true, enum: [activa, suspendida, cancelada, null] }
+                  vigente_hasta: { type: string, format: date, nullable: true }
+                  motivo: { type: string, nullable: true, enum: [sin_suscripcion, suspendida, cancelada, vencida, plan_no_disponible, null] }
+                  uso_rfc: { type: integer }
+                  puede_agregar_rfc: { type: boolean }
+                  es_admin_plataforma: { type: boolean }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /api/v1/suscripcion/planes:
+    get:
+      operationId: planesActivos
+      tags: [Suscripción]
+      summary: Planes activos del catálogo
+      responses:
+        '200':
+          description: Planes
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/Plan' } }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /api/v1/suscripcion/admin/cuentas:
+    get:
+      operationId: cuentasConSuscripcion
+      tags: [Suscripción]
+      summary: Cuentas con su plan y uso (solo administrador de la plataforma)
+      parameters:
+        - { name: q, in: query, required: false, schema: { type: string, maxLength: 100 }, description: Busca en correo o nombre }
+      responses:
+        '200':
+          description: Hasta 200 cuentas
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    usuario_id: { type: string, format: uuid }
+                    email: { type: string }
+                    nombre: { type: string, nullable: true }
+                    es_admin_plataforma: { type: boolean }
+                    plan_clave: { type: string, nullable: true }
+                    estado: { type: string, nullable: true }
+                    vigente_hasta: { type: string, format: date, nullable: true }
+                    notas: { type: string, nullable: true }
+                    uso_rfc: { type: integer }
         '401':
           $ref: '#/components/responses/UnauthorizedError'
         '403':
@@ -3557,12 +3621,70 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ConfiguracionValidacionesCfdi' }
+
+  /api/v1/suscripcion/admin/cuentas/{usuario_id}:
+    put:
+      operationId: asignarSuscripcion
+      tags: [Suscripción]
+      summary: Asignar plan a una cuenta (pago registrado aparte)
+      parameters:
+        - { name: usuario_id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [plan_clave]
+              properties:
+                plan_clave: { type: string }
+                estado: { type: string, enum: [activa, suspendida, cancelada], default: activa }
+                vigente_hasta: { type: string, format: date, nullable: true }
+                notas: { type: string, nullable: true, maxLength: 1000 }
+      responses:
+        '200':
+          description: Suscripción resultante de la cuenta (mismo formato que GET /suscripcion)
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '422':
+          $ref: '#/components/responses/UnprocessableError'
+
+  /api/v1/suscripcion/admin/planes/{clave}:
+    put:
+      operationId: editarPlan
+      tags: [Suscripción]
+      summary: Editar un plan (o crearlo si la clave no existe)
+      parameters:
+        - { name: clave, in: path, required: true, schema: { type: string, pattern: '^[a-z][a-z0-9_]{1,29}$' } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [nombre, precio_mensual]
+              properties:
+                nombre: { type: string, maxLength: 80 }
+                precio_mensual: { type: string, description: MXN sin IVA }
+                max_rfc: { type: integer, nullable: true, description: null = ilimitado }
+                activo: { type: boolean, default: true }
+      responses:
+        '200':
+          description: Plan guardado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Plan' }
         '401':
           $ref: '#/components/responses/UnauthorizedError'
         '403':
           $ref: '#/components/responses/ForbiddenError'
         '422':
           description: Clave de validación desconocida o umbral fuera de 0 a 2,000
+          $ref: '#/components/responses/UnprocessableError'
 
 # ============================================================
 # COMPONENTS
@@ -4635,3 +4757,12 @@ components:
         activa: { type: boolean }
         periodo: { type: integer, nullable: true }
         acumulado: { type: integer, nullable: true }
+    Plan:
+      type: object
+      properties:
+        clave: { type: string }
+        nombre: { type: string }
+        precio_mensual: { type: string, description: MXN sin IVA, dos decimales }
+        max_rfc: { type: integer, nullable: true, description: null = ilimitado }
+        activo: { type: boolean }
+        por_defecto: { type: boolean }
