@@ -8,8 +8,11 @@ from backend import validaciones_cfdi as v
 
 
 def test_catalogo_con_cuatro_validaciones_y_sus_direcciones():
-    assert [x.clave for x in v.CATALOGO] == ["pue_forma_99", "pue_con_rep", "egreso_sin_relacion", "no_bancarizado"]
+    assert [x.clave for x in v.CATALOGO] == ["pue_forma_99", "pue_con_rep", "egreso_sin_relacion", "no_bancarizado",
+                                            "gas_efectivo"]
     assert v.POR_CLAVE["no_bancarizado"].direcciones == ("recibidos",)
+    assert v.POR_CLAVE["gas_efectivo"].direcciones == ("recibidos",)
+    assert [x.tipo for x in v.CATALOGO] == ["exclusion"] * 4 + ["advertencia"]
     assert v.POR_CLAVE["pue_forma_99"].direcciones == ("emitidos", "recibidos")
     assert [x.clave for x in v.de_direccion("emitidos")] == ["pue_forma_99", "pue_con_rep", "egreso_sin_relacion"]
 

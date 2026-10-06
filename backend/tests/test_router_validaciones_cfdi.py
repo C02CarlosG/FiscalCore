@@ -55,7 +55,7 @@ def test_resumen_con_tarjeta_inactiva_en_null(monkeypatch, config):
     def _contar(empresa_id, rfc, direccion, periodo, c):
         llamadas.append((direccion, periodo))
         return {"pue_forma_99": (1, 2), "egreso_sin_relacion": (0, 3)} if direccion == "emitidos" else {
-            "pue_forma_99": (0, 0), "egreso_sin_relacion": (0, 0), "no_bancarizado": (4, 9)}
+            "pue_forma_99": (0, 0), "egreso_sin_relacion": (0, 0), "no_bancarizado": (4, 9), "gas_efectivo": (1, 2)}
 
     monkeypatch.setattr(datos, "contar", _contar)
     r = client.get(BASE, params={"periodo": "2026-03"})
@@ -68,7 +68,8 @@ def test_resumen_con_tarjeta_inactiva_en_null(monkeypatch, config):
     assert (emitidos["pue_forma_99"]["periodo"], emitidos["pue_forma_99"]["acumulado"]) == (1, 2)
     assert (emitidos["pue_con_rep"]["activa"], emitidos["pue_con_rep"]["periodo"]) == (False, None)
     assert emitidos["pue_forma_99"]["titulo"]
-    assert [t["clave"] for t in cuerpo["recibidos"]][-1] == "no_bancarizado"
+    assert [(t["clave"], t["tipo"]) for t in cuerpo["recibidos"]][-2:] == [
+        ("no_bancarizado", "exclusion"), ("gas_efectivo", "advertencia")]
 
 
 @pytest.mark.parametrize("params", [

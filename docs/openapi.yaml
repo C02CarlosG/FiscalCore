@@ -3460,8 +3460,9 @@ paths:
       summary: Conteo del periodo y del acumulado por validación, en emitidos y recibidos
       description: |
         Solo CFDI vigentes. Validaciones: pue_forma_99, pue_con_rep, egreso_sin_relacion
-        (emitidos y recibidos) y no_bancarizado (solo recibidos). Una validación
-        inactiva trae conteos null. V1, carril D.
+        (emitidos y recibidos), no_bancarizado y gas_efectivo (solo recibidos; esta es
+        una advertencia, `tipo: advertencia`). Una validación inactiva trae conteos null.
+        V1, carril D.
       parameters:
         - $ref: '#/components/parameters/EmpresaId'
         - { name: periodo, in: query, required: true, schema: { type: string, pattern: '^\d{4}-(0[1-9]|1[0-2])$' } }
@@ -3505,7 +3506,7 @@ paths:
         - $ref: '#/components/parameters/EmpresaId'
         - { name: periodo, in: query, required: true, schema: { type: string } }
         - { name: direccion, in: query, required: true, schema: { type: string, enum: [emitidos, recibidos] } }
-        - { name: validacion, in: query, required: true, schema: { type: string, enum: [pue_forma_99, pue_con_rep, egreso_sin_relacion, no_bancarizado] } }
+        - { name: validacion, in: query, required: true, schema: { type: string, enum: [pue_forma_99, pue_con_rep, egreso_sin_relacion, no_bancarizado, gas_efectivo] } }
         - { name: alcance, in: query, required: false, schema: { type: string, enum: [periodo, acumulado], default: periodo } }
       responses:
         '200':
@@ -5031,7 +5032,7 @@ components:
       properties:
         inactivas:
           type: array
-          items: { type: string, enum: [pue_forma_99, pue_con_rep, egreso_sin_relacion, no_bancarizado] }
+          items: { type: string, enum: [pue_forma_99, pue_con_rep, egreso_sin_relacion, no_bancarizado, gas_efectivo] }
         umbral_efectivo:
           type: string
           description: Importe en pesos con dos decimales, de 0 a 2,000; por defecto "2000.00" (art. 27-III LISR fija $2,000, solo se puede bajar).
@@ -5042,6 +5043,10 @@ components:
         clave: { type: string }
         titulo: { type: string }
         descripcion: { type: string }
+        tipo:
+          type: string
+          enum: [exclusion, advertencia]
+          description: advertencia = depende de un dato que el CFDI no trae (revisar, no excluir)
         activa: { type: boolean }
         periodo: { type: integer, nullable: true }
         acumulado: { type: integer, nullable: true }

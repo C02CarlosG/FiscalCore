@@ -26,7 +26,14 @@ function Tarjeta({ tarjeta, onAbrir }: { tarjeta: TarjetaValidacion; onAbrir: ()
           : "border-border bg-card hover:border-primary/40"
       }`}
     >
-      <span className="text-sm font-semibold">{tarjeta.titulo}</span>
+      <span className="text-sm font-semibold">
+        {tarjeta.titulo}
+        {tarjeta.tipo === "advertencia" && (
+          <span className="ml-2 rounded border border-border px-1.5 py-0.5 text-[10px] font-medium uppercase text-muted-foreground">
+            Advertencia
+          </span>
+        )}
+      </span>
       {tarjeta.activa ? (
         <span>
           <span className="block font-display text-3xl font-bold">{ENTERO.format(tarjeta.periodo ?? 0)}</span>

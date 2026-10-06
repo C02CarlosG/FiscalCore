@@ -50,7 +50,7 @@ async def resumen(
         conteos = datos.contar(str(empresa_id), empresa["rfc"], direccion, periodo, config)
         resultado[direccion] = [
             {
-                "clave": x.clave, "titulo": x.titulo, "descripcion": x.descripcion,
+                "clave": x.clave, "titulo": x.titulo, "descripcion": x.descripcion, "tipo": x.tipo,
                 "activa": config.activa(x.clave),
                 "periodo": conteos.get(x.clave, (None, None))[0],
                 "acumulado": conteos.get(x.clave, (None, None))[1],
