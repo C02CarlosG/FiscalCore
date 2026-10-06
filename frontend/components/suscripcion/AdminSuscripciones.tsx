@@ -6,10 +6,50 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ErrorState } from "@/components/shared/ErrorState";
-import { useAsignarPlan, useCuentas, useEditarPlan, usePlanes } from "@/hooks/useSuscripcion";
+import { useAsignarPlan, useCuentas, useEditarPlan, usePlanes, useVencimientos } from "@/hooks/useSuscripcion";
+import { formatearFecha } from "@/lib/formato";
 import { ApiError } from "@/lib/api-client";
 import { DetalleCuenta } from "./DetalleCuenta";
-import type { CuentaSuscripcion, EstadoSuscripcion, Plan } from "./tipos";
+import { ETIQUETA_ESTADO, textoVencimiento, type CuentaSuscripcion, type EstadoSuscripcion, type Plan } from "./tipos";
+
+const mayuscula = (texto: string) => texto.charAt(0).toUpperCase() + texto.slice(1);
+
+/** Cuentas activas que vencen en 15 días o menos, o ya vencidas (avisos solo en la interfaz, D10). */
+function Vencimientos() {
+  const consulta = useVencimientos(true);
+  if (consulta.isError) {
+    return <p role="alert" className="text-sm text-destructive">No se pudieron consultar los vencimientos.</p>;
+  }
+  if (!consulta.data) return null;
+  return (
+    <div className="space-y-2">
+      <h3 className="text-sm font-semibold">Por vencer y vencidas</h3>
+      {consulta.data.length === 0 ? (
+        <p className="text-sm text-muted-foreground">Ninguna cuenta vence en los próximos 15 días.</p>
+      ) : (
+        <ul aria-label="Cuentas por vencer o vencidas" className="divide-y divide-border rounded-md border border-border">
+          {consulta.data.map((v) => (
+            <li key={v.usuario_id} className="flex flex-wrap items-center justify-between gap-2 p-3 text-sm">
+              <span className="min-w-0">
+                <span className="block truncate font-medium">{v.email}</span>
+                <span className="block text-xs text-muted-foreground">
+                  {v.plan_nombre} · vigente hasta {formatearFecha(v.vigente_hasta)}
+                </span>
+              </span>
+              <span className={`rounded border px-1.5 py-0.5 text-xs ${
+                v.dias_para_vencer < 0
+                  ? "border-status-error/40 text-status-error"
+                  : "border-status-pendiente/40 bg-status-pendiente-soft text-status-pendiente"
+              }`}>
+                {mayuscula(textoVencimiento(v.dias_para_vencer))}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
 
 const CAMPO = "h-9 rounded-md border border-input bg-background px-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring";
 const mensajeDe = (err: unknown, otro: string) => (err instanceof ApiError ? err.message : otro);
@@ -44,7 +84,7 @@ function FilaCuenta({ cuenta, planes, onError }: { cuenta: CuentaSuscripcion; pl
         </span>
         {cuenta.dias_para_vencer !== null && (
           <span className="mt-1 inline-block rounded border border-status-pendiente/40 bg-status-pendiente-soft px-1.5 py-0.5 text-xs text-status-pendiente">
-            {cuenta.dias_para_vencer === 0 ? "Vence hoy" : `Vence en ${cuenta.dias_para_vencer} días`}
+            {mayuscula(textoVencimiento(cuenta.dias_para_vencer))}
           </span>
         )}
       </td>
@@ -58,9 +98,9 @@ function FilaCuenta({ cuenta, planes, onError }: { cuenta: CuentaSuscripcion; pl
       <td className="px-3 py-2">
         <select aria-label={`Estado de ${cuenta.email}`} className={CAMPO} value={estado}
                 onChange={(e) => setEstado(e.target.value as EstadoSuscripcion)}>
-          <option value="activa">Activa</option>
-          <option value="suspendida">Suspendida</option>
-          <option value="cancelada">Cancelada</option>
+          {(Object.keys(ETIQUETA_ESTADO) as EstadoSuscripcion[]).map((e) => (
+            <option key={e} value={e}>{ETIQUETA_ESTADO[e]}</option>
+          ))}
         </select>
       </td>
       <td className="px-3 py-2">
@@ -162,6 +202,7 @@ export function AdminSuscripciones() {
         <CardDescription>Asigna el plan de cada cuenta después de registrar su pago y ajusta el catálogo.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-6 px-5 pb-5 sm:px-6">
+        <Vencimientos />
         {error && (
           <p role="alert" className="text-sm text-destructive">
             {error}

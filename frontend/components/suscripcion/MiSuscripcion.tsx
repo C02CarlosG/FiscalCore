@@ -4,10 +4,24 @@ import { AlertTriangle } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ErrorState } from "@/components/shared/ErrorState";
 import { LoadingState } from "@/components/shared/LoadingState";
-import { useMiHistorial, useMiSuscripcion, useMisDatosFiscales, useMisPagos, usePlanes } from "@/hooks/useSuscripcion";
-import { formatearFecha, formatearMoneda } from "@/lib/formato";
+import {
+  useGuardarMisDatosFiscales,
+  useMiHistorial,
+  useMiSuscripcion,
+  useMisDatosFiscales,
+  useMisPagos,
+  usePlanes,
+} from "@/hooks/useSuscripcion";
+import { DatosFiscalesForm } from "./DatosFiscalesForm";
+import { formatearFecha, formatearInstante, formatearMoneda } from "@/lib/formato";
 import { PagosTabla } from "./PagosTabla";
-import { ETIQUETA_ESTADO, type AsignacionHistorial, type MiSuscripcionDatos, type Plan } from "./tipos";
+import {
+  ETIQUETA_ESTADO,
+  textoVencimiento,
+  type AsignacionHistorial,
+  type MiSuscripcionDatos,
+  type Plan,
+} from "./tipos";
 
 const MOTIVO: Record<NonNullable<MiSuscripcionDatos["motivo"]>, string> = {
   sin_suscripcion: "Aún no tienes un plan asignado: aplica el plan por defecto.",
@@ -68,7 +82,7 @@ export function HistorialPlan({ filas, conNotas = false }: { filas: AsignacionHi
         <tbody className="divide-y divide-border">
           {filas.map((f, i) => (
             <tr key={`${f.fecha}-${i}`}>
-              <td className="px-3 py-2">{formatearFecha(f.fecha)}</td>
+              <td className="px-3 py-2">{formatearInstante(f.fecha)}</td>
               <td className="px-3 py-2 font-medium">{f.plan_nombre}</td>
               <td className="px-3 py-2">{ETIQUETA_ESTADO[f.estado]}</td>
               <td className="px-3 py-2">{f.vigente_hasta ? formatearFecha(f.vigente_hasta) : "Sin vencimiento"}</td>
@@ -88,6 +102,7 @@ export function MiSuscripcion() {
   const historial = useMiHistorial();
   const fiscales = useMisDatosFiscales();
   const pagos = useMisPagos();
+  const guardarFiscales = useGuardarMisDatosFiscales();
 
   if (mia.isLoading) return <LoadingState label="Consultando suscripción" />;
   if (mia.isError || !mia.data) {
@@ -110,10 +125,10 @@ export function MiSuscripcion() {
           {datos.dias_para_vencer !== null && (
             <p role="status" className="flex items-start gap-2 rounded-md border border-status-pendiente/30 bg-status-pendiente-soft p-3 text-sm text-status-pendiente">
               <AlertTriangle className="mt-0.5 h-4 w-4 flex-none" />
-              {datos.dias_para_vencer === 0
-                ? "Tu suscripción vence hoy."
-                : `Tu suscripción vence en ${datos.dias_para_vencer} ${datos.dias_para_vencer === 1 ? "día" : "días"}.`}{" "}
-              Contacta a tu proveedor para renovarla; al vencer aplica el plan por defecto.
+              {`Tu suscripción ${textoVencimiento(datos.dias_para_vencer)}.`}{" "}
+              {datos.dias_para_vencer < 0
+                ? "Mientras no se renueve aplica el plan por defecto; contacta a tu proveedor."
+                : "Contacta a tu proveedor para renovarla; al vencer aplica el plan por defecto."}
             </p>
           )}
           <Uso datos={datos} />
@@ -162,38 +177,31 @@ export function MiSuscripcion() {
         <CardHeader className="px-5 py-5 sm:px-6">
           <CardTitle className="font-display text-base">Pagos y facturación</CardTitle>
           <CardDescription>
-            Los pagos los registra tu proveedor y el CFDI de la suscripción se emite con estos datos fiscales.
+            Los pagos los registra tu proveedor y el CFDI de la suscripción se emite con estos datos fiscales. Un
+            pago anulado ya no cuenta para tu vigencia.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4 px-5 pb-5 sm:px-6">
-          {fiscales.data ? (
-            <dl aria-label="Datos fiscales" className="grid grid-cols-1 gap-2 text-sm sm:grid-cols-5">
-              {(
-                [
-                  ["RFC", fiscales.data.rfc],
-                  ["Razón social", fiscales.data.razon_social],
-                  ["Régimen", fiscales.data.regimen_fiscal],
-                  ["Código postal", fiscales.data.codigo_postal],
-                  ["Uso del CFDI", fiscales.data.uso_cfdi],
-                ] as const
-              ).map(([etiqueta, valor]) => (
-                <div key={etiqueta}>
-                  <dt className="text-xs text-muted-foreground">{etiqueta}</dt>
-                  <dd className="font-medium">{valor}</dd>
-                </div>
-              ))}
-            </dl>
-          ) : (
-            fiscales.data === null && (
-              <p className="text-sm text-muted-foreground">
-                Aún no hay datos fiscales para tu factura. Envíalos a tu proveedor para que los capture.
-              </p>
-            )
+          {fiscales.isSuccess && (
+            <div className="space-y-2">
+              <h3 className="text-sm font-semibold">Datos fiscales para tu factura</h3>
+              {fiscales.data === null && (
+                <p className="text-sm text-muted-foreground">
+                  Aún no hay datos fiscales para tu factura: captúralos aquí o envíalos a tu proveedor.
+                </p>
+              )}
+              <DatosFiscalesForm id="mis-datos-fiscales" nombre="Mis datos fiscales" inicial={fiscales.data}
+                                 guardar={(d) => guardarFiscales.mutateAsync(d)} pendiente={guardarFiscales.isPending} />
+            </div>
           )}
+          {pagos.isError && <p role="alert" className="text-sm text-destructive">No se pudieron consultar tus pagos.</p>}
           {pagos.data && <PagosTabla pagos={pagos.data} />}
         </CardContent>
       </Card>
 
+      {historial.isError && (
+        <p role="alert" className="text-sm text-destructive">No se pudo consultar el historial de tu plan.</p>
+      )}
       {historial.data && (
         <Card>
           <CardHeader className="px-5 py-5 sm:px-6">
