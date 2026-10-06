@@ -453,7 +453,8 @@ pausa.
 | U1, M7 | D | U1 (usuarios y perfil, PR #36) en revisión: invitaciones con doble confirmación (D9); depende del índice único sobre `lower(email)` del carril B. M7.1 (planes, límite de RFC, PR #40) en revisión |
 | F3.6 | A | Pendiente (después de F3.5b) | — | — |
 | Punto de control de paridad | Coordinación | Pendiente: al terminar F5–F7 se recorre FiscalCore con Playwright contra las capturas y se cuadran las cifras de control | — | — |
-| M2, M5 | C | Pendiente | — | — |
+| M5 | C | M5.1 (API de captura y comparativo, migración 056) en revisión; M5.2 (pantalla) pendiente | `docs/superpowers/specs/2026-10-06-m5-comparativo-declarado-design.md` | un plan por entrega |
+| M2 | C | Pendiente | — | — |
 
 ### Lista de verificación de F0
 

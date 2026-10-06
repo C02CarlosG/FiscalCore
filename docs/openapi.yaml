@@ -3206,6 +3206,118 @@ paths:
         '422':
           description: Parametros invalidos
 
+  /api/v1/empresas/{empresa_id}/declaraciones:
+    get:
+      operationId: listarDeclaraciones
+      tags: [Declaraciones]
+      summary: Declaraciones capturadas del ejercicio
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - { name: ejercicio, in: query, required: true, schema: { type: integer, minimum: 2000, maximum: 2099 } }
+      responses:
+        '200':
+          description: Las declaraciones capturadas, sin recalcular
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ejercicio: { type: integer }
+                  items: { type: array, items: { $ref: '#/components/schemas/Declaracion' } }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '422':
+          description: Ejercicio invalido
+
+  /api/v1/empresas/{empresa_id}/declaraciones/{periodo}:
+    get:
+      operationId: comparativoDeclarado
+      tags: [Declaraciones]
+      summary: Lo declarado contra lo calculado de IVA e ISR del periodo
+      description: |
+        Por impuesto: `estado` (`sin_declaracion`, `cuadra`, `con_diferencias`, `sin_captura`), los renglones con
+        declarado, calculado y diferencia (hasta $1.00 es `cuadra`: las declaraciones van en pesos) y `pendiente_de_pago`.
+        El pago provisional del ISR no se calcula (F7.3): se muestra solo lo declarado (`sin_calculo`).
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - { name: periodo, in: path, required: true, schema: { type: string, pattern: '^20[0-9]{2}-(0[1-9]|1[0-2])$' } }
+        - { name: factor, in: query, schema: { type: number, minimum: 0, maximum: 1, default: 1 } }
+      responses:
+        '200':
+          description: Comparativo de IVA e ISR
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '422':
+          description: Periodo o factor invalidos
+
+  /api/v1/empresas/{empresa_id}/declaraciones/{periodo}/{impuesto}:
+    put:
+      operationId: guardarDeclaracion
+      tags: [Declaraciones]
+      summary: Captura o reemplaza la declaracion del periodo e impuesto
+      description: Todos los importes son opcionales; solo se compara lo capturado. Queda en la auditoria (`declaracion_guardada`).
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - { name: periodo, in: path, required: true, schema: { type: string, pattern: '^20[0-9]{2}-(0[1-9]|1[0-2])$' } }
+        - { name: impuesto, in: path, required: true, schema: { type: string, enum: [iva, isr] } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                tipo: { type: string, enum: [normal, complementaria], default: normal }
+                fecha_presentacion: { type: string, format: date, nullable: true }
+                numero_operacion: { type: string, maxLength: 40, nullable: true }
+                ingresos: { type: number, nullable: true }
+                deducciones: { type: number, nullable: true }
+                impuesto_trasladado: { type: number, nullable: true }
+                impuesto_acreditable: { type: number, nullable: true }
+                retenciones: { type: number, nullable: true }
+                impuesto_a_cargo: { type: number, nullable: true, description: "A cargo (+) o a favor (-)" }
+                monto_pagado: { type: number, minimum: 0, nullable: true }
+                notas: { type: string, maxLength: 500 }
+      responses:
+        '200':
+          description: La declaracion guardada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Declaracion' }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '422':
+          description: Periodo, impuesto o importes invalidos
+    delete:
+      operationId: eliminarDeclaracion
+      tags: [Declaraciones]
+      summary: Elimina la declaracion capturada
+      description: Queda en la auditoria (`declaracion_eliminada`).
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+        - { name: periodo, in: path, required: true, schema: { type: string, pattern: '^20[0-9]{2}-(0[1-9]|1[0-2])$' } }
+        - { name: impuesto, in: path, required: true, schema: { type: string, enum: [iva, isr] } }
+      responses:
+        '204':
+          description: Eliminada
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          description: No hay declaracion capturada
+        '422':
+          description: Periodo o impuesto invalidos
+
   /api/v1/empresas/{empresa_id}/cedula-iva/{periodo}:
     get:
       operationId: cedulaIva
@@ -4070,6 +4182,23 @@ components:
             detail: "Error SAT: Servicio no disponible"
 
   schemas:
+    Declaracion:
+      type: object
+      properties:
+        periodo: { type: string }
+        impuesto: { type: string, enum: [iva, isr] }
+        tipo: { type: string, enum: [normal, complementaria] }
+        fecha_presentacion: { type: string, format: date, nullable: true }
+        numero_operacion: { type: string, nullable: true }
+        ingresos: { type: number, nullable: true }
+        deducciones: { type: number, nullable: true }
+        impuesto_trasladado: { type: number, nullable: true }
+        impuesto_acreditable: { type: number, nullable: true }
+        retenciones: { type: number, nullable: true }
+        impuesto_a_cargo: { type: number, nullable: true }
+        monto_pagado: { type: number, nullable: true }
+        notas: { type: string }
+        updated_at: { type: string, format: date-time }
     Proveedor:
       type: object
       properties:
