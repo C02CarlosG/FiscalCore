@@ -3224,7 +3224,7 @@ paths:
       description: |
         **612 (Art. 106)**: utilidad acumulada (ingresos cobrados menos deducciones pagadas, menos PTU pagada y perdidas
         pendientes de la configuracion del ejercicio) sobre la tarifa mensual acumulada del Anexo 8 de la RMF; resta los
-        pagos provisionales anteriores (estimados con el mismo calculo, `meses_con_pago_estimado`) y el ISR retenido a
+        pagos provisionales anteriores (lo realmente pagado segun las declaraciones capturadas del ISR, `meses_con_pago_real`; los meses sin pago capturado se estiman con el mismo calculo, `meses_con_pago_estimado`) y el ISR retenido a
         favor del mes. **606 (Art. 116)**: base del periodo (no acumulada) = ingresos menos deducciones; tarifa mensual
         (o trimestral, solo en marzo, junio, septiembre y diciembre) y se acredita el ISR retenido por personas morales.
         Con la deduccion opcional del 35 % (Art. 115) las deducciones son el 35 % de los ingresos mas `predial`.

@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 
-from .. import db, isr_flujo, isr_flujo_datos, isr_flujo_exportacion, isr_pago_provisional
+from .. import db, declaraciones_datos, isr_flujo, isr_flujo_datos, isr_flujo_exportacion, isr_pago_provisional
 from ..auditoria import registrar_evento
 from ..deps import empresa_or_404, get_current_user, validar_acceso_empresa
 
@@ -202,6 +202,7 @@ async def pago_provisional(
     eventos = isr_flujo_datos.cargar_eventos(empresa_id, empresa["rfc"], periodo)
     resultado = isr_pago_provisional.pago_provisional_flujo(
         periodo, lambda p: isr_flujo.resumen(eventos, p, ajustes, pct), parametros["ptu_pagada"], parametros["perdidas_pendientes"],
+        pagos_reales=declaraciones_datos.pagos_del_ejercicio(empresa_id, ejercicio, "isr"),
         ptu_mes_pago=parametros["ptu_mes_pago"])
     registrar_evento(current_user["user_id"], "reporte_generado", empresa_id=empresa_id,
                      metadata={"tipo": "isr_pago_provisional", "periodo": periodo})

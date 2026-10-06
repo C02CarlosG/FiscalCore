@@ -234,3 +234,20 @@ def test_config_de_arrendamiento_se_guarda_y_conserva(entorno):
     finally:
         client.put(_url(entorno, "config/2026"), headers=headers,
                    json={"pct_nomina_exenta": 0.47, "arrendamiento_periodicidad": "mensual", "deduccion_opcional_35": False})
+
+
+def test_el_pago_provisional_usa_lo_realmente_pagado_de_las_declaraciones(entorno):
+    client, headers = entorno[1], entorno[2]
+    base = f"/api/v1/empresas/{entorno[3]}/declaraciones/2026-01/isr"
+    try:
+        assert client.put(base, headers=headers, json={"impuesto_a_cargo": "5.76", "monto_pagado": "9.00"}).status_code == 200
+        # una complementaria suma su pago al de la normal
+        assert client.put(base, headers=headers, json={"tipo": "complementaria", "impuesto_a_cargo": "5.76", "monto_pagado": "1.00"}).status_code == 200
+
+        d = client.get(_url(entorno, "2026-09/pago-provisional"), headers=headers).json()
+
+        assert d["meses_con_pago_real"] == [1] and d["meses_con_pago_estimado"] == [2, 3, 4, 5, 6, 7, 8]
+        assert d["pagos_provisionales_anteriores"] == 10.0      # 9 + 1 reales de enero; febrero–agosto estimados en 0
+    finally:
+        client.delete(base, headers=headers)
+        client.delete(base, headers=headers)
