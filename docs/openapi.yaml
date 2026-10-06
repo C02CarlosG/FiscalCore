@@ -47,10 +47,8 @@ tags:
     description: Conciliacion de movimientos bancarios con CFDIs
   - name: Cierre
     description: Vista de cierre mensual con bloqueos y acciones pendientes
-  - name: Emitidos
-    description: CFDIs emitidos y recibidos por la empresa (clasificados por anticipos/notas de credito)
   - name: CFDI
-    description: Visor general y nomina de CFDIs (sin la clasificacion de Emitidos/Recibidos)
+    description: Listado unificado de CFDI emitidos y recibidos (todos los tipos), detalle, XML y exportacion
   - name: Dashboard
     description: Vista consolidada de indicadores fiscales
   - name: SAT FIEL
@@ -1005,154 +1003,6 @@ paths:
   # EMITIDOS / RECIBIDOS
   # ============================================================
 
-  /api/v1/empresas/{empresa_id}/emitidos:
-    get:
-      operationId: getEmitidos
-      tags: [Emitidos]
-      summary: CFDIs emitidos por la empresa en el periodo
-      description: |
-        Retorna los CFDIs emitidos por la empresa en el periodo especificado,
-        clasificados segun la logica SAT:
-
-        **Ingresos**:
-        - ventas_servicios: CFDIs regulares de ingreso
-        - anticipos: CFDIs con ClaveProdServ 84111506 + MetodoPago PUE + sin CFDI relacionado
-        - facturas_con_anticipo: CFDIs de ingreso con TipoRelacion=07
-
-        **Egresos**:
-        - notas_credito: CFDIs de egreso regulares
-        - aplicaciones_anticipo: CFDIs de egreso con FormaPago=30
-
-        Incluye advertencias cuando una factura con anticipo no tiene su
-        CFDI Egreso de aplicacion correspondiente.
-      parameters:
-        - $ref: '#/components/parameters/EmpresaId'
-        - name: periodo
-          in: query
-          required: true
-          schema:
-            type: string
-            pattern: '^\d{4}-\d{2}$'
-          description: Periodo fiscal YYYY-MM
-          example: "2024-01"
-      responses:
-        '200':
-          description: CFDIs emitidos clasificados
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/EmitidosResponse'
-        '401':
-          $ref: '#/components/responses/UnauthorizedError'
-        '403':
-          $ref: '#/components/responses/ForbiddenError'
-
-  /api/v1/empresas/{empresa_id}/recibidos:
-    get:
-      operationId: getRecibidos
-      tags: [Emitidos]
-      summary: CFDIs recibidos por la empresa en el periodo
-      description: |
-        Retorna los CFDIs recibidos (compras y gastos) por la empresa en el
-        periodo especificado, con resumen de IVA acreditable.
-      parameters:
-        - $ref: '#/components/parameters/EmpresaId'
-        - name: periodo
-          in: query
-          required: true
-          schema:
-            type: string
-            pattern: '^\d{4}-\d{2}$'
-          description: Periodo fiscal YYYY-MM
-          example: "2024-01"
-      responses:
-        '200':
-          description: CFDIs recibidos clasificados
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/RecibidosResponse'
-              example:
-                periodo: "2024-01"
-                resumen:
-                  subtotal: 72000.00
-                  iva_acreditable: 11520.00
-                  total: 83520.00
-                  num_compras: 12
-                  num_egresos: 1
-                  vigentes: 12
-                  canceladas: 1
-                compras: []
-                egresos: []
-        '401':
-          $ref: '#/components/responses/UnauthorizedError'
-        '403':
-          $ref: '#/components/responses/ForbiddenError'
-
-  /api/v1/empresas/{empresa_id}/cfdi/visor:
-    get:
-      operationId: getVisorSat
-      tags: [CFDI]
-      summary: Visor general de CFDI (emitidos y recibidos, cualquier tipo)
-      description: |
-        Retorna todos los CFDIs (cualquier tipo_comprobante) emitidos o
-        recibidos por el RFC de la empresa en el periodo especificado — la
-        vista "como en el portal del SAT", sin la clasificacion de
-        anticipos/notas de credito que aplican los endpoints de
-        Emitidos/Recibidos. Cada CFDI incluye `direccion` (emitido/recibido)
-        segun si el RFC de la empresa aparece como emisor o receptor.
-      parameters:
-        - $ref: '#/components/parameters/EmpresaId'
-        - name: periodo
-          in: query
-          required: true
-          schema:
-            type: string
-            pattern: '^\d{4}-\d{2}$'
-          description: Periodo fiscal YYYY-MM
-          example: "2024-01"
-      responses:
-        '200':
-          description: CFDIs del periodo, emitidos y recibidos
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/VisorSatResponse'
-        '401':
-          $ref: '#/components/responses/UnauthorizedError'
-        '403':
-          $ref: '#/components/responses/ForbiddenError'
-
-  /api/v1/empresas/{empresa_id}/cfdi/nomina:
-    get:
-      operationId: getCfdiNomina
-      tags: [CFDI]
-      summary: CFDIs de nomina emitidos por la empresa en el periodo
-      description: |
-        Retorna los CFDIs de nomina (tipo_comprobante='N') emitidos por la
-        empresa (como patron) a sus empleados en el periodo especificado.
-      parameters:
-        - $ref: '#/components/parameters/EmpresaId'
-        - name: periodo
-          in: query
-          required: true
-          schema:
-            type: string
-            pattern: '^\d{4}-\d{2}$'
-          description: Periodo fiscal YYYY-MM
-          example: "2024-01"
-      responses:
-        '200':
-          description: Recibos de nomina del periodo
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/NominaResponse'
-        '401':
-          $ref: '#/components/responses/UnauthorizedError'
-        '403':
-          $ref: '#/components/responses/ForbiddenError'
-
   /api/v1/empresas/{empresa_id}/cfdis:
     get:
       operationId: listarCfdis
@@ -1209,6 +1059,14 @@ paths:
         comprobante y totales en pesos del tipo activo, del periodo y del
         acumulado del ejercicio (enero al mes del periodo). Sin CFDI las cifras
         van en null. Incluye las advertencias de anticipos sin CFDI de egreso.
+        Las cifras dependen del tipo y `cifras` las enumera (clave, etiqueta y
+        formato `entero` o `moneda`): Ingreso, Egreso y Traslado traen
+        retenciones, traslados, subtotal, descuento, neto y total; Nomina trae
+        empleados, sueldos, otras percepciones, gravado, exento, ISR retenido,
+        otras deducciones, subsidio causado y neto a pagar; Pago trae las bases
+        de IVA al 16, 8 y 0 % y exento, traslado y retencion de IVA, total y
+        documentos relacionados (de pago20:Totales; un REP de Pagos 1.0 no las
+        trae y queda en null).
       parameters:
         - $ref: '#/components/parameters/EmpresaId'
         - { name: direccion, in: query, required: true, schema: { type: string, enum: [emitidos, recibidos] } }
@@ -1228,6 +1086,14 @@ paths:
                 type: object
                 properties:
                   conteos: { type: object, additionalProperties: { type: integer } }
+                  cifras:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        clave: { type: string }
+                        etiqueta: { type: string }
+                        formato: { type: string, enum: [entero, moneda] }
                   totales:
                     type: object
                     properties:
@@ -1248,7 +1114,9 @@ paths:
       summary: Catalogo de columnas del listado de CFDI
       description: |
         Columnas de encabezado y de concepto con su etiqueta, tipo de dato,
-        visibilidad por defecto y si se pueden ordenar o filtrar.
+        visibilidad por defecto y si se pueden ordenar o filtrar. Nomina (N) y
+        Pago (P) tienen su propio juego de columnas; Ingreso, Egreso y Traslado
+        comparten el de comprobante.
       parameters:
         - $ref: '#/components/parameters/EmpresaId'
         - { name: direccion, in: query, required: true, schema: { type: string, enum: [emitidos, recibidos] } }
@@ -4261,263 +4129,6 @@ components:
           type: boolean
         es_factura_con_anticipo:
           type: boolean
-
-    EmitidosResponse:
-      type: object
-      properties:
-        periodo:
-          type: string
-        empresa_rfc:
-          type: string
-        resumen:
-          type: object
-          properties:
-            subtotal:
-              type: number
-              format: float
-            iva_trasladado:
-              type: number
-              format: float
-            total_facturado:
-              type: number
-              format: float
-            vigentes:
-              type: integer
-            canceladas:
-              type: integer
-            num_tipo_i:
-              type: integer
-            num_tipo_e:
-              type: integer
-            num_tipo_p:
-              type: integer
-            total_cfdi_periodo:
-              type: integer
-            total_ingresos:
-              type: number
-              format: float
-            total_facturas_con_anticipo:
-              type: number
-              format: float
-            total_anticipos_acumulados:
-              type: number
-              format: float
-            total_aplicaciones_anticipo:
-              type: number
-              format: float
-            ingreso_neto_periodo:
-              type: number
-              format: float
-            num_ingresos:
-              type: integer
-            num_anticipos:
-              type: integer
-            num_facturas_con_anticipo:
-              type: integer
-            num_egresos:
-              type: integer
-            advertencias:
-              type: array
-              items:
-                type: object
-                properties:
-                  tipo:
-                    type: string
-                  uuid_factura:
-                    type: string
-                  mensaje:
-                    type: string
-        ingresos:
-          type: object
-          properties:
-            ventas_servicios:
-              type: array
-              items:
-                $ref: '#/components/schemas/CFDIItem'
-            anticipos:
-              type: array
-              items:
-                $ref: '#/components/schemas/CFDIItem'
-            facturas_con_anticipo:
-              type: array
-              items:
-                $ref: '#/components/schemas/CFDIItem'
-        egresos:
-          type: object
-          properties:
-            notas_credito:
-              type: array
-              items:
-                $ref: '#/components/schemas/CFDIItem'
-            aplicaciones_anticipo:
-              type: array
-              items:
-                $ref: '#/components/schemas/CFDIItem'
-
-    RecibidosResponse:
-      type: object
-      properties:
-        periodo:
-          type: string
-        resumen:
-          type: object
-          properties:
-            subtotal:
-              type: number
-              format: float
-            iva_acreditable:
-              type: number
-              format: float
-            total:
-              type: number
-              format: float
-            num_compras:
-              type: integer
-            num_egresos:
-              type: integer
-            vigentes:
-              type: integer
-            canceladas:
-              type: integer
-        compras:
-          type: array
-          items:
-            type: object
-            properties:
-              uuid:
-                type: string
-              serie_folio:
-                type: string
-                nullable: true
-              fecha:
-                type: string
-                format: date
-              rfc_emisor:
-                type: string
-              nombre_emisor:
-                type: string
-                nullable: true
-              subtotal:
-                type: number
-                format: float
-              total:
-                type: number
-                format: float
-              iva:
-                type: number
-                format: float
-              estado:
-                type: string
-        egresos:
-          type: array
-          items:
-            type: object
-
-    VisorSatResponse:
-      type: object
-      properties:
-        periodo:
-          type: string
-        empresa_rfc:
-          type: string
-        resumen:
-          type: object
-          properties:
-            total_cfdi:
-              type: integer
-            emitidos:
-              type: integer
-            recibidos:
-              type: integer
-            vigentes:
-              type: integer
-            canceladas:
-              type: integer
-            monto_total:
-              type: number
-              format: float
-        cfdi:
-          type: array
-          items:
-            type: object
-            properties:
-              uuid:
-                type: string
-              tipo_comprobante:
-                type: string
-              serie_folio:
-                type: string
-                nullable: true
-              fecha:
-                type: string
-                format: date
-              rfc_emisor:
-                type: string
-              nombre_emisor:
-                type: string
-                nullable: true
-              rfc_receptor:
-                type: string
-              nombre_receptor:
-                type: string
-                nullable: true
-              total:
-                type: number
-                format: float
-              iva:
-                type: number
-                format: float
-              estado:
-                type: string
-              direccion:
-                type: string
-                enum: [emitido, recibido]
-
-    NominaResponse:
-      type: object
-      properties:
-        periodo:
-          type: string
-        empresa_rfc:
-          type: string
-        resumen:
-          type: object
-          properties:
-            total_nomina:
-              type: number
-              format: float
-            num_recibos:
-              type: integer
-            vigentes:
-              type: integer
-            canceladas:
-              type: integer
-        recibos:
-          type: array
-          items:
-            type: object
-            properties:
-              uuid:
-                type: string
-              serie_folio:
-                type: string
-                nullable: true
-              fecha:
-                type: string
-                format: date
-              rfc_receptor:
-                type: string
-              nombre_receptor:
-                type: string
-                nullable: true
-              subtotal:
-                type: number
-                format: float
-              total:
-                type: number
-                format: float
-              estado:
-                type: string
 
     DashboardResponse:
       type: object

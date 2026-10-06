@@ -17,8 +17,9 @@ import json
 import logging
 import uuid as _uuid
 
+import psycopg2.extras
+
 from . import db
-from .cfdi_parser import SEIS_DECIMALES, _agrupar_impuestos
 
 _log = logging.getLogger(__name__)
 
@@ -27,7 +28,9 @@ _log = logging.getLogger(__name__)
 # 1: impuestos por tasa, conceptos, encabezados y totales de nómina (migración 028).
 # 2: extracción v2 (migración 040): Totales e ImpuestosP del REP, ObjetoImpDR,
 #    ACuentaTerceros y nómina completa por percepción, deducción y otro pago.
-DETALLE_VERSION = 2
+# 3: cada pago de un REP tiene su fila por orden de nodo y guarda su forma de pago
+#    (migración 041); el reproceso re-registra los REP con la llave nueva.
+DETALLE_VERSION = 3
 
 
 def _tasa(valor):
@@ -212,7 +215,11 @@ def guardar_detalle(empresa_id: str, resultado) -> bool:
 
 def recalcular_cobrado(empresa_id: str, uuid: str) -> None:
     """Recalcula monto_cobrado y estado_pago de un CFDI a partir de los pagos
-    registrados para él (suma de ``pagos_relaciones`` de la empresa)."""
+    registrados para él (suma de ``pagos_relaciones`` de la empresa).
+
+    Solo cuentan los pagos de un REP **vigente**: uno cancelado (o sustituido) ya no es un
+    cobro, y sumarlo inflaría ``monto_cobrado``, ``estado_pago`` y el saldo PPD, con lo que
+    se desviarían la conciliación y los riesgos."""
     uuid = uuid.upper()
     db.execute(
         """
@@ -227,12 +234,85 @@ def recalcular_cobrado(empresa_id: str, uuid: str) -> None:
             SELECT COALESCE(SUM(pr.importe_pagado), 0) AS pagado
             FROM pagos_relaciones pr
             JOIN pagos_cfdi pc ON pc.id = pr.pago_id
-            WHERE pc.empresa_id = %s AND pr.cfdi_uuid = %s
+            JOIN cfdi rep ON rep.id = pc.cfdi_id
+            WHERE pc.empresa_id = %s AND pr.cfdi_uuid = %s AND rep.estado = 'vigente'
         ) p
         WHERE c.empresa_id = %s AND c.uuid = %s
         """,
         (empresa_id, uuid, empresa_id, uuid),
     )
+
+
+def recalcular_cobrado_de_rep(empresa_id: str, uuid_rep: str) -> int:
+    """Recalcula lo cobrado de todos los documentos que paga un REP. Se llama cuando el
+    estado de un REP cambia (por ejemplo, el SAT lo reporta cancelado): ``recalcular_cobrado``
+    es derivado y ya excluye al REP no vigente, pero alguien tiene que volver a correrlo
+    sobre las facturas que ese REP había cobrado. Devuelve cuántos documentos recalculó."""
+    filas = db.query_all(
+        """
+        SELECT DISTINCT UPPER(pr.cfdi_uuid) AS uuid
+        FROM pagos_relaciones pr
+        JOIN pagos_cfdi pc ON pc.id = pr.pago_id
+        JOIN cfdi rep ON rep.id = pc.cfdi_id
+        WHERE pc.empresa_id = %s AND rep.empresa_id = %s AND rep.uuid = %s
+        """,
+        (empresa_id, empresa_id, uuid_rep.upper()),
+    )
+    for f in filas:
+        recalcular_cobrado(empresa_id, f["uuid"])
+    return len(filas)
+
+
+def _fila_de_pago(empresa_id: str, cfdi_db_id: str, uuid_rep: str, pago) -> str:
+    """Id de la fila de ``pagos_cfdi`` de un nodo pago:Pago, creándola si hace falta.
+
+    Cada nodo tiene su fila, identificada por su orden en el XML (``nodo``): dos pagos
+    de la misma fecha y monto ya no comparten fila. Un REP guardado antes de la
+    migración 041 tiene filas con nodo = 0 ("sin asignar"), y una de ellas pudo juntar las
+    relaciones de varios nodos. El nodo reclama la que coincide en fecha y monto,
+    conservando su id (a él apuntan las conciliaciones) pero **borrando sus relaciones**:
+    las del nodo se vuelven a insertar justo después y las de los demás nodos van en sus
+    propias filas; si no se borraran, una parcialidad quedaría en dos filas y se contaría dos
+    veces. Solo si no hay fila que reclamar se inserta una nueva.
+
+    Todo en una transacción y bajo un candado por REP: dos copias simultáneas del mismo REP
+    antiguo no pueden reclamar la misma fila ni crear dos."""
+    with db.get_conn() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (f"pagos_cfdi:{cfdi_db_id}",))
+            cur.execute("SELECT id FROM pagos_cfdi WHERE cfdi_id = %s AND nodo = %s", (cfdi_db_id, pago.nodo))
+            fila = cur.fetchone()
+            if fila:
+                return str(fila["id"])
+
+            cur.execute(
+                """
+                UPDATE pagos_cfdi SET nodo = %s
+                WHERE id = (
+                    SELECT id FROM pagos_cfdi
+                    WHERE cfdi_id = %s AND nodo = 0 AND fecha_pago = %s AND monto = %s
+                    ORDER BY created_at, id LIMIT 1
+                )
+                RETURNING id
+                """,
+                (pago.nodo, cfdi_db_id, pago.fecha_pago, str(pago.monto)),
+            )
+            fila = cur.fetchone()
+            if fila:
+                # pagos_relaciones_impuestos cae en cascada.
+                cur.execute("DELETE FROM pagos_relaciones WHERE pago_id = %s", (fila["id"],))
+                return str(fila["id"])
+
+            cur.execute(
+                """
+                INSERT INTO pagos_cfdi (empresa_id, cfdi_id, uuid_cfdi_pago, fecha_pago, monto, moneda, tipo_cambio, nodo)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING id
+                """,
+                (empresa_id, cfdi_db_id, uuid_rep, pago.fecha_pago, str(pago.monto), pago.moneda,
+                 str(pago.tipo_cambio), pago.nodo),
+            )
+            return str(cur.fetchone()["id"])
 
 
 def persistir_complemento_pago(empresa_id: str, resultado) -> None:
@@ -250,46 +330,16 @@ def persistir_complemento_pago(empresa_id: str, resultado) -> None:
         return
     cfdi_db_id = str(cfdi_row["id"])
     uuids_afectados: list[str] = []
-    # Dos pagos del mismo REP con la misma fecha y monto comparten fila en pagos_cfdi
-    # (UNIQUE cfdi_id, fecha_pago, monto): sus ImpuestosP se acumulan en vez de pisarse,
-    # o el IVA cobrado de uno se perdería. Los documentos relacionados idénticos de
-    # esos pagos sí colapsan (limitación previa; la solución de fondo es agregar el
-    # orden del nodo a la llave, pendiente en F3.5b).
-    impuestos_p_por_pago: dict[str, list] = {}
 
     for pago in resultado.pagos:
         if not pago.fecha_pago or pago.monto <= 0:
             continue
 
-        pago_row = db.execute(
-            """
-            INSERT INTO pagos_cfdi (empresa_id, cfdi_id, uuid_cfdi_pago, fecha_pago, monto, moneda, tipo_cambio)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
-            ON CONFLICT (cfdi_id, fecha_pago, monto) DO NOTHING
-            RETURNING id
-            """,
-            (
-                empresa_id, cfdi_db_id, resultado.uuid,
-                pago.fecha_pago, str(pago.monto),
-                pago.moneda, str(pago.tipo_cambio),
-            ),
-            returning=True,
-        )
-        if not pago_row:
-            # Ya existía (ON CONFLICT DO NOTHING) — recuperar id existente
-            pago_row = db.query_one(
-                "SELECT id FROM pagos_cfdi WHERE cfdi_id = %s AND fecha_pago = %s AND monto = %s",
-                (cfdi_db_id, pago.fecha_pago, str(pago.monto)),
-            )
-        if not pago_row:
-            continue
-        pago_db_id = str(pago_row["id"])
-        impuestos_p_por_pago.setdefault(pago_db_id, []).extend(pago.impuestos_p)
+        pago_db_id = _fila_de_pago(empresa_id, cfdi_db_id, resultado.uuid, pago)
         _en_transaccion([
-            ("UPDATE pagos_cfdi SET version_pago = %s WHERE id = %s", (pago.version, pago_db_id)),
-            *_sentencias_impuestos(
-                "pagos_impuestos", "pago_id", pago_db_id,
-                _agrupar_impuestos(impuestos_p_por_pago[pago_db_id], SEIS_DECIMALES)),
+            ("UPDATE pagos_cfdi SET version_pago = %s, forma_pago = %s WHERE id = %s",
+             (pago.version, pago.forma_pago, pago_db_id)),
+            *_sentencias_impuestos("pagos_impuestos", "pago_id", pago_db_id, pago.impuestos_p),
         ])
 
         for docto in pago.doctos_relacionados:

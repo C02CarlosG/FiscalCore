@@ -232,6 +232,10 @@ def init_db() -> None:
         # ACuentaTerceros y nómina completa (percepciones por tipo, otros pagos, separación, jubilación)
         _run_sql_file("040_extraccion_v2.sql")
 
+        # 041 es idempotente — pagos_cfdi: orden del nodo en la llave (dos pagos idénticos del mismo REP
+        # ya no colapsan) y forma de pago de cada pago
+        _run_sql_file("041_pagos_nodo_forma_pago.sql")
+
         # 050 es idempotente — ajustes manuales del IVA por flujo (no considerar / reasignar periodo)
         _run_sql_file("050_iva_ajustes.sql")
 

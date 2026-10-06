@@ -259,21 +259,15 @@ export interface CfdiListadoResponse {
   por_pagina: number;
 }
 
-/** Cifras en pesos. Sin CFDI en el periodo, `conteo` es 0 y las demás van en null. */
-export interface CfdiTotalesBloque {
-  conteo: number;
-  retencion_iva: number | null;
-  retencion_ieps: number | null;
-  retencion_isr: number | null;
-  traslado_iva: number | null;
-  traslado_ieps: number | null;
-  traslado_isr: number | null;
-  total_retenciones: number | null;
-  subtotal: number | null;
-  descuento: number | null;
-  neto: number | null;
-  total: number | null;
+/** Una cifra de la tabla de totales: cada tipo de comprobante trae las suyas. */
+export interface CfdiCifra {
+  clave: string;
+  etiqueta: string;
+  formato: "entero" | "moneda";
 }
+
+/** Cifras en pesos del periodo o del acumulado, por clave. Sin CFDI, `conteo` es 0 y las demás van en null. */
+export type CfdiTotalesBloque = { conteo: number } & Record<string, number | null>;
 
 export interface CfdiAdvertencia {
   tipo: string;
@@ -283,6 +277,8 @@ export interface CfdiAdvertencia {
 
 export interface CfdiResumenResponse {
   conteos: Record<CfdiTipoComprobante, number>;
+  /** Cifras del tipo activo, en el orden en que se muestran (la primera es el conteo). */
+  cifras: CfdiCifra[];
   totales: { periodo: CfdiTotalesBloque; acumulado: CfdiTotalesBloque };
   advertencias: CfdiAdvertencia[];
 }

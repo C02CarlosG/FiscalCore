@@ -35,6 +35,47 @@ LATERALES = """
     ) pag ON TRUE
 """
 
+# Nómina: encabezado del complemento (casi siempre un solo nodo por CFDI) y subsidio causado
+# de los otros pagos. Un CFDI guardado antes de la extracción v2 no los tiene: sus columnas
+# salen vacías (no en cero) hasta que se reprocese.
+LATERALES_NOMINA = """
+    LEFT JOIN LATERAL (
+        SELECT MIN(n.fecha_pago) AS fecha_pago, MIN(n.tipo_regimen) AS tipo_regimen,
+               MIN(n.tipo_nomina) AS tipo_nomina, SUM(n.total_sueldos) AS sueldos,
+               SUM(COALESCE(n.total_percepciones, 0) - COALESCE(n.total_sueldos, 0)) AS otras_percepciones
+        FROM cfdi_nominas n
+        WHERE n.cfdi_id = c.id
+    ) nom ON TRUE
+    LEFT JOIN LATERAL (
+        SELECT SUM(k.subsidio_causado) AS subsidio
+        FROM cfdi_nominas n JOIN cfdi_nomina_conceptos k ON k.nomina_id = n.id
+        WHERE n.cfdi_id = c.id
+    ) sub ON TRUE
+"""
+
+# Pago: cifras oficiales en pesos del REP (pago20:Totales; un REP 1.0 no las trae) y datos
+# de sus pagos y documentos relacionados.
+LATERALES_PAGO = """
+    LEFT JOIN cfdi_pagos_totales ptot ON ptot.cfdi_id = c.id
+    LEFT JOIN LATERAL (
+        SELECT (MIN(p.fecha_pago))::date AS fecha_pago, MIN(p.version_pago) AS version_pago,
+               string_agg(DISTINCT p.forma_pago, ', ') AS forma_pago
+        FROM pagos_cfdi p
+        WHERE p.cfdi_id = c.id
+    ) pgo ON TRUE
+    LEFT JOIN LATERAL (
+        SELECT COUNT(*) AS n
+        FROM pagos_cfdi p JOIN pagos_relaciones pr ON pr.pago_id = p.id
+        WHERE p.cfdi_id = c.id
+    ) rel ON TRUE
+"""
+
+
+def laterales(tipo: str) -> str:
+    """Subconsultas que usa el juego de columnas de ese tipo de comprobante."""
+    return {"N": LATERALES_NOMINA, "P": LATERALES_PAGO}.get(tipo, LATERALES)
+
+
 # Filtros que ya viven en la barra del listado (pestaña de tipo, estado, método).
 _FILTROS_DE_BARRA = {"tipo_comprobante", "estado", "metodo_pago"}
 
@@ -98,8 +139,97 @@ def _categoria_sql(direccion: str) -> str:
 
 
 def columnas(direccion: str, tipo: str) -> list[Columna]:
-    """Columnas de encabezado del listado. ``tipo`` se recibe para que Nómina y
-    Pago tengan su propio juego (F3.5); hoy todos los tipos comparten este."""
+    """Columnas de encabezado del listado: Nómina y Pago tienen su propio juego; los demás
+    tipos (Ingreso, Egreso, Traslado) comparten el de comprobante."""
+    if tipo == "N":
+        return _columnas_nomina(direccion)
+    if tipo == "P":
+        return _columnas_pago(direccion)
+    return _columnas_comprobante(direccion)
+
+
+def _identificacion(direccion: str) -> list[Columna]:
+    """Columnas de identificación y contraparte comunes a Nómina y Pago."""
+    emitidos = direccion == "emitidos"
+    rfc_sql, nombre_sql = ("c.rfc_receptor", "c.nombre_receptor") if emitidos else ("c.rfc_emisor", "c.nombre_emisor")
+    rfc_etq, nombre_etq = ("RFC receptor", "Receptor") if emitidos else ("RFC emisor", "Emisor")
+    return [
+        Columna("fecha_emision", "Fecha expedición", "fecha", "c.fecha_emision", visible=True),
+        Columna("serie", "Serie", "texto", "c.serie"),
+        Columna("folio", "Folio", "texto", "c.folio"),
+        Columna("uuid", "UUID", "texto", "c.uuid"),
+        Columna("rfc_contraparte", rfc_etq, "texto", rfc_sql, visible=True),
+        Columna("contraparte", nombre_etq, "texto", nombre_sql, visible=True),
+    ]
+
+
+def _cierre() -> list[Columna]:
+    """Columnas del final, comunes a Nómina y Pago."""
+    return [
+        Columna("estado", "Estado", "catalogo", "c.estado", visible=True,
+                opciones=("vigente", "cancelado", "sustituido")),
+        Columna("version", "Versión", "texto", "c.version"),
+        Columna("fecha_timbrado", "Fecha timbrado", "fecha_hora", "c.fecha_timbrado"),
+        Columna("no_certificado", "No. certificado", "texto", "c.no_certificado"),
+        Columna("lugar_expedicion", "Lugar de expedición", "texto", "c.lugar_expedicion"),
+    ]
+
+
+def _columnas_nomina(direccion: str) -> list[Columna]:
+    """Nómina: sueldos, percepciones gravadas y exentas, ISR retenido, deducciones y subsidio.
+    "Ajuste de ISR retenido" no se publica: de qué nodo sale con las reglas de 2024 está sin
+    confirmar. Las columnas que salen de ``nom``/``sub`` solo existen para CFDI con la
+    extracción v2 y no se ordenan ni filtran (se calculan sobre la página)."""
+    return [
+        *_identificacion(direccion)[:1],
+        Columna("fecha_pago", "Fecha de pago", "fecha", "nom.fecha_pago", visible=True, simple=False),
+        *_identificacion(direccion)[1:],
+        Columna("tipo_regimen", "Tipo de régimen", "texto", "nom.tipo_regimen", visible=True, simple=False),
+        Columna("tipo_nomina", "Tipo de nómina", "texto", "nom.tipo_nomina", simple=False),
+        Columna("sueldos", "Sueldos", "moneda", "nom.sueldos", visible=True, simple=False),
+        Columna("otras_percepciones", "Otras percepciones", "moneda", "nom.otras_percepciones", visible=True, simple=False),
+        Columna("percepciones", "Total percepciones", "moneda", "c.nomina_percepciones"),
+        Columna("gravado", "Gravado", "moneda", "c.nomina_gravado", visible=True),
+        Columna("exento", "Exento", "moneda", "c.nomina_exento", visible=True),
+        Columna("isr_retenido", "ISR retenido", "moneda", "c.nomina_isr_retenido", visible=True),
+        Columna("otras_deducciones", "Otras deducciones", "moneda",
+                "(c.nomina_deducciones - c.nomina_isr_retenido)", visible=True),
+        Columna("deducciones", "Total deducciones", "moneda", "c.nomina_deducciones"),
+        Columna("otros_pagos", "Otros pagos", "moneda", "c.nomina_otros_pagos"),
+        Columna("subsidio_causado", "Subsidio causado", "moneda", "sub.subsidio", visible=True, simple=False),
+        Columna("neto_pagar", "Neto a pagar", "moneda", "c.total", visible=True),
+        *_cierre(),
+    ]
+
+
+def _columnas_pago(direccion: str) -> list[Columna]:
+    """Pago (REP): bases de IVA por tasa, traslado y retención, y total, tomados de
+    pago20:Totales (cifras oficiales en pesos). Un REP de Pagos 1.0 no las trae: salen
+    vacías, no en cero."""
+    return [
+        *_identificacion(direccion)[:1],
+        Columna("fecha_pago", "Fecha de pago", "fecha", "pgo.fecha_pago", visible=True, simple=False),
+        *_identificacion(direccion)[1:],
+        Columna("base_iva_16", "Base IVA 16 %", "moneda", "ptot.total_traslados_base_iva16", visible=True, simple=False),
+        Columna("base_iva_8", "Base IVA 8 %", "moneda", "ptot.total_traslados_base_iva8", visible=True, simple=False),
+        Columna("base_iva_0", "Base IVA 0 %", "moneda", "ptot.total_traslados_base_iva0", visible=True, simple=False),
+        Columna("base_iva_exento", "Base IVA exento", "moneda", "ptot.total_traslados_base_exento", visible=True, simple=False),
+        Columna("traslado_iva", "Traslado IVA", "moneda",
+                "(COALESCE(ptot.total_traslados_iva16, 0) + COALESCE(ptot.total_traslados_iva8, 0)"
+                " + COALESCE(ptot.total_traslados_iva0, 0))", visible=True, simple=False),
+        Columna("retencion_iva", "Retención IVA", "moneda", "ptot.total_retenciones_iva", visible=True, simple=False),
+        Columna("retencion_isr", "Retención ISR", "moneda", "ptot.total_retenciones_isr", simple=False),
+        Columna("total", "Total", "moneda", "ptot.monto_total_pagos", visible=True, simple=False),
+        Columna("forma_pago", "Forma de pago código", "texto", "pgo.forma_pago", visible=True, simple=False),
+        Columna("forma_pago_desc", "Forma de pago", "texto"),
+        Columna("pagos_relacionados_total", "Documentos relacionados", "numero", "rel.n", visible=True, simple=False),
+        Columna("version_pago", "Versión del complemento", "texto", "pgo.version_pago", simple=False),
+        *_cierre(),
+    ]
+
+
+def _columnas_comprobante(direccion: str) -> list[Columna]:
+    """Columnas de Ingreso, Egreso y Traslado."""
     emitidos = direccion == "emitidos"
     rfc_sql, nombre_sql = ("c.rfc_receptor", "c.nombre_receptor") if emitidos else ("c.rfc_emisor", "c.nombre_emisor")
     rfc_etq, nombre_etq = ("RFC receptor", "Receptor") if emitidos else ("RFC emisor", "Emisor")

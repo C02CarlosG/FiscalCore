@@ -2,40 +2,33 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { columnasVisibles, type ColumnaPreferida } from "@/lib/columnas-preferidas";
 import { formatearMoneda } from "@/lib/formato";
-import type { CfdiResumenResponse, CfdiTotalesBloque } from "@/types/api";
-
-type Cifra = Exclude<keyof CfdiTotalesBloque, "conteo">;
-
-/** Cifras que se pueden mostrar u ocultar y reordenar (el conteo de CFDI siempre va primero). */
-export const CIFRAS: { clave: Cifra; encabezado: string }[] = [
-  { clave: "retencion_iva", encabezado: "Ret. IVA" },
-  { clave: "retencion_ieps", encabezado: "Ret. IEPS" },
-  { clave: "retencion_isr", encabezado: "Ret. ISR" },
-  { clave: "traslado_iva", encabezado: "Tras. IVA" },
-  { clave: "traslado_ieps", encabezado: "Tras. IEPS" },
-  { clave: "traslado_isr", encabezado: "Tras. ISR" },
-  { clave: "total_retenciones", encabezado: "Total ret." },
-  { clave: "subtotal", encabezado: "Subtotal" },
-  { clave: "descuento", encabezado: "Descuento" },
-  { clave: "neto", encabezado: "Neto" },
-  { clave: "total", encabezado: "Total" },
-];
+import type { CfdiCifra, CfdiResumenResponse, CfdiTotalesBloque } from "@/types/api";
 
 const ENTERO = new Intl.NumberFormat("es-MX");
 
-type CifraVisible = (typeof CIFRAS)[number];
+/**
+ * Cifras que se pueden mostrar, ocultar y reordenar, con la forma que usa el editor de
+ * columnas. El conteo de CFDI no entra: siempre va primero.
+ */
+export function catalogoCifras(cifras: CfdiCifra[] | undefined) {
+  return (cifras ?? [])
+    .filter((c) => c.clave !== "conteo")
+    .map((c) => ({ clave: c.clave, etiqueta: c.etiqueta, visible_por_defecto: true }));
+}
 
-/** Catálogo de cifras con la forma que usa el editor de columnas. */
-export const CATALOGO_CIFRAS = CIFRAS.map((c) => ({ clave: c.clave, etiqueta: c.encabezado, visible_por_defecto: true }));
+function texto(cifra: CfdiCifra, valor: number | null | undefined): string {
+  if (valor === null || valor === undefined) return "—";
+  return cifra.formato === "entero" ? ENTERO.format(valor) : formatearMoneda(valor);
+}
 
-function Renglon({ nombre, bloque, cifras }: { nombre: string; bloque: CfdiTotalesBloque; cifras: CifraVisible[] }) {
+function Renglon({ nombre, bloque, cifras }: { nombre: string; bloque: CfdiTotalesBloque; cifras: CfdiCifra[] }) {
   return (
     <TableRow>
       <TableHead scope="row" className="whitespace-nowrap normal-case">{nombre}</TableHead>
       <TableCell className="text-right font-mono tabular-nums">{ENTERO.format(bloque.conteo)}</TableCell>
-      {cifras.map(({ clave }) => (
-        <TableCell key={clave} className="whitespace-nowrap text-right font-mono tabular-nums">
-          {formatearMoneda(bloque[clave])}
+      {cifras.map((cifra) => (
+        <TableCell key={cifra.clave} className="whitespace-nowrap text-right font-mono tabular-nums">
+          {texto(cifra, bloque[cifra.clave])}
         </TableCell>
       ))}
     </TableRow>
@@ -44,26 +37,30 @@ function Renglon({ nombre, bloque, cifras }: { nombre: string; bloque: CfdiTotal
 
 /**
  * Totales en pesos del tipo activo: el periodo y el acumulado del ejercicio (enero al
- * mes elegido). Sin CFDI las cifras vienen en null y se muestran como guion: un cero
- * diría que sí hay comprobantes y que suman nada.
+ * mes elegido). Las cifras las dicta el servidor (`cifras`): Ingreso, Egreso y Traslado
+ * traen retenciones y traslados; Nómina, sueldos y percepciones; Pago, las bases de IVA.
+ * Sin dato las cifras vienen en null y se muestran como guion: un cero diría que sí hay
+ * comprobantes y que suman nada.
  */
 export function CfdiTotales({
   totales,
+  cifras,
   preferencia,
 }: {
   totales: CfdiResumenResponse["totales"] | undefined;
+  cifras: CfdiCifra[] | undefined;
   preferencia?: ColumnaPreferida[] | null;
 }) {
-  const porClave = new Map(CIFRAS.map((c) => [c.clave, c]));
-  const cifras = columnasVisibles(CATALOGO_CIFRAS, preferencia).map((c) => porClave.get(c.clave as Cifra)!);
-
-  if (!totales) {
+  if (!totales || !cifras) {
     return (
       <div role="status" aria-label="Cargando totales">
         <Skeleton className="h-24 rounded-md" />
       </div>
     );
   }
+
+  const porClave = new Map(cifras.map((c) => [c.clave, c]));
+  const visibles = columnasVisibles(catalogoCifras(cifras), preferencia).map((c) => porClave.get(c.clave)!);
 
   return (
     <div className="overflow-x-auto rounded-md border bg-card">
@@ -72,14 +69,14 @@ export function CfdiTotales({
           <TableRow>
             <TableHead className="h-11" />
             <TableHead className="h-11 text-right">CFDI</TableHead>
-            {cifras.map(({ clave, encabezado }) => (
-              <TableHead key={clave} className="h-11 whitespace-nowrap text-right">{encabezado}</TableHead>
+            {visibles.map((cifra) => (
+              <TableHead key={cifra.clave} className="h-11 whitespace-nowrap text-right">{cifra.etiqueta}</TableHead>
             ))}
           </TableRow>
         </TableHeader>
         <TableBody>
-          <Renglon nombre="Periodo" bloque={totales.periodo} cifras={cifras} />
-          <Renglon nombre="Acumulado" bloque={totales.acumulado} cifras={cifras} />
+          <Renglon nombre="Periodo" bloque={totales.periodo} cifras={visibles} />
+          <Renglon nombre="Acumulado" bloque={totales.acumulado} cifras={visibles} />
         </TableBody>
       </Table>
     </div>
