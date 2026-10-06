@@ -194,3 +194,10 @@ def test_proxima_corrida_con_hora_invalida_usa_las_3(hora):
 def test_proxima_corrida_acepta_fecha_sin_zona_como_utc():
     ahora = datetime(2026, 10, 4, 1, 0)
     assert proxima_corrida(ahora, "03:00") > ahora.replace(tzinfo=timezone.utc)
+
+
+def test_el_barrido_puede_ser_solo_de_algunos_tipos():
+    plan = _plan(**DIARIA, meses_cancelacion=3, barrido_cancelados=frozenset({"recibidos"}))
+    rangos = {t: i for t, i, _ in _rangos(plan)}
+    assert rangos["recibidos"] == date(HOY.year - 1, 1, 1)
+    assert rangos["emitidos"] == date(2026, 7, 1)          # el otro tipo solo pide la ventana reciente

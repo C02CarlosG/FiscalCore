@@ -456,3 +456,29 @@ def test_la_carga_inicial_no_pide_metadatos(entorno):
     db, empresa, sat = entorno
     assert _correr_hasta_terminar(empresa, datetime.now(timezone.utc)) == "al_dia"
     assert _ventanas_de_metadatos(sat) == []
+
+
+def _metadato(db, empresa, tipo, inicio, fin, estado, creada="NOW()"):
+    db.execute(
+        "INSERT INTO sat_solicitudes (empresa_id, tipo, periodo_inicio, periodo_fin, estado, origen, tipo_solicitud, "
+        f"estado_comprobante, fecha_inicio, fecha_fin, created_at) VALUES (%s,%s,'2026-01','2026-10',%s,'cancelados','Metadata',"
+        f"'Cancelado',%s,%s,{creada})",
+        (empresa, tipo, estado, inicio, fin))
+
+
+def test_el_barrido_es_por_tipo_y_un_fallo_de_hoy_cuenta_como_pedido(entorno):
+    """Si el barrido de un tipo falló, no se da por hecho el del otro; y repetir hoy los mismos
+    parámetros gastaría el límite 5002, así que una solicitud fallida de hoy también cuenta."""
+    from backend import sat_sync
+
+    db, empresa, _sat = entorno
+    hoy = date(2026, 10, 10)
+    enero = date(hoy.year - 1, 1, 1)
+    _metadato(db, empresa, "emitidos", enero, hoy - timedelta(days=2), "descargado")     # barrido bueno de emitidos
+    _metadato(db, empresa, "recibidos", enero, hoy - timedelta(days=2), "fallo")         # el de recibidos falló
+    _metadato(db, empresa, "recibidos", enero, hoy, "fallo")                              # y hoy ya se intentó
+
+    barrido, de_hoy = sat_sync._estado_de_cancelados(empresa, hoy, sat_sync.ConfigSync())
+
+    assert barrido == frozenset({"recibidos"})
+    assert de_hoy == frozenset({"recibidos"})

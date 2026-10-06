@@ -279,3 +279,19 @@ def test_5002_con_una_parte_agotada_conserva_la_otra(bd, monkeypatch, intentos_p
 
     assert [f["estado"] for f in filas] == ["solicitado", "fallo"]
     assert bd.filas["sol-2"]["error_msg"].startswith("Parte 2 de 2 ")
+
+
+@pytest.mark.parametrize("inicio, fin", [
+    (date(2026, 10, 1), date(2026, 10, 31)),
+    (date(2026, 10, 20), date(2026, 10, 31)),    # empieza después del 15: el corte no puede quedar antes del inicio
+    (date(2026, 10, 16), date(2026, 10, 17)),
+    (date(2026, 10, 20), date(2026, 10, 20)),    # un solo día
+])
+@pytest.mark.parametrize("intento", [0, 1, 5])
+def test_rangos_partidos_cubren_el_periodo_sin_huecos_ni_inversiones(inicio, fin, intento):
+    from datetime import datetime, time, timedelta
+
+    (a1, a2), (b1, b2) = sat_sync.rangos_partidos(inicio, fin, intento)
+    assert a1 == datetime.combine(inicio, time.min) and b2 == datetime.combine(fin, time(23, 59, 59))
+    assert a1 < a2 and b1 <= b2                   # ningún rango invertido
+    assert b1 == a2 + timedelta(seconds=1)        # contiguos, sin dejar fuera ningún segundo
