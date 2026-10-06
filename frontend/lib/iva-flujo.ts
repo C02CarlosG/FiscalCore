@@ -58,7 +58,7 @@ export const ETIQUETA_MARCA: Record<string, string> = {
   tc_distante: "Equivalencia lejos del tipo de cambio",
   objeto_imp_inconsistente: "ObjetoImpDR contradice el CFDI",
   objeto_sin_desglose: "Objeto sin desglose de IVA",
-  forma_pago_rep: "Forma de pago del REP desconocida",
+  forma_pago_rep: "REP sin forma de pago registrada",
   sin_desglose: "Sin desglose por tasa",
   sin_equivalencia: "Sin equivalencia",
   sin_tipo_cambio: "Sin tipo de cambio",

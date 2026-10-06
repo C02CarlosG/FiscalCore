@@ -64,3 +64,32 @@ def test_ajuste_exige_motivo_con_texto(con_acceso):
 def test_detalle_valida_bloque_y_lado(con_acceso):
     assert client.get(f"{BASE}/2026-09/detalle", params={"lado": "ingreso", "bloque": "otro"}).status_code == 422
     assert client.get(f"{BASE}/2026-09/detalle", params={"lado": "x", "bloque": "contado"}).status_code == 422
+
+
+def test_exportar_arma_el_excel_con_detalle_y_resumen_y_audita(con_acceso, monkeypatch):
+    from io import BytesIO
+
+    import openpyxl
+
+    from backend import isr_flujo
+    from backend.tests.test_isr_flujo import doc, todos
+
+    eventos = todos(doc("U1", subtotal=1000))
+    auditado = []
+    monkeypatch.setattr(isr_flujo_datos, "cargar_ajustes", lambda e: {})
+    monkeypatch.setattr(isr_flujo_datos, "porcentaje_nomina_exenta", lambda e, ej: isr_flujo.PORCENTAJE_NOMINA_EXENTA)
+    monkeypatch.setattr(isr_flujo_datos, "cargar_eventos", lambda e, rfc, p: eventos)
+    monkeypatch.setattr(router, "registrar_evento", lambda *a, **k: auditado.append(k["metadata"]))
+
+    r = client.get(f"{BASE}/2026-09/exportar", params={"lado": "ingreso", "bloque": "contado"})
+
+    assert r.status_code == 200, r.text
+    wb = openpyxl.load_workbook(BytesIO(r.content))
+    assert wb.sheetnames == ["Detalle", "Resumen"]
+    assert wb["Detalle"].max_row == 2 and wb["Detalle"]["I2"].value == 1000
+    assert auditado[0]["filas"] == 1
+
+
+def test_exportar_rechaza_bloque_o_periodo_invalido(con_acceso):
+    assert client.get(f"{BASE}/2026-09/exportar", params={"lado": "ingreso", "bloque": "otro"}).status_code == 422
+    assert client.get(f"{BASE}/2026-13/exportar", params={"lado": "ingreso", "bloque": "contado"}).status_code == 422

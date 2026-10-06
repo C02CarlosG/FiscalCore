@@ -66,7 +66,7 @@ def cargar_eventos(empresa_id: str, rfc: str, periodo: str) -> list[dict]:
     pagos = db.query_all(
         """
         SELECT pc.uuid_cfdi_pago AS uuid_pago, pc.fecha_pago, pc.version_pago, pc.moneda AS pago_moneda,
-               pc.tipo_cambio AS pago_tipo_cambio, rep.estado AS pago_estado,
+               pc.tipo_cambio AS pago_tipo_cambio, pc.forma_pago AS forma_pago_p, rep.estado AS pago_estado,
                pr.cfdi_uuid, pr.parcialidad, pr.importe_pagado, pr.moneda_dr, pr.equivalencia_dr,
                pc.monto AS pago_monto, agg.suma_equivalente, agg.n_relaciones
         FROM pagos_relaciones pr
