@@ -16,6 +16,7 @@ from typing import Any, Optional
 ESTADOS = ("activa", "suspendida", "cancelada")
 CENTAVOS = Decimal("0.01")
 PRECIO_MAXIMO = Decimal("10000000")
+MAX_RFC_TOPE = 2**31 - 1  # planes.max_rfc es INTEGER
 MAX_NOTAS = 1000
 _CLAVE_RE = re.compile(r"^[a-z][a-z0-9_]{1,29}$")
 
@@ -64,6 +65,11 @@ def mensaje_limite(plan: dict, de_tercero: bool = False) -> str:
     """``de_tercero``: el límite es de otra cuenta (por ejemplo, la persona que se aprueba
     como administradora de una empresa), así que el mensaje no le habla a quien actúa."""
     n = plan["max_rfc"]
+    if n == 0:
+        if de_tercero:
+            return (f"El plan {plan['nombre']} de esa persona no incluye RFC. "
+                    "Necesita un cambio de plan para administrar una empresa.")
+        return f"Tu plan {plan['nombre']} no incluye RFC. Pide un cambio de plan para agregar una empresa."
     if de_tercero:
         usados = "ya lo usa" if n == 1 else "ya los usa"
         return (
@@ -116,8 +122,9 @@ def validar_plan(clave: str, cuerpo: dict) -> dict:
     except (InvalidOperation, ValueError, TypeError):
         raise DatoInvalido("precio_mensual debe ser un importe de 0 o más")
     max_rfc: Any = cuerpo.get("max_rfc")
-    if max_rfc is not None and (isinstance(max_rfc, bool) or not isinstance(max_rfc, int) or max_rfc < 0):
-        raise DatoInvalido("max_rfc debe ser un entero de 0 o más, o null para ilimitado")
+    if max_rfc is not None and (isinstance(max_rfc, bool) or not isinstance(max_rfc, int)
+                                or not 0 <= max_rfc <= MAX_RFC_TOPE):
+        raise DatoInvalido(f"max_rfc debe ser un entero de 0 a {MAX_RFC_TOPE}, o null para ilimitado")
     activo = cuerpo.get("activo", True)
     if not isinstance(activo, bool):  # bool("false") sería True
         raise DatoInvalido("activo debe ser true o false")

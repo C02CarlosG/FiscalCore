@@ -212,7 +212,7 @@ async def listar_usuarios(empresa_id: uuid.UUID, current_user: dict = Depends(ge
         # reconocer a quien se registró con un correo ajeno.
         por_aprobar = db.query_all(
             """
-            SELECT i.id, i.email, i.rol, i.respondida_at, u.nombre, u.email AS email_cuenta,
+            SELECT i.id, i.email AS email_invitado, i.rol, i.respondida_at, u.nombre, u.email AS email_cuenta,
                    u.created_at AS cuenta_creada
             FROM invitaciones_empresa i
             JOIN usuarios u ON u.id = i.respondida_por
@@ -228,7 +228,8 @@ async def listar_usuarios(empresa_id: uuid.UUID, current_user: dict = Depends(ge
         "invitaciones": [_invitacion(f) for f in invitaciones],
         "por_aprobar": [
             {
-                "id": str(f["id"]), "email": f["email_cuenta"], "nombre": f.get("nombre"), "rol": f["rol"],
+                "id": str(f["id"]), "email": f["email_cuenta"], "email_invitado": f["email_invitado"],
+                "nombre": f.get("nombre"), "rol": f["rol"],
                 "cuenta_creada": f["cuenta_creada"].isoformat() if f.get("cuenta_creada") else None,
                 "aceptada": f["respondida_at"].isoformat() if f.get("respondida_at") else None,
             }
@@ -341,11 +342,20 @@ async def invitar(
             ON CONFLICT (empresa_id, email) WHERE estado IN ('pendiente', 'aceptada_pendiente')
             DO UPDATE SET rol = EXCLUDED.rol, invitada_por = EXCLUDED.invitada_por,
                           created_at = NOW(), expires_at = NOW() + INTERVAL '7 days'
+            WHERE invitaciones_empresa.estado = 'pendiente'
             RETURNING id, email, rol, estado, created_at
             """,
             (eid, email, rol, current_user["user_id"]),
         )
-        fila = dict(cur.fetchone())
+        fila = cur.fetchone()
+        if fila is None:
+            # Ya la aceptaron: re-invitar no cambia el rol ni renueva el plazo de lo que
+            # el administrador está por aprobar.
+            raise HTTPException(
+                status_code=409,
+                detail="Esa persona ya aceptó una invitación que espera aprobación: apruébala o recházala",
+            )
+        fila = dict(fila)
     registrar_evento(
         current_user["user_id"], "cuenta.invitar", empresa_id=eid, entidad="invitacion",
         entidad_id=str(fila["id"]), metadata=_metadata(via_admin, {"email": email, "rol": rol}),
@@ -384,7 +394,7 @@ def _resolver(empresa_id: uuid.UUID, invitacion_id: uuid.UUID, current_user: dic
     with _miembros_bloqueados(eid) as (cur, miembros, roles):
         _exigir_administrador(current_user, roles, rol_plataforma)
         cur.execute(
-            "SELECT i.id, i.rol, i.respondida_por FROM invitaciones_empresa i "
+            "SELECT i.id, i.rol, i.respondida_por, i.email, u.email AS email_cuenta FROM invitaciones_empresa i "
             "JOIN usuarios u ON u.id = i.respondida_por AND u.activo IS NOT FALSE "
             "WHERE i.id = %s AND i.empresa_id = %s AND i.estado = 'aceptada_pendiente' AND i.expires_at > NOW() "
             "FOR UPDATE OF i",
@@ -395,7 +405,21 @@ def _resolver(empresa_id: uuid.UUID, invitacion_id: uuid.UUID, current_user: dic
             raise HTTPException(status_code=404, detail="Invitación no encontrada")
         promovidos = []
         if aprobar:
-            if inv["rol"] == "administrador":
+            # B1 otra vez al aprobar: si desde que aceptó apareció otra cuenta con el mismo
+            # correo en minúsculas (o el de la cuenta ya no es el invitado), no se aprueba.
+            correo = inv["email_cuenta"].strip().lower()
+            cur.execute("SELECT COUNT(*) AS n FROM usuarios WHERE lower(btrim(email)) = %s", (correo,))
+            if correo != inv["email"] or cur.fetchone()["n"] > 1:
+                registrar_evento(current_user["user_id"], "cuenta.correo_ambiguo", empresa_id=eid,
+                                 entidad="invitacion", entidad_id=str(invitacion_id),
+                                 metadata=_metadata(via_admin, {"usuario": str(inv["respondida_por"])}))
+                raise HTTPException(
+                    status_code=409,
+                    detail="El correo de esa cuenta ya no identifica a una sola persona; no se puede aprobar",
+                )
+            # Administra la empresa si se le invitó como administrador o si es el primer
+            # vínculo (administrador implícito): eso suma un RFC a su plan (M7.1).
+            if inv["rol"] == "administrador" or not miembros:
                 _verificar_plan(cur, str(inv["respondida_por"]), current_user)
             promovidos = _fijar_administradores(cur, eid, miembros, roles)
             cur.execute(

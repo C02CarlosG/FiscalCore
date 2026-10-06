@@ -28,6 +28,14 @@ function renderCon(ui: React.ReactElement, datos: MiSuscripcionDatos = mia()) {
   vi.mocked(apiFetch).mockImplementation(async (ruta: string, opciones?: RequestInit) => {
     if (ruta === "/api/v1/suscripcion") return datos;
     if (ruta === "/api/v1/suscripcion/planes") return planes;
+    if (ruta === "/api/v1/suscripcion/historial") {
+      return [{ fecha: "2026-10-01T12:00:00+00:00", plan_clave: "basico", plan_nombre: "Básico", estado: "activa",
+                vigente_hasta: null }];
+    }
+    if (ruta === "/api/v1/suscripcion/admin/cuentas/u9/historial") {
+      return [{ fecha: "2026-10-01T12:00:00+00:00", plan_clave: "basico", plan_nombre: "Básico", estado: "suspendida",
+                vigente_hasta: "2026-12-31", notas: "pago SPEI", asignada_por: "admin@despacho.mx" }];
+    }
     if (ruta.startsWith("/api/v1/suscripcion/admin/cuentas?")) {
       return [{ usuario_id: "u9", email: "ana@despacho.mx", nombre: "Ana", es_admin_plataforma: false,
                 plan_clave: null, estado: null, vigente_hasta: null, notas: null, uso_rfc: 1 }];
@@ -71,6 +79,25 @@ describe("MiSuscripcion", () => {
 describe("AdminSuscripciones", () => {
   beforeEach(() => {
     vi.mocked(apiFetch).mockReset();
+  });
+
+  it("muestra el historial de mi plan sin notas internas", async () => {
+    renderCon(<MiSuscripcion />);
+    const tabla = await screen.findByRole("table", { name: "Historial de plan" });
+    expect(within(tabla).getByText("Básico")).toBeInTheDocument();
+    expect(within(tabla).getByText("Sin vencimiento")).toBeInTheDocument();
+    expect(within(tabla).queryByText("Notas")).not.toBeInTheDocument();
+  });
+
+  it("el administrador abre el historial completo de una cuenta", async () => {
+    const user = userEvent.setup();
+    renderCon(<AdminSuscripciones />, mia({ es_admin_plataforma: true }));
+    await user.click(await screen.findByRole("button", { name: "Historial de ana@despacho.mx" }));
+    const tabla = await screen.findByRole("table", { name: "Historial de plan" });
+    expect(within(tabla).getByText("pago SPEI")).toBeInTheDocument();
+    expect(within(tabla).getByText("admin@despacho.mx")).toBeInTheDocument();
+    expect(within(tabla).getByText("Suspendida")).toBeInTheDocument();
+    expect(apiFetch).toHaveBeenCalledWith("/api/v1/suscripcion/admin/cuentas/u9/historial");
   });
 
   it("asigna un plan a una cuenta", async () => {

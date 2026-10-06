@@ -14,8 +14,9 @@ import { apiFetch, ApiError } from "@/lib/api-client";
 
 const BASE = "/api/v1/validaciones-cfdi/empresas/e1";
 
-const tarjeta = (clave: string, titulo: string, periodo: number | null, acumulado: number | null, activa = true) =>
-  ({ clave, titulo, descripcion: `Descripción de ${titulo}`, activa, periodo, acumulado }) as const;
+const tarjeta = (clave: string, titulo: string, periodo: number | null, acumulado: number | null, activa = true,
+                 tipo: "exclusion" | "advertencia" = "exclusion") =>
+  ({ clave, titulo, descripcion: `Descripción de ${titulo}`, tipo, activa, periodo, acumulado }) as const;
 
 const resumen: ResumenValidaciones = {
   periodo: "2026-03",
@@ -30,6 +31,7 @@ const resumen: ResumenValidaciones = {
     tarjeta("pue_con_rep", "PUE con complemento de pago", null, null, false),
     tarjeta("egreso_sin_relacion", "Egresos sin CFDI relacionado", 0, 0),
     tarjeta("no_bancarizado", "Gastos no bancarizados", 4, 9),
+    tarjeta("gas_efectivo", "Gas pagado en efectivo", 1, 2, true, "advertencia"),
   ] as ResumenValidaciones["recibidos"],
 };
 
@@ -72,6 +74,13 @@ describe("ValidacionesPanel", () => {
     expect(pue99).toHaveTextContent("Acumulado: 2");
     const recibidos = screen.getByRole("region", { name: "Recibidos" });
     expect(within(recibidos).getByRole("button", { name: /Gastos no bancarizados/ })).toHaveTextContent("Acumulado: 9");
+  });
+
+  it("marca como advertencia la del gas en efectivo, solo esa", async () => {
+    renderPanel();
+    const gas = await screen.findByRole("button", { name: /Gas pagado en efectivo/ });
+    expect(gas).toHaveTextContent("Advertencia");
+    expect(screen.getAllByText("Advertencia")).toHaveLength(1);
   });
 
   it("una validación desactivada no se puede abrir", async () => {
