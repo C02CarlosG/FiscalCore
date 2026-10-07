@@ -3857,6 +3857,95 @@ paths:
         '422':
           description: Clave fuera del catálogo
 
+  /api/v1/reinicio/empresas/{empresa_id}/previsualizar:
+    post:
+      operationId: previsualizarReinicio
+      tags: [Reinicio]
+      summary: Paso 1 de «Reiniciar datos»; conteos de lo que se borraría, frase y token de un solo uso (10 minutos)
+      description: |
+        Solo el administrador de la empresa (o de la plataforma). Lista exacta de tablas en
+        `docs/superpowers/specs/2026-10-06-reinicio-datos-design.md`. Se audita
+        `empresa.reiniciar_previsualizar`.
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [alcance]
+              properties:
+                alcance: { type: string, enum: [todo] }
+      responses:
+        '200':
+          description: Vista previa
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  conteos: { type: object, additionalProperties: { type: integer } }
+                  total_cfdi: { type: integer }
+                  frase: { type: string, example: REINICIAR ACM010101AA1 }
+                  token: { type: string }
+                  expira_en: { type: string, format: date-time }
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '409':
+          description: Más de 50,000 CFDI; se hará en segundo plano en una entrega futura
+        '422':
+          description: Alcance inválido (solo «todo»)
+
+  /api/v1/reinicio/empresas/{empresa_id}/confirmar:
+    post:
+      operationId: confirmarReinicio
+      tags: [Reinicio]
+      summary: Paso 2 de «Reiniciar datos»; borra los datos operativos de la empresa en una transacción
+      description: |
+        Exige el token de la vista previa (vigente, sin usar, del mismo usuario y empresa), la
+        frase exacta y la contraseña actual. Pausa la descarga automática del SAT. Se audita
+        `empresa.reiniciar`. Límite de 5 por minuto por usuario.
+      parameters:
+        - $ref: '#/components/parameters/EmpresaId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, frase, contrasena]
+              properties:
+                token: { type: string }
+                frase: { type: string }
+                contrasena: { type: string, format: password }
+      responses:
+        '200':
+          description: Reiniciada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  borrados: { type: object, additionalProperties: { type: integer } }
+                  sincronizacion_pausada: { type: boolean }
+        '400':
+          description: Frase incorrecta, o token inválido o vencido; no se borró nada
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          description: Contraseña incorrecta o sin permiso; no se borró nada
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '409':
+          description: El token ya se usó o el reinicio ya se está ejecutando
+        '429':
+          description: Demasiados intentos
+
   /api/v1/informacion-fiscal/empresas/{empresa_id}/documentos:
     get:
       operationId: historialDocumentosFiscales

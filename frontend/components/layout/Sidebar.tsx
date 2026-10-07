@@ -21,6 +21,7 @@ import {
   Upload,
   UserRound,
   Users,
+  RotateCcw,
 } from "lucide-react";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { EmpresaSwitcher } from "@/components/layout/EmpresaSwitcher";
@@ -40,6 +41,7 @@ const NAV_ITEMS = [
   { slug: "informacion-fiscal", label: "Información fiscal", icon: FileCheck2 },
   { slug: "validaciones", label: "Validaciones", icon: ListChecks },
   { slug: "usuarios", label: "Usuarios", icon: Users },
+  { slug: "reiniciar", label: "Reiniciar datos", icon: RotateCcw },
 ] as const;
 
 const CFDI_GROUP = {

@@ -284,6 +284,9 @@ def init_db() -> None:
         # 066 es idempotente — datos fiscales y pagos manuales de la suscripción (M7.2, D10, carril D)
         _run_sql_file("066_suscripciones_pagos.sql")
 
+        # 067 es idempotente — tokens e historial de «Reiniciar datos» (carril D)
+        _run_sql_file("067_reinicios_empresa.sql")
+
         # Seed inicial: usuario admin si la base aún no tiene usuarios
         _seed_admin()
 
