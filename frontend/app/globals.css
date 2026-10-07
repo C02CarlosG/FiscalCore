@@ -3,27 +3,39 @@
 @tailwind utilities;
 
 @layer base {
+  /*
+   * Sistema de color FiscalCore — marca índigo coherente en claro y oscuro.
+   * Antes el primario era índigo en claro pero verde en oscuro (incoherente),
+   * y el fondo oscuro era casi negro puro (210 14% 3%), demasiado duro.
+   * Ahora ambos temas comparten la familia índigo y neutrales con un matiz
+   * frío sutil; el oscuro es un navy índigo profundo (no negro) con tarjetas
+   * ligeramente elevadas para dar jerarquía.
+   */
   :root {
-    --background: 240 33% 98%;
-    --foreground: 248 20% 11%;
+    --background: 240 30% 98%;
+    --foreground: 240 24% 11%;
     --card: 0 0% 100%;
-    --card-foreground: 248 20% 11%;
+    --card-foreground: 240 24% 11%;
     --popover: 0 0% 100%;
-    --popover-foreground: 248 20% 11%;
-    --primary: 243 75% 59%;
+    --popover-foreground: 240 24% 11%;
+    --primary: 243 72% 56%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 245 30% 95%;
-    --secondary-foreground: 248 20% 11%;
-    --muted: 245 30% 95%;
-    --muted-foreground: 247 8% 45%;
-    --accent: 246 78% 95%;
-    --accent-foreground: 244 62% 47%;
+    --secondary: 243 32% 95%;
+    --secondary-foreground: 243 34% 26%;
+    --muted: 240 24% 95%;
+    --muted-foreground: 240 10% 42%;
+    --accent: 243 76% 95%;
+    --accent-foreground: 243 62% 45%;
     --destructive: 0 72% 51%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 245 30% 92%;
-    --input: 245 30% 88%;
-    --ring: 243 75% 59%;
-    --radius: 0.5rem;
+    --destructive-foreground: 0 0% 100%;
+    --border: 240 22% 90%;
+    --input: 240 22% 86%;
+    --ring: 243 72% 56%;
+    --radius: 0.625rem;
+
+    /* Acento de marca para realces (gradientes, anillos de foco destacados). */
+    --brand: 243 72% 56%;
+    --brand-contrast: 266 70% 60%;
 
     --severity-critico: #DC2626;
     --severity-critico-soft: #FDECEC;
@@ -42,25 +54,28 @@
   }
 
   .dark {
-    --background: 210 14% 3%;
-    --foreground: 146 18% 92%;
-    --card: 200 10% 6%;
-    --card-foreground: 146 18% 92%;
-    --popover: 200 10% 6%;
-    --popover-foreground: 146 18% 92%;
-    --primary: 161 44% 29%;
-    --primary-foreground: 146 18% 92%;
-    --secondary: 144 10% 10%;
-    --secondary-foreground: 146 18% 92%;
-    --muted: 144 10% 10%;
-    --muted-foreground: 156 8% 65%;
-    --accent: 160 43% 40%;
-    --accent-foreground: 146 18% 92%;
-    --destructive: 0 49% 32%;
-    --destructive-foreground: 0 99% 98%;
-    --border: 153 12% 19%;
-    --input: 144 10% 10%;
-    --ring: 160 43% 40%;
+    --background: 240 20% 8%;
+    --foreground: 240 16% 92%;
+    --card: 240 17% 11%;
+    --card-foreground: 240 16% 92%;
+    --popover: 240 17% 12%;
+    --popover-foreground: 240 16% 92%;
+    --primary: 243 82% 72%;
+    --primary-foreground: 243 45% 12%;
+    --secondary: 240 14% 17%;
+    --secondary-foreground: 240 16% 92%;
+    --muted: 240 14% 17%;
+    --muted-foreground: 240 10% 65%;
+    --accent: 243 38% 24%;
+    --accent-foreground: 243 80% 86%;
+    --destructive: 0 62% 56%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 240 14% 21%;
+    --input: 240 14% 23%;
+    --ring: 243 82% 72%;
+
+    --brand: 243 82% 72%;
+    --brand-contrast: 266 78% 74%;
 
     --severity-critico: #F87171;
     --severity-critico-soft: #3A1B1F;
@@ -90,7 +105,26 @@
 
   body {
     @apply bg-background text-foreground;
+    font-feature-settings: "ss01" on, "cv01" on;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Los encabezados usan la fuente display (Sora) con un tracking ajustado
+     para una jerarquía más nítida y de aspecto editorial. */
+  h1, h2, h3, h4 {
+    font-family: var(--font-sora), var(--font-public-sans), system-ui, sans-serif;
+    letter-spacing: -0.02em;
     font-feature-settings: "ss01" on;
+  }
+
+  /* Cifras monetarias y tabulares: ancho fijo para que las columnas cuadren. */
+  .font-mono,
+  .tabular-nums,
+  [class*="tabular"] {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum" on, "zero" on;
   }
 
   button,
@@ -101,7 +135,12 @@
   }
 
   ::selection {
-    @apply bg-primary/15 text-foreground;
+    @apply bg-primary/20 text-foreground;
+  }
+
+  /* Anillo de foco visible y de marca en todo elemento interactivo. */
+  :focus-visible {
+    @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-background;
   }
 }
 
