@@ -181,8 +181,8 @@ export function Header({ onMenuClick }: { onMenuClick: () => void }) {
             type="button"
             aria-label={session?.nombre ?? "Cuenta"}
           >
-            <Avatar className="h-9 w-9 border border-border">
-              <AvatarFallback className="bg-accent text-xs font-bold text-accent-foreground">
+            <Avatar className="h-9 w-9 ring-1 ring-border transition-shadow hover:ring-primary/40">
+              <AvatarFallback className="bg-gradient-to-br from-primary to-primary/60 text-xs font-bold text-primary-foreground">
                 {iniciales}
               </AvatarFallback>
             </Avatar>
