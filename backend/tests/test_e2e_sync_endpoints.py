@@ -84,6 +84,7 @@ def test_estado_sin_configuracion_devuelve_los_valores_por_defecto(entorno):
         "activa": False, "estado": "inactiva", "motivo_pausa": None, "ultima_exitosa": None,
         "proxima_corrida": None, "carga_inicial_ok": False, "consentimiento_por": None,
         "consentimiento_el": None, "progreso": {"total": 0, "terminadas": 0, "fallidas": 0},
+        "cancelados_fallidas": 0,
     }
 
 
@@ -329,3 +330,15 @@ def test_un_usuario_sin_acceso_a_la_empresa_recibe_403(entorno, metodo, ruta, cu
 def test_sin_sesion_recibe_401(entorno, metodo, ruta):
     _db, client, _h, empresa = entorno
     assert client.request(metodo, _url(empresa, ruta)).status_code == 401
+
+
+def test_estado_informa_las_ventanas_de_cancelados_que_fallaron_en_la_ultima_corrida(entorno):
+    from backend import sat_sync
+
+    db, _client, _headers, empresa = entorno
+    assert _activar(entorno).status_code == 200
+    assert _estado(entorno)["cancelados_fallidas"] == 0
+    sat_sync._auditar(empresa, "sync_corrida_fin", resultado="al_dia", cancelados_fallidas=2)
+    assert _estado(entorno)["cancelados_fallidas"] == 2
+    sat_sync._auditar(empresa, "sync_corrida_fin", resultado="al_dia", cancelados_fallidas=0)
+    assert _estado(entorno)["cancelados_fallidas"] == 0          # manda la última corrida

@@ -167,11 +167,17 @@ class SolicitudActiva(Exception):
 def rangos_partidos(inicio: date, fin: date, intento: int) -> list[tuple[datetime, datetime]]:
     """Parte el periodo en dos rangos contiguos que lo cubren segundo a segundo.
 
-    El corte cae el día 15 a las 23:59:59 menos ``intento`` segundos, así cada
-    intento manda al SAT fechas distintas a las anteriores (el límite 5002 es por
-    parámetros idénticos) sin dejar fuera ningún CFDI del periodo.
+    El corte cae a las 23:59:59 menos ``intento`` segundos del día 15 (si el periodo lo
+    contiene) o, si no, del día de en medio, así cada intento manda al SAT fechas distintas
+    a las anteriores (el límite 5002 es por parámetros idénticos) sin dejar fuera ningún
+    CFDI ni invertir el rango cuando el periodo empieza después del 15.
     """
-    corte = datetime.combine(inicio.replace(day=15), time(23, 59, 59)) - timedelta(seconds=intento)
+    dia_corte = inicio.replace(day=15)
+    if not inicio <= dia_corte < fin:
+        dia_corte = inicio + (fin - inicio) // 2
+    # un periodo de un solo día se parte a medio día; si no, el segundo rango quedaría vacío
+    hora_corte = time(23, 59, 59) if inicio < fin else time(12, 0, 0)
+    corte = datetime.combine(dia_corte, hora_corte) - timedelta(seconds=intento)
     return [
         (datetime.combine(inicio, time.min), corte),
         (corte + timedelta(seconds=1), datetime.combine(fin, time(23, 59, 59))),
@@ -789,7 +795,7 @@ def planear_corrida(
     traslape_dias: int,
     descargadas: set[tuple[str, date, date]],
     meses_cancelacion: int | None = None,
-    barrido_cancelados: bool = False,
+    barrido_cancelados: bool | frozenset[str] = False,
     metadatos_hoy: frozenset[str] = frozenset(),
 ) -> list[VentanaPlan]:
     """Decide qué ventanas hay que pedir al SAT en esta corrida.
@@ -804,8 +810,9 @@ def planear_corrida(
     - **Cancelados**: solo en la corrida diaria y si ``meses_cancelacion`` no es ``None``: una
       ventana de metadatos por tipo, **siempre con ``fin = hoy``** (así los parámetros no se
       repiten de un día a otro y no se gasta el límite 5002). Normalmente cubre el mes en curso
-      y los ``meses_cancelacion`` anteriores; con ``barrido_cancelados`` (cada
-      ``dias_barrido_cancelados`` días) cubre desde enero del ejercicio anterior, porque el SAT
+      y los ``meses_cancelacion`` anteriores; con ``barrido_cancelados`` (``True`` para todos los
+      tipos o el conjunto de tipos a barrer; cada ``dias_barrido_cancelados`` días) cubre desde
+      enero del ejercicio anterior, porque el SAT
       filtra por fecha de **emisión** y una cancelación puede ocurrir meses después. Los tipos
       en ``metadatos_hoy`` ya se verificaron hoy y no se piden otra vez.
 
@@ -824,11 +831,12 @@ def planear_corrida(
             plan.append(VentanaPlan(tipo, inicio, fin, origen))
 
     if origen == "diaria" and meses_cancelacion is not None:
-        inicio = (date(hoy.year - 1, 1, 1) if barrido_cancelados
-                  else _restar_meses(hoy.replace(day=1), meses_cancelacion))
         for tipo in TIPOS_DESCARGA:
-            if tipo not in metadatos_hoy:
-                plan.append(VentanaPlan(tipo, inicio, hoy, "cancelados", "Metadata", "Cancelado"))
+            if tipo in metadatos_hoy:
+                continue
+            barre = barrido_cancelados if isinstance(barrido_cancelados, bool) else tipo in barrido_cancelados
+            inicio = date(hoy.year - 1, 1, 1) if barre else _restar_meses(hoy.replace(day=1), meses_cancelacion)
+            plan.append(VentanaPlan(tipo, inicio, hoy, "cancelados", "Metadata", "Cancelado"))
     return plan
 
 
@@ -961,29 +969,31 @@ def _solicitudes_de_la_corrida(empresa_id: str) -> list[dict]:
 
 def _estado_de_cancelados(
     empresa_id: str, hoy: date, config: ConfigSync, corrida_inicio: datetime | None = None,
-) -> tuple[bool, frozenset[str]]:
-    """(¿toca el barrido largo?, tipos cuyos metadatos ya se pidieron hoy).
+) -> tuple[frozenset[str], frozenset[str]]:
+    """(tipos a los que toca el barrido largo, tipos cuyos metadatos ya se pidieron hoy).
 
-    El barrido toca si no hay uno bueno (``descargado``) de los últimos ``dias_barrido_cancelados``
-    días **anterior a esta corrida**: lo pedido en la propia corrida no cuenta, para que la
-    decisión no cambie entre vueltas del worker (si no, el segundo tipo pediría la ventana corta
-    en cuanto el primero termine su barrido). Un tipo se da por verificado hoy si ya tiene una
-    solicitud de metadatos que termina hoy."""
+    A un tipo le toca el barrido si no tiene uno bueno (``descargado``) de los últimos
+    ``dias_barrido_cancelados`` días **anterior a esta corrida**: lo pedido en la propia corrida
+    no cuenta, para que la decisión no cambie entre vueltas del worker (si no, el segundo tipo
+    pediría la ventana corta en cuanto el primero termine su barrido). Es por tipo: si el
+    barrido de uno falló, no se da por hecho el del otro. Un tipo se da por verificado hoy si ya
+    tiene una solicitud de metadatos que termina hoy, **incluida una que falló**: repetir los
+    mismos parámetros el mismo día gasta el límite 5002 del SAT."""
     inicio_barrido = date(hoy.year - 1, 1, 1)
-    hecho = db.query_one(
-        """SELECT 1 AS ok FROM sat_solicitudes
+    con_barrido = db.query_all(
+        """SELECT DISTINCT tipo FROM sat_solicitudes
            WHERE empresa_id=%s AND tipo_solicitud='Metadata' AND estado='descargado' AND fecha_inicio=%s
              AND created_at >= NOW() - make_interval(days => %s)
-             AND (%s::timestamptz IS NULL OR created_at < %s::timestamptz)
-           LIMIT 1""",
+             AND (%s::timestamptz IS NULL OR created_at < %s::timestamptz)""",
         (empresa_id, inicio_barrido, config.dias_barrido_cancelados, corrida_inicio, corrida_inicio),
     )
     de_hoy = db.query_all(
         """SELECT DISTINCT tipo FROM sat_solicitudes
-           WHERE empresa_id=%s AND tipo_solicitud='Metadata' AND fecha_fin=%s AND estado <> 'fallo'""",
+           WHERE empresa_id=%s AND tipo_solicitud='Metadata' AND fecha_fin=%s""",
         (empresa_id, hoy),
     )
-    return hecho is None, frozenset(f["tipo"] for f in de_hoy)
+    hechos = {f["tipo"] for f in con_barrido}
+    return frozenset(t for t in TIPOS_DESCARGA if t not in hechos), frozenset(f["tipo"] for f in de_hoy)
 
 
 def _plan_de_la_corrida(empresa_id: str, cfg: dict, ahora: datetime, config: ConfigSync):
@@ -1238,6 +1248,7 @@ def estado_sync(empresa_id: str) -> dict:
             "activa": False, "estado": "inactiva", "motivo_pausa": None, "ultima_exitosa": None,
             "proxima_corrida": None, "carga_inicial_ok": False, "consentimiento_por": None,
             "consentimiento_el": None, "progreso": {"total": 0, "terminadas": 0, "fallidas": 0},
+            "cancelados_fallidas": 0,
         }
     return {
         "activa": bool(cfg["activa"]),
@@ -1249,7 +1260,19 @@ def estado_sync(empresa_id: str) -> dict:
         "consentimiento_por": str(cfg["consentimiento_por"]) if cfg["consentimiento_por"] else None,
         "consentimiento_el": _iso(cfg["consentimiento_el"]),
         "progreso": _progreso(empresa_id, cfg),
+        "cancelados_fallidas": _cancelados_fallidas_ultima_corrida(empresa_id),
     }
+
+
+def _cancelados_fallidas_ultima_corrida(empresa_id: str) -> int:
+    """Ventanas de metadatos de cancelados que fallaron en la última corrida cerrada: la
+    verificación de cancelaciones es de mejor esfuerzo y no pone la corrida en ``error``."""
+    fila = db.query_one(
+        """SELECT metadata->>'cancelados_fallidas' AS n FROM auditoria
+           WHERE empresa_id=%s AND accion='sync_corrida_fin' ORDER BY creado_en DESC LIMIT 1""",
+        (empresa_id,),
+    )
+    return int(fila["n"] or 0) if fila else 0
 
 
 def _exigir_efirma_vigente(empresa_id: str) -> None:

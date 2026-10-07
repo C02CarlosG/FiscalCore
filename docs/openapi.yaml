@@ -5868,6 +5868,12 @@ components:
               type: integer
             fallidas:
               type: integer
+        cancelados_fallidas:
+          type: integer
+          description: |
+            Ventanas de metadatos de cancelados que fallaron en la ultima corrida cerrada. La
+            verificacion de cancelaciones es de mejor esfuerzo: no pone la corrida en error,
+            pero con un valor mayor a cero las cancelaciones recientes pueden no estar al dia.
 
     SyncIniciadoResponse:
       type: object
