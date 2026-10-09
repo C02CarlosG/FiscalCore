@@ -6,7 +6,7 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 import backend.main_api as main
-from backend import iva_flujo_datos
+from backend import iva_flujo_datos, cierre as cierre_logic
 from backend.deps import get_current_user
 from backend.routers import iva_flujo as router
 
@@ -20,6 +20,9 @@ def con_acceso(monkeypatch):
     main.app.dependency_overrides[get_current_user] = lambda: {"user_id": "u1"}
     monkeypatch.setattr(router, "validar_acceso_empresa", lambda *a, **k: None)
     monkeypatch.setattr(router, "empresa_or_404", lambda eid: {"id": eid, "rfc": "AAA010101AAA"})
+    monkeypatch.setattr(cierre_logic, "periodo_esta_cerrado", lambda *a, **k: False)
+    # Mock para queries de CFDI en endpoints DELETE
+    monkeypatch.setattr(router.db, "query_one", lambda *a, **k: {"fecha_emision": datetime(2026, 9, 10)})
     yield
     main.app.dependency_overrides.clear()
 
