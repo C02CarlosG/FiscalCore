@@ -652,6 +652,7 @@ export interface IsrDetalle {
   por_pagina: number;
 }
 
+<<<<<<< HEAD
 // ── Proveedores (F6.1) ────────────────────────────────────────────────────────
 
 export interface Proveedor {
@@ -689,3 +690,68 @@ export interface ProveedorIn {
 }
 
 export type ProveedorPatch = Partial<Omit<ProveedorIn, "rfc">>;
+
+// ── Comparativo contra lo declarado (M5) ─────────────────────────────────────
+
+export type ImpuestoDeclarado = "iva" | "isr";
+export type EstadoRenglon = "cuadra" | "diferencia" | "sin_captura" | "sin_calculo";
+export type EstadoDeclaracion = "sin_declaracion" | "cuadra" | "con_diferencias" | "sin_comparar";
+
+export interface Declaracion {
+  periodo: string;
+  impuesto: ImpuestoDeclarado;
+  secuencia: number;
+  tipo: "normal" | "complementaria";
+  fecha_presentacion: string | null;
+  numero_operacion: string | null;
+  ingresos: number | null;
+  deducciones: number | null;
+  impuesto_trasladado: number | null;
+  impuesto_acreditable: number | null;
+  retenciones: number | null;
+  retenciones_a_terceros: number | null;
+  saldo_a_favor_aplicado: number | null;
+  impuesto_a_cargo: number | null;
+  monto_pagado: number | null;
+  notas: string;
+  updated_at: string;
+}
+
+export interface DeclaracionRenglon {
+  clave: string;
+  etiqueta: string;
+  declarado: number | null;
+  calculado: number | null;
+  diferencia: number | null;
+  estado: EstadoRenglon;
+}
+
+export interface ImpuestoComparado {
+  impuesto: ImpuestoDeclarado;
+  estado: EstadoDeclaracion;
+  declaracion: Declaracion | null;
+  declaraciones: number;
+  renglones: DeclaracionRenglon[];
+  pendiente_de_pago: number | null;
+}
+
+export interface ComparativoDeclarado {
+  empresa_id: string;
+  periodo: string;
+  factor_prorrateo: number;
+  iva: ImpuestoComparado;
+  isr: ImpuestoComparado;
+  aviso: string;
+}
+
+/** Importes como texto con hasta dos decimales (el servidor los valida); vacío = no capturado. */
+export type DeclaracionIn = {
+  tipo: "normal" | "complementaria";
+  fecha_presentacion: string | null;
+  numero_operacion: string | null;
+  notas: string;
+} & Partial<Record<
+  | "ingresos" | "deducciones" | "impuesto_trasladado" | "impuesto_acreditable" | "retenciones"
+  | "retenciones_a_terceros" | "saldo_a_favor_aplicado" | "impuesto_a_cargo" | "monto_pagado",
+  string | null
+>>;

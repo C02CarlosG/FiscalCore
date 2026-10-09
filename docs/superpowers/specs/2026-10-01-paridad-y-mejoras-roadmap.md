@@ -423,6 +423,7 @@ pausa.
 | 2026-10-06 | D → A, B, C | «Reiniciar datos» (carril D) borra, para una empresa: `recomendaciones`, `detecciones`, `conciliaciones`, `scoring_fiscal`, `periodos_procesados`, `iva_ajustes`, `isr_ajustes`, `diot_operaciones_cfdi`, `diot_terceros_periodo`, `movimientos_bancarios`, `pagos_cfdi` (y sus cascadas), `cfdi` (y sus cascadas) y `sat_solicitudes` terminadas; pausa `sat_sync_config`. Revisen la lista (spec `2026-10-06-reinicio-datos-design.md`) y avisen al carril D si agregan tablas con datos por empresa que deban entrar o quedar fuera | Pendiente de revisión |
 | 2026-10-06 | C → B | F7.2: agregué `"isr-flujo": "ISR base flujo"` al mapa del breadcrumb de `layout/Header.tsx` y el enlace "ISR base flujo" a `Sidebar.tsx` (solo líneas); falta `"isr-flujo"` en `SUB_RUTAS` de `layout/EmpresaSwitcher.tsx` para conservar la pantalla al cambiar de empresa | Pendiente (lo hace B) |
 | 2026-10-06 | C → B | Pantalla de Proveedores (F6.1b): agregué `"proveedores": "Proveedores"` al breadcrumb de `layout/Header.tsx` y el enlace a `Sidebar.tsx` (solo líneas); falta `"proveedores"` en `SUB_RUTAS` de `layout/EmpresaSwitcher.tsx` | Pendiente (lo hace B) |
+| 2026-10-06 | C → B | M5.2: agregué `"declaraciones": "Declaraciones"` al breadcrumb de `layout/Header.tsx` y el enlace a `Sidebar.tsx` (solo líneas); falta `"declaraciones"` en `SUB_RUTAS` de `layout/EmpresaSwitcher.tsx` | Pendiente (lo hace B) |
 | 2026-10-04 | D → B | M7.1: en `POST /mis-empresas` (`empresas.py`), dentro de la transacción que crea la empresa y su vínculo, y antes de esos INSERT, llamar a `suscripcion_datos.verificar_alta_rfc(cur, current_user["user_id"])` con el cursor de esa transacción (toma un candado por cuenta hasta el commit) y responder 403 con el mensaje de `LimiteRfcAlcanzado`. Contrato completo en la spec de M7.1, "Contrato del límite". Mientras no esté, el límite de RFC no bloquea la creación de empresas | Pendiente |
 
 ## Riesgos
@@ -458,7 +459,7 @@ pausa.
 | U1, M7 | D | U1 (usuarios y perfil, PR #36) en revisión: invitaciones con doble confirmación (D9); depende del índice único sobre `lower(email)` del carril B. M7.1 (planes, límite de RFC, PR #40) integrada. M7.2 (D10: historial, pagos manuales, datos fiscales y avisos de vencimiento, PR #51) en revisión |
 | F3.6 | A | En revisión: etiquetas por empresa, comentarios y evidencias (bytea, 5 MB / 20 por CFDI, tipo por contenido), lote de hasta 500 CFDI, filtro `etiqueta=` | `docs/superpowers/specs/2026-10-05-f3-6-etiquetas-comentarios-evidencias-design.md` | — |
 | Punto de control de paridad | Coordinación | Pendiente: al terminar F5–F7 se recorre FiscalCore con Playwright contra las capturas y se cuadran las cifras de control | — | — |
-| M5 | C | M5.1 (API de captura y comparativo, migración 056) en revisión; M5.2 (pantalla) pendiente | `docs/superpowers/specs/2026-10-06-m5-comparativo-declarado-design.md` | un plan por entrega |
+| M5 | C | M5.1 (API y comparativo, migración 056) integrada en #52; M5.2 (pantalla Declaraciones) en revisión | `docs/superpowers/specs/2026-10-06-m5-comparativo-declarado-design.md` | un plan por entrega |
 | M2 | C | Pendiente | — | — |
 
 ### Lista de verificación de F0
