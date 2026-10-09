@@ -123,7 +123,7 @@ async def guardar_ajuste(empresa_id: str, datos: AjusteIn, current_user: dict = 
     validar_acceso_empresa(empresa_id, current_user)
     empresa = empresa_or_404(empresa_id)
     cfdi = db.query_one(
-        """SELECT uuid, tipo_comprobante, rfc_emisor, rfc_receptor
+        """SELECT uuid, tipo_comprobante, rfc_emisor, rfc_receptor, fecha_emision
            FROM cfdi WHERE empresa_id = %s AND UPPER(uuid) = UPPER(%s) AND estado = 'vigente'""",
         (empresa_id, datos.uuid),
     )
@@ -135,6 +135,13 @@ async def guardar_ajuste(empresa_id: str, datos: AjusteIn, current_user: dict = 
     )
     if not propio:
         raise HTTPException(status_code=404, detail="CFDI no encontrado para ese ajuste")
+
+    # Validar que el período no esté cerrado
+    from .. import cierre as cierre_logic
+    periodo = cfdi["fecha_emision"].strftime("%Y-%m")
+    if cierre_logic.periodo_esta_cerrado(empresa_id, periodo):
+        raise HTTPException(status_code=422, detail="Período cerrado; reabre para cambios")
+
     uuid = cfdi["uuid"].upper()
     isr_flujo_datos.guardar_ajuste(empresa_id, uuid, datos.lado, datos.motivo, current_user["user_id"])
     return {"uuid": uuid, "lado": datos.lado, "accion": "excluir", "motivo": datos.motivo}
@@ -144,6 +151,18 @@ async def guardar_ajuste(empresa_id: str, datos: AjusteIn, current_user: dict = 
 async def quitar_ajuste(empresa_id: str, lado: Literal["ingreso", "deduccion"], uuid: str,
                         current_user: dict = Depends(get_current_user)):
     validar_acceso_empresa(empresa_id, current_user)
+
+    # Validar que el período no esté cerrado
+    from .. import cierre as cierre_logic
+    cfdi = db.query_one(
+        """SELECT fecha_emision FROM cfdi WHERE empresa_id = %s AND UPPER(uuid) = UPPER(%s)""",
+        (empresa_id, uuid),
+    )
+    if cfdi:
+        periodo = cfdi["fecha_emision"].strftime("%Y-%m")
+        if cierre_logic.periodo_esta_cerrado(empresa_id, periodo):
+            raise HTTPException(status_code=422, detail="Período cerrado; reabre para cambios")
+
     if len(uuid) > _UUID_MAX or not isr_flujo_datos.quitar_ajuste(empresa_id, uuid, lado, current_user["user_id"]):
         raise HTTPException(status_code=404, detail="Ajuste no encontrado")
 
