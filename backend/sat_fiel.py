@@ -104,7 +104,21 @@ def cargar_fiel(cer_bytes: bytes, key_bytes: bytes, password: str | bytes) -> "S
         )
         return signer
     except Exception as exc:
-        if "password" in str(exc).lower() or "decrypt" in str(exc).lower():
+        mensaje = str(exc).lower()
+        # Una contraseña incorrecta se manifiesta de distintas formas según la
+        # versión de satcfdi/cryptography instalada: unas la envuelven con un
+        # texto propio ("Incorrect password, could not decrypt key") y otras
+        # dejan pasar el error crudo de cryptography, que al descifrar con la
+        # clave equivocada obtiene bytes basura y falla al interpretarlos
+        # ("Could not deserialize key data ... ASN.1 parsing error"). Se cubren
+        # todas para que el mensaje en español no dependa de la versión.
+        indicios_contrasena = (
+            "password",
+            "decrypt",
+            "could not deserialize key data",
+            "asn.1 parsing error",
+        )
+        if any(indicio in mensaje for indicio in indicios_contrasena):
             raise FIELError("la contraseña de la llave privada es incorrecta") from exc
         raise FIELError(f"No se pudo cargar la FIEL: {exc}") from exc
 
