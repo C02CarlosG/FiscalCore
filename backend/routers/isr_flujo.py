@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 
-from .. import db, declaraciones_datos, isr_flujo, isr_flujo_datos, isr_flujo_exportacion, isr_pago_provisional
+from .. import db, declaraciones_datos, informacion_fiscal, isr_flujo, isr_flujo_datos, isr_flujo_exportacion, isr_pago_provisional
 from ..auditoria import registrar_evento
 from ..deps import empresa_or_404, get_current_user, validar_acceso_empresa
 

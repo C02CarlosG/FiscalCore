@@ -254,6 +254,8 @@ def test_el_redondeo_es_medio_hacia_arriba():
 @pytest.mark.parametrize("texto,codigo,modulo", [
     ("612", "612", "flujo"), ("612 - Personas Físicas con Actividades Empresariales", "612", "flujo"),
     ("606", "606", "flujo"), ("601 General de Ley Personas Morales", "601", "coeficiente"),
+    ("601 - General de Ley Personas Morales", "601", "coeficiente"),  # con prefijo
+    ("General de Ley Personas Morales", "601", "coeficiente"),  # sin prefijo (fix para COP941004363)
     ("626", "626", "no_soportado"), ("6120", None, "no_soportado"), ("", None, "no_soportado"), (None, None, "no_soportado"),
 ])
 def test_aplicabilidad_por_regimen(texto, codigo, modulo):

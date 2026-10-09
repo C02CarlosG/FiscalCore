@@ -480,9 +480,16 @@ REGIMENES_COEFICIENTE = frozenset({"601"})
 
 
 def codigo_de_regimen(texto: Optional[str]) -> Optional[str]:
-    """El código SAT de tres dígitos al inicio de ``empresas.regimen_fiscal`` ("612 - Personas Físicas…"), o ``None``."""
+    """El código SAT de tres dígitos al inicio de ``empresas.regimen_fiscal`` ("612 - Personas Físicas…"), o None si no está
+    en ese formato. Intenta también buscar el nombre del régimen usando ``informacion_fiscal.codigo_regimen()``."""
+    from . import informacion_fiscal
+
     t = (texto or "").strip()
-    return t[:3] if len(t) >= 3 and t[:3].isdigit() and (len(t) == 3 or not t[3].isdigit()) else None
+    # Primero, intenta extraer si el formato es "612 - Descripción"
+    if len(t) >= 3 and t[:3].isdigit() and (len(t) == 3 or not t[3].isdigit()):
+        return t[:3]
+    # Si no, intenta buscar por nombre (ej: "General de Ley Personas Morales" → "601")
+    return informacion_fiscal.codigo_regimen(t)
 
 
 def aplicabilidad(texto_regimen: Optional[str]) -> dict:
