@@ -1,0 +1,37 @@
+{
+  "pantalla": "CFDI Emitidos",
+  "existe": true,
+  "url": "/empresas/{id}/cfdi/emitidos?periodo=2026-10",
+  "screenshot": "02_cfdi_emitidos.jpg",
+  "titulo": "CFDI emitidos",
+  "subtitulo": "Ingresos, egresos, traslados, nómina y pagos documentados por la empresa.",
+  "filtros": [
+    "Periodo (selector mensual)",
+    "Búsqueda: UUID, RFC, nombre, serie o folio",
+    "Etiquetas (dropdown)",
+    "Estado: Vigentes | Cancelados | Todos",
+    "Forma de pago: Todos | PUE | PPD",
+    "Filtro avanzado (botón)"
+  ],
+  "tabs_tipo_cfdi": ["Ingreso", "Egreso", "Traslado", "Nómina", "Pago"],
+  "botones": ["Filtro avanzado", "Columnas", "Columnas de totales", "Exportar a Excel"],
+  "resumen": {
+    "periodo": {"cfdi": 0},
+    "acumulado": {
+      "cfdi": 1639,
+      "ret_iva": "$0.00",
+      "ret_ieps": "$0.00",
+      "ret_isr": "$0.00",
+      "tras_iva": "$16,309,456.35",
+      "tras_ieps": "$0.00",
+      "tras_isr": "$0.00",
+      "total_ret": "$0.00",
+      "subtotal": "$101,934,515.14",
+      "descuento": "$413.97",
+      "neto": "$101,934,101.17",
+      "total": "$118,243,557.52"
+    }
+  },
+  "tabla_columnas": ["CFDI", "RET.IVA", "RET.IEPS", "RET.ISR", "TRAS.IVA", "TRAS.IEPS", "TRAS.ISR", "TOTAL RET.", "SUBTOTAL", "DESCUENTO", "NETO", "TOTAL"],
+  "mensaje_vacio": "No hay CFDI con estos filtros"
+}

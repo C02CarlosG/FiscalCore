@@ -1,0 +1,33 @@
+{
+  "pantalla": "IVA base flujo",
+  "ruta_menu": "Impuestos > IVA base flujo",
+  "url": "https://app.ezaudita.com/iva/?cid=...&ivaType=period_transferred&period=2026-enero",
+  "periodo": "2026 - Enero",
+  "aviso_importante": "IMPORTANTE: No están considerados CFDIs de pago 1.0",
+  "kpis_tarjetas": [
+    {"etiqueta": "IVA trasladado", "valor": "$4,088,512.30", "seleccionada": true},
+    {"etiqueta": "IVA acreditable", "valor": "$3,058,071.54"},
+    {"etiqueta": "IVA a cargo", "valor": "$1,030,440.76"}
+  ],
+  "seccion_detalle": "Detalles - IVA trasladado efectivamente cobrado",
+  "pestanas_detalle": [
+    {"nombre": "Totales", "conteo": 287, "activa": true},
+    {"nombre": "Facturas de contado", "conteo": 223},
+    {"nombre": "Cobro facturas de crédito", "conteo": 52},
+    {"nombre": "Notas de crédito", "conteo": 12},
+    {"nombre": "No considerados IVA", "conteo": 0, "tooltip": true},
+    {"nombre": "Periodo de IVA reasignado", "conteo": 0, "tooltip": true}
+  ],
+  "tabla_totales": {
+    "encabezados": ["(tipo)", "Conteo de CFDIs", "Base IVA 16%", "Base IVA 8%", "Base IVA 0%", "Base IVA exento", "IVA trasladado 16%", "IVA trasladado 8%", "IVA trasladado total", "Retenciones IVA"],
+    "filas": [
+      {"tipo": "Facturas de contado", "conteo": 223, "base_iva_16": "$23,110,360.84", "base_iva_8": "$0.00", "base_iva_0": "$0.00", "base_iva_exento": "$0.00", "iva_trasl_16": "$3,697,657.71", "iva_trasl_8": "$0.00", "iva_trasl_total": "$3,697,657.71", "retenciones_iva": "$0.00"},
+      {"tipo": "Cobro facturas de crédito", "conteo": "52 / 92", "base_iva_16": "$2,442,841.49", "base_iva_8": "$0.00", "base_iva_0": "$0.00", "base_iva_exento": "$0.00", "iva_trasl_16": "$390,854.59", "iva_trasl_8": "$0.00", "iva_trasl_total": "$390,854.59", "retenciones_iva": "$0.00"},
+      {"tipo": "Totales", "conteo": 275, "base_iva_16": "$25,553,202.33", "base_iva_8": "$0.00", "base_iva_0": "$0.00", "base_iva_exento": "$0.00", "iva_trasl_16": "$4,088,512.30", "iva_trasl_8": "$0.00", "iva_trasl_total": "$4,088,512.30", "retenciones_iva": "$0.00"},
+      {"tipo": "Notas de crédito", "conteo": 12, "base_iva_16": "$12,237.08", "base_iva_8": "$0.00", "base_iva_0": "$0.00", "base_iva_exento": "$0.00", "iva_trasl_16": "$1,957.92", "iva_trasl_8": "$0.00", "iva_trasl_total": "$1,957.92", "retenciones_iva": "$0.00"}
+    ]
+  },
+  "formula_implícita": "IVA a cargo = IVA trasladado (efectivamente cobrado) - IVA acreditable (efectivamente pagado). Desglosa PUE (contado) + PPD cobrados + notas de crédito.",
+  "botones_y_acciones": ["Exportar a Excel"],
+  "notas": "El 'Cobro facturas de crédito' muestra 52/92, indicando 52 pagos de 92 facturas de crédito total. Categorías 'No considerados IVA' y 'Periodo de IVA reasignado' tienen tooltips de ayuda (?). Al fondo hay una sección CFDIs con la lista desglosada."
+}

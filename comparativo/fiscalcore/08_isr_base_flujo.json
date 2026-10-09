@@ -1,0 +1,23 @@
+{
+  "pantalla": "ISR base flujo",
+  "existe": true,
+  "url": "/empresas/{id}/isr-flujo?periodo=2026-10",
+  "screenshot": "08_isr_base_flujo.jpg",
+  "titulo": "ISR base flujo",
+  "etiqueta": "IMPUESTOS",
+  "subtitulo": "Ingresos cobrados y deducciones pagadas del mes y del ejercicio, con los CFDI que componen cada cifra.",
+  "filtros": ["Periodo (selector mensual)"],
+  "botones": ["Exportar"],
+  "advertencia": "El régimen de la empresa no está soportado por este módulo. Las cifras se muestran solo como referencia.",
+  "controles": {
+    "nomina_exenta_deducible": {"tabs": ["Mes", "Acumulado del ejercicio"], "porcentaje": "47%"},
+    "utilidad_fiscal_estimada": "$0.00"
+  },
+  "notas_advertencia": [
+    "Hay pagos de REP sin forma de pago registrada. 91 CFDI",
+    "Hay anticipos del SAT: se acumulan al cobro y su aplicación los resta de la factura final. 43 CFDI",
+    "Hay compras pagadas en efectivo por $2,000 o menos: se deducen, salvo combustibles. 344 CFDI",
+    "Hay inversiones (I01-I08): se identifican y no suman a la deducción del mes. 2 CFDI"
+  ],
+  "tabla": {"columnas_visibles": ["MES", "IMPORTE"]}
+}

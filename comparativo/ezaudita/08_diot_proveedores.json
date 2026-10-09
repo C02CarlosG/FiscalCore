@@ -1,0 +1,23 @@
+{
+  "pantalla": "Proveedores (DIOT)",
+  "ruta_menu": "DIOT > Proveedores",
+  "url": "https://app.ezaudita.com/suppliers/?cid=...",
+  "filtros": ["Búsqueda por proveedor", "Exportar (dropdown)"],
+  "botones_y_acciones": ["Crear Proveedores", "Editar (por proveedor)", "Dropdown acciones (por proveedor)"],
+  "tabla": {
+    "encabezados": ["Nombre (sortable)", "RFC", "Tipo de tercero (filtrable)", "Tipo de operación (filtrable)", "Estado", "Acciones"],
+    "total_resultados": 275,
+    "paginacion": "30 / página, 10 páginas",
+    "primeras_filas": [
+      {"nombre": "ABASTECEDORA DE GRASAS ACEITES Y LUBRICANTES DE OAXACA", "rfc": "AGA8704063B5", "tipo_tercero": "Nacional", "tipo_operacion": "85 - Otros", "estado": "Activo"},
+      {"nombre": "ABI AUTOMATION", "rfc": "AAU13102438A", "tipo_tercero": "Nacional", "tipo_operacion": "85 - Otros", "estado": "Activo"},
+      {"nombre": "ABRAHAM VERA CRUZ", "rfc": "VECA730703R98", "tipo_tercero": "Nacional", "tipo_operacion": "85 - Otros", "estado": "Activo"},
+      {"nombre": "ACABADOS DE PAPELES SATINADOS Y ABSORBENTES", "rfc": "APS7503114Q2", "tipo_tercero": "Nacional", "tipo_operacion": "85 - Otros", "estado": "Activo"},
+      {"nombre": "ACEROS PERFILES Y HERRAJES RUSA", "rfc": "APH99011975A", "tipo_tercero": "Nacional", "tipo_operacion": "85 - Otros", "estado": "Activo"},
+      {"nombre": "ADA LOPEZ OROZCO", "rfc": "LOOA3401175Y2", "tipo_tercero": "Nacional", "tipo_operacion": "85 - Otros", "estado": "Activo"},
+      {"nombre": "ADLAND PLASTICS", "rfc": "APL991025AW3", "tipo_tercero": "Nacional", "tipo_operacion": "85 - Otros", "estado": "Activo"},
+      {"nombre": "ADMINISTRACION DEL SISTEMA", "rfc": "API931215862", "tipo_tercero": "Nacional", "tipo_operacion": "85 - Otros", "estado": "Activo"}
+    ]
+  },
+  "notas": "Catálogo maestro de proveedores para la DIOT. No se ve una columna de 'región' o 'zona' en esta vista de listado — la región parece definirse en el formulario de edición del proveedor o se asigna automáticamente por el estado del domicilio fiscal del RFC."
+}

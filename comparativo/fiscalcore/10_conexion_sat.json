@@ -1,0 +1,38 @@
+{
+  "pantalla": "Conexión SAT",
+  "existe": true,
+  "url": "/empresas/{id}/sat",
+  "screenshot": "10_conexion_sat.jpg",
+  "titulo": "Conexión SAT",
+  "etiqueta": "SINCRONIZACIÓN",
+  "subtitulo": "Guarda la e.firma de la empresa y descarga sus CFDI emitidos y recibidos directamente del SAT.",
+  "secciones": [
+    {
+      "nombre": "e.firma (FIEL)",
+      "descripcion": "Se guarda cifrada en el servidor y solo se usa para descargar los CFDI de esta empresa.",
+      "estado": "e.firma vigente",
+      "rfc_certificado": "COP941004363",
+      "vigente_hasta": "26/08/2028 · 688 días",
+      "guardada_el": "02/10/2026",
+      "campos": ["Certificado (.cer)", "Llave privada (.key)", "Contraseña de la llave privada"],
+      "botones": ["Reemplazar e.firma", "Eliminar e.firma"]
+    },
+    {
+      "nombre": "Descargar CFDI del SAT",
+      "descripcion": "Descarga masiva por mes. El SAT puede tardar varios minutos en preparar cada solicitud.",
+      "campos": [
+        {"nombre": "Periodo a descargar", "tipo": "date_input"},
+        {"nombre": "Comprobantes", "tipo": "dropdown", "valor": "Emitidos y recibidos"}
+      ],
+      "boton": "Descargar del SAT"
+    },
+    {
+      "nombre": "Historial de descargas",
+      "columnas": ["SOLICITADA", "TIPO", "PERIODO", "ESTADO", "CFDI IMPORTADOS"],
+      "filas": [
+        {"solicitada": "02/10/2026 13:12", "tipo": "Recibidos", "periodo": "2026-09", "estado": "Descargado", "cfdi_importados": "303 de 303"},
+        {"solicitada": "02/10/2026 13:12", "tipo": "Emitidos", "periodo": "2026-09", "estado": "Falló", "error": "El SAT rechazó la solicitud de emitidos (código 5002): Se han agotado las solicitudes de por vida"}
+      ]
+    }
+  ]
+}

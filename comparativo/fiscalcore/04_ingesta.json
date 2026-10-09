@@ -1,0 +1,31 @@
+{
+  "pantalla": "Ingesta",
+  "existe": true,
+  "url": "/empresas/{id}/ingesta",
+  "screenshot": "04_ingesta.jpg",
+  "titulo": "Ingesta",
+  "subtitulo": "Importa comprobantes fiscales y estados de cuenta para el periodo correspondiente.",
+  "seccion": "ARCHIVOS FISCALES Y BANCARIOS",
+  "paneles": [
+    {
+      "nombre": "Subir CFDI",
+      "descripcion": "Archivos XML · carga múltiple disponible",
+      "campos": [
+        {"nombre": "Periodo (YYYY-MM)", "tipo": "date_input"},
+        {"nombre": "Archivos XML", "tipo": "file_picker_multiple", "nota": "Selecciona uno o varios archivos con extensión .xml"}
+      ],
+      "boton": "Subir CFDI"
+    },
+    {
+      "nombre": "Subir estado de cuenta",
+      "descripcion": "Archivo XLSX o CSV del banco",
+      "campos": [
+        {"nombre": "Periodo (YYYY-MM)", "tipo": "date_input"},
+        {"nombre": "Banco", "tipo": "dropdown", "placeholder": "Selecciona un banco"},
+        {"nombre": "Estado de cuenta (.xlsx o .csv)", "tipo": "file_picker", "nota": "Formatos aceptados: .xlsx y .csv"}
+      ],
+      "boton": "Subir estado de cuenta"
+    }
+  ],
+  "filtros": []
+}

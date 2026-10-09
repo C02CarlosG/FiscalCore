@@ -1,0 +1,56 @@
+{
+  "pantalla": "Inicio (Dashboard)",
+  "ruta_menu": "Inicio",
+  "url": "https://app.ezaudita.com/?period=2026-enero",
+  "periodo": "2026 - Enero",
+  "contribuyente": "COPLASUR SA DE CV",
+  "alertas": [
+    "El servicio de descargas desde el SAT está inactivo, renueva tu suscripción lo antes posible para mantener actualizados tus CFDIs.",
+    "Tienes un plan de prueba; haz clic en Suscripción para contratar."
+  ],
+  "filtros": {
+    "periodo": {
+      "valor_actual": "2026 - Enero",
+      "opciones": "Dropdown con años (2019-2026), cada año expandible a meses"
+    }
+  },
+  "kpis": [
+    {"etiqueta": "Ingresos netos", "del_periodo": "$30,128,904.86", "acumulado_del_ejercicio": "$30,128,904.86"},
+    {"etiqueta": "Gastos y compras netas", "del_periodo": "$14,530,052.08", "acumulado_del_ejercicio": "$14,530,052.08"}
+  ],
+  "grafica": {
+    "tipo": "Barras (con opción Cambiar a líneas)",
+    "series": ["Ingreso neto", "Gastos y compras netas"],
+    "eje_y": "Valores monetarios (escala hasta $35,000,000.00)",
+    "eje_x": "Meses del ejercicio"
+  },
+  "tabla_ingresos_nominales_por_mes": {
+    "encabezados": ["Mes", "Cancelados", "Vigentes", "Ingresos nominales", "Descuentos", "Ingresos netos"],
+    "total_anual": {"cancelados": 64, "vigentes": 3494, "ingresos_nominales": "$219,510,271.33", "descuentos": "$413.97", "ingresos_netos": "$219,509,857.36"},
+    "filas": [
+      {"mes": "Enero", "cancelados": 8, "vigentes": 415, "ingresos_nominales": "$30,128,904.86", "descuentos": "$0.00", "ingresos_netos": "$30,128,904.86"},
+      {"mes": "Febrero", "cancelados": 6, "vigentes": 428, "ingresos_nominales": "$24,140,037.69", "descuentos": "$413.97", "ingresos_netos": "$24,139,623.72"},
+      {"mes": "Marzo", "cancelados": 8, "vigentes": 401, "ingresos_nominales": "$26,742,561.44", "descuentos": "$0.00", "ingresos_netos": "$26,742,561.44"},
+      {"mes": "Abril", "cancelados": 8, "vigentes": 365, "ingresos_nominales": "$23,045,377.11", "descuentos": "$0.00", "ingresos_netos": "$23,045,377.11"},
+      {"mes": "Mayo", "cancelados": 5, "vigentes": 355, "ingresos_nominales": "$25,341,855.42", "descuentos": "$0.00", "ingresos_netos": "$25,341,855.42"},
+      {"mes": "Junio", "cancelados": 8, "vigentes": 407, "ingresos_nominales": "$20,877,490.36", "descuentos": "$0.00", "ingresos_netos": "$20,877,490.36"},
+      {"mes": "Julio", "cancelados": 11, "vigentes": 429, "ingresos_nominales": "$25,259,302.33", "descuentos": "$0.00", "ingresos_netos": "$25,259,302.33"},
+      {"mes": "Agosto", "cancelados": 4, "vigentes": 344, "ingresos_nominales": "$19,901,679.00", "descuentos": "$0.00", "ingresos_netos": "$19,901,679.00"},
+      {"mes": "Septiembre", "cancelados": 6, "vigentes": 297, "ingresos_nominales": "$22,322,396.52", "descuentos": "$0.00", "ingresos_netos": "$22,322,396.52"},
+      {"mes": "Octubre", "cancelados": 0, "vigentes": 53, "ingresos_nominales": "$1,750,666.60", "descuentos": "$0.00", "ingresos_netos": "$1,750,666.60"}
+    ],
+    "acciones": ["Copiar tabla"]
+  },
+  "tabla_iva_base_flujo": {
+    "pestanas": ["IVA por periodo", "IVA trasladado", "IVA acreditable"],
+    "pestana_activa": "IVA por periodo",
+    "encabezados": ["Mes", "IVA trasladado", "IVA acreditable", "IVA a cargo", "Retenciones IVA"],
+    "totales": {"iva_trasladado": "$4,088,512.30", "iva_acreditable": "$3,058,071.54", "iva_a_cargo": "$1,030,440.76", "retenciones_iva": "$4,303.75"},
+    "filas": [
+      {"mes": "Enero", "iva_trasladado": "$4,088,512.30", "iva_acreditable": "$3,058,071.54", "iva_a_cargo": "$1,030,440.76", "retenciones_iva": "$4,303.75"}
+    ],
+    "acciones": ["Copiar tabla"]
+  },
+  "botones_y_acciones": ["Editar widgets", "Cambiar a líneas", "Copiar tabla (x2)"],
+  "menu_lateral": ["Inicio", "CFDIs (expandible)", "Impuestos (expandible)", "DIOT (expandible)", "Exportaciones", "EFOS", "Validaciones", "Sincroniza SAT (expandible)", "Configuración (expandible: Perfil de usuario, Usuarios, Notificaciones, Reiniciar)", "Suscripción", "Soporte (expandible)"]
+}

@@ -1,0 +1,23 @@
+{
+  "pantalla": "Cédula de IVA",
+  "existe": true,
+  "url": "/empresas/{id}/cedula-iva?periodo=2026-10",
+  "screenshot": "06_cedula_iva.jpg",
+  "titulo": "Cédula de IVA",
+  "etiqueta": "IMPUESTOS INDIRECTOS",
+  "subtitulo": "Determinación mensual del impuesto trasladado, acreditable y resultado.",
+  "filtros": ["Periodo (selector mensual)"],
+  "tabla": {
+    "renglones": [
+      {"concepto": "IVA trasladado (total)", "valor": "$0.00"},
+      {"concepto": "IVA acreditable bruto", "valor": "$0.00"},
+      {"concepto": "Factor de prorrateo", "valor": "1"},
+      {"concepto": "IVA acreditable ajustado", "valor": "$0.00"},
+      {"concepto": "IVA retenido", "valor": "$0.00"},
+      {"concepto": "Retenciones por enterar", "valor": "$0.00"},
+      {"concepto": "IVA por pagar", "valor": "$0.00"},
+      {"concepto": "Saldo a cargo", "valor": "$0.00"},
+      {"concepto": "Saldo a favor", "valor": "$0.00"}
+    ]
+  }
+}

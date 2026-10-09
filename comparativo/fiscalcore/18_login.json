@@ -1,0 +1,28 @@
+{
+  "pantalla": "Login",
+  "existe": true,
+  "url": "/login",
+  "screenshot": "18_login.jpg",
+  "titulo": "Bienvenido",
+  "etiqueta": "ACCESO A CUENTA",
+  "subtitulo": "Inicia sesión para continuar.",
+  "layout": "Dos columnas: hero izquierda (fondo oscuro), formulario derecha (fondo claro)",
+  "hero": {
+    "marca": "FiscalCore",
+    "supertitulo": "PLATAFORMA FISCAL",
+    "titulo": "Visibilidad clara para cada obligación.",
+    "descripcion": "Accede a la información de tus empresas en un espacio de trabajo seguro.",
+    "features_iconos": ["Empresas", "CFDI", "Conciliación"],
+    "footer": "FiscalCore · Información fiscal organizada"
+  },
+  "formulario": {
+    "campos": [
+      {"nombre": "Correo", "tipo": "email_input"},
+      {"nombre": "Contraseña", "tipo": "password_input"}
+    ],
+    "boton": "Entrar →",
+    "nota": "El acceso está protegido y vinculado a tu cuenta de FiscalCore."
+  },
+  "registro_visible": false,
+  "recuperar_contrasena_visible": false
+}

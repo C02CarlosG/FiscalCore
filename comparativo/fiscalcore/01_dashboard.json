@@ -1,0 +1,82 @@
+{
+  "pantalla": "Dashboard",
+  "existe": true,
+  "url": "/empresas/{id}/dashboard?periodo=2026-10",
+  "contribuyente": "COPLASUR S.A. DE C.V.",
+  "rfc": "COP941004363",
+  "periodo": "2026-Octubre",
+  "screenshot": "01_dashboard.jpg",
+  "secciones": [
+    {
+      "nombre": "KPIs principales",
+      "tipo": "stat_cards",
+      "datos": {
+        "ingresos_netos_periodo": "$0.00",
+        "ingresos_netos_ejercicio": "$101,007,272.91",
+        "gastos_netos_periodo": "$0.00",
+        "gastos_netos_ejercicio": "$59,089,891.53"
+      },
+      "nota": "0 CFDI de ingreso y notas de crédito en el periodo"
+    },
+    {
+      "nombre": "Últimos 12 meses",
+      "tipo": "grafica_barras",
+      "series": ["Ingresos", "Gastos"],
+      "descripcion": "Ingresos y gastos netos facturados mes por mes, sin IVA"
+    },
+    {
+      "nombre": "Ingresos por mes",
+      "tipo": "tabla",
+      "columnas": ["MES", "FACTURADO", "NOTAS DE CRÉDITO", "NETO", "CFDI"],
+      "filas_con_datos": [
+        {"mes": "2026-Enero", "facturado": "$30,141,411.45", "notas_credito": "$12,237.08", "neto": "$30,129,174.37", "cfdi": 432},
+        {"mes": "2026-Febrero", "facturado": "$25,350,511.26", "notas_credito": "$554,977.29", "neto": "$24,795,533.97", "cfdi": 454},
+        {"mes": "2026-Julio", "facturado": "$25,433,734.22", "notas_credito": "$87,528.70", "neto": "$25,346,205.52", "cfdi": 445},
+        {"mes": "2026-Agosto", "facturado": "$20,894,425.27", "notas_credito": "$158,066.22", "neto": "$20,736,359.05", "cfdi": 355}
+      ],
+      "total": {"facturado": "$101,820,082.20", "notas_credito": "$812,809.29", "neto": "$101,007,272.91", "cfdi": 1686}
+    },
+    {
+      "nombre": "IVA del ejercicio 2026",
+      "tipo": "tabla_con_tabs",
+      "tabs": ["Trasladado cobrado", "Acreditable pagado", "Resultado"],
+      "tab_activa": "Trasladado cobrado",
+      "columnas": ["MES", "PUE", "PPD COBRADO", "NOTAS DE CRÉDITO", "TOTAL"],
+      "total": {"pue": "$11,170,365.41", "ppd_cobrado": "$1,971,261.72", "notas_credito": "$131,980.52", "total": "$13,009,646.61"},
+      "advertencias": [
+        "Hay complementos de pago sin desglose de impuestos del documento: su IVA se aproxima por la proporción pagada. 4 CFDI",
+        "Hay pagos con ObjetoImpDR sin IVA sobre un CFDI que sí trae IVA: se calculó por la proporción del CFDI. 3 CFDI",
+        "El IVA de los documentos de un complemento de pago no cuadra con lo que el propio complemento declara. 3 CFDI",
+        "Hay pagos de REP sin forma de pago registrada. 93 CFDI",
+        "Hay anticipos del SAT: su IVA se causa al cobrarse. 43 CFDI",
+        "Hay aplicaciones de anticipo (forma de pago 30). 43 CFDI",
+        "El factor de prorrateo del acreditable es 1 (actividad 100% gravada)."
+      ]
+    },
+    {
+      "nombre": "Scoring y riesgos",
+      "tipo": "stat_cards",
+      "datos": {
+        "score_fiscal_periodo": "–",
+        "riesgos_abiertos": 0,
+        "monto_en_riesgo": "$0.00",
+        "conciliacion_bancaria": "0%"
+      }
+    },
+    {
+      "nombre": "Riesgos por severidad",
+      "tipo": "stat_cards",
+      "datos": {"criticos": 0, "altos": 0, "medios": 0, "bajos": 0}
+    },
+    {
+      "nombre": "Riesgos abiertos",
+      "tipo": "tabla_con_busqueda",
+      "mensaje": "No hay riesgos abiertos en este periodo."
+    }
+  ],
+  "filtros": ["Periodo (selector mensual con calendario)"],
+  "menu_lateral": {
+    "workspace": ["Empresas", "Mi perfil", "Suscripción"],
+    "fiscal": ["Dashboard", "CFDIs", "Ingesta", "Conciliación", "Cédula de IVA", "IVA base flujo", "ISR base flujo", "DIOT por flujo", "Conexión SAT", "Información fiscal", "Validaciones"]
+  }
+}

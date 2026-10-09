@@ -1,0 +1,36 @@
+{
+  "pantalla": "CFDI Recibidos",
+  "existe": true,
+  "url": "/empresas/{id}/cfdi/recibidos?periodo=2026-10",
+  "screenshot": "03_cfdi_recibidos.jpg",
+  "titulo": "CFDI recibidos",
+  "subtitulo": "Comprobantes que la empresa recibió de sus proveedores y de terceros.",
+  "filtros": [
+    "Periodo (selector mensual)",
+    "Búsqueda: UUID, RFC, nombre, serie o folio",
+    "Etiquetas (dropdown)",
+    "Estado: Vigentes | Cancelados | Todos",
+    "Forma de pago: Todos | PUE | PPD",
+    "Filtro avanzado (botón)"
+  ],
+  "tabs_tipo_cfdi": ["Ingreso", "Egreso", "Traslado", "Nómina", "Pago"],
+  "botones": ["Filtro avanzado", "Columnas", "Columnas de totales", "Exportar a Excel"],
+  "resumen": {
+    "periodo": {"cfdi": 0},
+    "acumulado": {
+      "cfdi": 853,
+      "ret_iva": "$24,521.71",
+      "ret_ieps": "$0.00",
+      "ret_isr": "$9,729.58",
+      "tras_iva": "$8,425,192.55",
+      "tras_ieps": "$0.00",
+      "tras_isr": "$0.00",
+      "total_ret": "$34,251.29",
+      "subtotal": "$61,033,745.94",
+      "descuento": "$32,554.21",
+      "neto": "$61,001,191.73",
+      "total": "$69,392,320.71"
+    }
+  },
+  "mensaje_vacio": "No hay CFDI con estos filtros"
+}

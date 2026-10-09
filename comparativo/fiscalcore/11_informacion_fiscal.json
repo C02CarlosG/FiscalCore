@@ -1,0 +1,36 @@
+{
+  "pantalla": "Información fiscal",
+  "existe": true,
+  "url": "/empresas/{id}/informacion-fiscal",
+  "screenshot": "11_informacion_fiscal.jpg",
+  "titulo": "Información fiscal",
+  "etiqueta": "SINCRONIZACIÓN",
+  "subtitulo": "Constancia de situación fiscal y opinión de cumplimiento de la empresa: súbelas en PDF, consúltalas y descárgalas.",
+  "secciones": [
+    {
+      "nombre": "Opinión de cumplimiento",
+      "descripcion": "Opinión del cumplimiento de obligaciones fiscales (32-D). La positiva vale 30 días naturales.",
+      "estado": "Aún no se ha subido ninguna opinión.",
+      "subir_pdf": {"limite": "5 MB", "requisito": "Debe ser del RFC de la empresa"},
+      "boton": "Subir"
+    },
+    {
+      "nombre": "Constancia de situación fiscal",
+      "descripcion": "Régimen, domicilio y obligaciones registrados en el SAT.",
+      "estado": "Aún no se ha subido ninguna constancia.",
+      "subir_pdf": {"limite": "5 MB", "requisito": "Debe ser del RFC de la empresa"},
+      "boton": "Subir"
+    },
+    {
+      "nombre": "Régimen fiscal",
+      "descripcion": "Define qué cálculo de ISR aplica. Se toma de la constancia de situación fiscal.",
+      "valor": "Sin capturar",
+      "nota": "Sube la constancia de situación fiscal para tomar de ahí el régimen."
+    },
+    {
+      "nombre": "Historial",
+      "descripcion": "Todas las constancias y opiniones subidas, de la más reciente a la más antigua.",
+      "estado": "Todavía no hay documentos cargados."
+    }
+  ]
+}

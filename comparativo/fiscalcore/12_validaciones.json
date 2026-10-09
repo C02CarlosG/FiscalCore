@@ -1,0 +1,31 @@
+{
+  "pantalla": "Validaciones de CFDI",
+  "existe": true,
+  "url": "/empresas/{id}/validaciones?periodo=2026-10",
+  "screenshot": "12_validaciones.jpg",
+  "titulo": "Validaciones de CFDI",
+  "etiqueta": "REVISIÓN",
+  "subtitulo": "Comprobantes con posibles situaciones incorrectas en el periodo y en lo que va del ejercicio. Haz clic en una tarjeta para ver los CFDI.",
+  "filtros": ["Periodo (selector mensual)"],
+  "botones": ["Configurar validaciones"],
+  "secciones": [
+    {
+      "nombre": "Emitidos",
+      "tarjetas": [
+        {"nombre": "PUE con forma de pago 99", "periodo": 0, "acumulado": 0},
+        {"nombre": "PUE con complemento de pago", "periodo": 0, "acumulado": 0},
+        {"nombre": "Egresos sin CFDI relacionado", "periodo": 0, "acumulado": 3}
+      ]
+    },
+    {
+      "nombre": "Recibidos",
+      "tarjetas": [
+        {"nombre": "PUE con forma de pago 99", "periodo": 0, "acumulado": 0},
+        {"nombre": "PUE con complemento de pago", "periodo": 0, "acumulado": 0},
+        {"nombre": "Egresos sin CFDI relacionado", "periodo": 0, "acumulado": 0},
+        {"nombre": "Gastos no bancarizados", "periodo": 0, "acumulado": 212},
+        {"nombre": "Gas pagado en efectivo", "etiqueta": "ADVERTENCIA", "periodo": 0, "acumulado": 35}
+      ]
+    }
+  ]
+}

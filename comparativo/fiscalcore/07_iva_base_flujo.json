@@ -1,0 +1,26 @@
+{
+  "pantalla": "IVA base flujo",
+  "existe": true,
+  "url": "/empresas/{id}/iva-flujo?periodo=2026-10",
+  "screenshot": "07_iva_base_flujo.jpg",
+  "titulo": "IVA base flujo",
+  "etiqueta": "IMPUESTOS",
+  "subtitulo": "IVA cobrado y pagado del mes por tasa y origen, con los CFDI que componen cada cifra.",
+  "filtros": ["Periodo (selector mensual)"],
+  "botones": ["Exportar"],
+  "kpis": [
+    {"nombre": "Trasladado", "valor": "$0.00", "detalle": "IVA cobrado"},
+    {"nombre": "Acreditable", "valor": "$0.00", "detalle": "IVA pagado"},
+    {"nombre": "A cargo", "valor": "$0.00", "detalle": "Lo que queda del mes"},
+    {"nombre": "Totales", "valor": "$0.00", "detalle": "0 CFDI"},
+    {"nombre": "Facturas de contado", "valor": "$0.00", "detalle": "0 CFDI"},
+    {"nombre": "Cobro de facturas de crédito", "valor": "$0.00", "detalle": "0/0"},
+    {"nombre": "Notas de crédito", "valor": "$0.00", "detalle": "0 CFDI"},
+    {"nombre": "No considerados", "valor": "$0.00", "detalle": "0 CFDI"},
+    {"nombre": "Periodo reasignado", "valor": "$0.00", "detalle": "0 CFDI"}
+  ],
+  "tabla_inferior": {
+    "columnas_visibles": ["TASA", "BASE", "IVA"],
+    "nota": "Tabla de desglose por tasa (parcialmente visible)"
+  }
+}

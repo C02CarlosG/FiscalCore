@@ -1,0 +1,16 @@
+{
+  "pantalla": "Reiniciar datos",
+  "existe": true,
+  "url": "/empresas/{id}/reiniciar",
+  "screenshot": "14_reiniciar_datos.jpg",
+  "titulo": "Reiniciar datos",
+  "etiqueta": "CONFIGURACIÓN",
+  "subtitulo": "Borra los datos operativos de la empresa para empezar de cero.",
+  "secciones": [
+    {
+      "nombre": "Reiniciar datos de la empresa",
+      "descripcion": "Borra los CFDI, pagos, movimientos bancarios, conciliaciones, ajustes y DIOT de esta empresa para volver a descargarlos o cargarlos. Se conservan la empresa, sus usuarios, la e.firma, la configuración, los documentos fiscales, las declaraciones, los proveedores y la auditoría. No se puede deshacer.",
+      "boton": "Ver qué se borraría"
+    }
+  ]
+}

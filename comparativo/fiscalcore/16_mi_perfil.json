@@ -1,0 +1,32 @@
+{
+  "pantalla": "Mi perfil",
+  "existe": true,
+  "url": "/perfil",
+  "screenshot": "16_mi_perfil.jpg",
+  "titulo": "Mi perfil",
+  "etiqueta": "CUENTA",
+  "subtitulo": "Tus datos como contador y tu contraseña.",
+  "secciones": [
+    {
+      "nombre": "Datos del perfil",
+      "correo": "admin@fiscalcore.mx",
+      "campos": [
+        {"nombre": "Nombre", "valor": "Administrador"},
+        {"nombre": "Teléfono", "valor": ""},
+        {"nombre": "RFC", "valor": ""},
+        {"nombre": "Despacho", "valor": ""},
+        {"nombre": "Cédula profesional", "valor": ""}
+      ],
+      "boton": "Guardar perfil"
+    },
+    {
+      "nombre": "Contraseña",
+      "descripcion": "Usa al menos 8 caracteres.",
+      "campos": [
+        {"nombre": "Contraseña actual"},
+        {"nombre": "Contraseña nueva"},
+        {"nombre": "Confirma la contraseña nueva"}
+      ]
+    }
+  ]
+}

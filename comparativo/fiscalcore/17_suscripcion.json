@@ -1,0 +1,31 @@
+{
+  "pantalla": "Suscripción",
+  "existe": true,
+  "url": "/suscripcion",
+  "screenshot": "17_suscripcion.jpg",
+  "titulo": "Suscripción",
+  "etiqueta": "CUENTA",
+  "subtitulo": "Tu plan, cuántos RFC usas y los planes disponibles.",
+  "secciones": [
+    {
+      "nombre": "Tu plan",
+      "plan": "Prueba",
+      "precio": "$0.00 al mes más IVA",
+      "limite": "1 RFC · sin límite",
+      "nota": "Aún no tienes un plan asignado: aplica el plan por defecto."
+    },
+    {
+      "nombre": "Planes",
+      "descripcion": "Precios mensuales en pesos, más IVA. Para cambiar de plan, contacta a tu despacho proveedor.",
+      "tabla": {
+        "columnas": ["Plan", "RFC", "Precio mensual"],
+        "filas": [
+          {"plan": "Prueba", "rfc": "1", "precio": "$0.00", "activo": true},
+          {"plan": "Básico", "rfc": "3", "precio": "$499.00"},
+          {"plan": "Despacho", "rfc": "15", "precio": "$1,499.00"},
+          {"plan": "Ilimitado", "rfc": "Sin límite", "precio": "$3,999.00"}
+        ]
+      }
+    }
+  ]
+}

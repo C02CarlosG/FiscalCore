@@ -1,0 +1,31 @@
+{
+  "pantalla": "ISR base flujo",
+  "ruta_menu": "Impuestos > ISR base flujo",
+  "url": "https://app.ezaudita.com/isr/?cid=...&period=2026-enero",
+  "periodo": "2026 - Enero",
+  "aviso_importante": "IMPORTANTE: No están considerados CFDIs de pago 1.0",
+  "kpis_tarjetas": [
+    {"etiqueta": "Ingresos acumulables", "valor": "$25,553,202.33", "seleccionada": true},
+    {"sub_etiqueta": "ISR retenido a favor", "valor": "$0.00"},
+    {"etiqueta": "Deducciones", "valor": "$24,215,045.89"},
+    {"sub_etiqueta": "ISR retenido a cargo", "valor": "$2,317.69"}
+  ],
+  "seccion_detalle": "Detalles - Ingresos acumulables efectivamente cobrados",
+  "pestanas_detalle": [
+    {"nombre": "Totales", "conteo": 275, "activa": true},
+    {"nombre": "Facturas contado", "conteo": 223, "subtitulo": "Ejercicio 2026"},
+    {"nombre": "CFDI de pagos", "conteo": 52, "subtitulo": "Ejercicio 2026"},
+    {"nombre": "No considerados ISR", "conteo": 0, "tooltip": true}
+  ],
+  "tabla_totales": {
+    "encabezados": ["(tipo)", "Periodo", "Conteo de CFDIs", "Base IVA 16%", "Base IVA 8%", "Base IVA 0%", "Base IVA exento", "Total base ISR", "ISR retenido a favor"],
+    "filas": [
+      {"tipo": "Facturas de contado", "periodo": "Enero 2026", "conteo": 223, "base_iva_16": "$23,110,360.84", "total_base_isr": "$23,110,360.84", "isr_retenido_favor": "$0.00"},
+      {"tipo": "CFDI de pagos", "periodo": "Enero 2026", "conteo": 52, "base_iva_16": "$2,442,841.49", "total_base_isr": "$2,442,841.49", "isr_retenido_favor": "$0.00"},
+      {"tipo": "Total", "total_base_isr": "$25,553,202.33", "isr_retenido_favor": "$0.00"}
+    ]
+  },
+  "formula_implicita": "ISR: Ingresos acumulables (base flujo: contado + pagos cobrados) vs Deducciones. Muestra ISR retenido a favor y a cargo por separado.",
+  "botones_y_acciones": ["Exportar a Excel"],
+  "notas": "Similar al IVA, desglosa entre PUE (contado) y pagos cobrados. No muestra cálculo de pago provisional de ISR completo (coeficiente, utilidad fiscal, tarifa) — solo ingresos y deducciones base."
+}

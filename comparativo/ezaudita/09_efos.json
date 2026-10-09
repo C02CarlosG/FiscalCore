@@ -1,0 +1,32 @@
+{
+  "pantalla": "EFOS (Lista 69-B)",
+  "ruta_menu": "EFOS",
+  "url": "https://app.ezaudita.com/efos/?cid=...&type=ingress&period=todos",
+  "periodo_filtro": "Todos",
+  "pestanas_estado": ["Vigentes (activa)", "Cancelados", "Todos"],
+  "ultima_actualizacion_efos": "31 de agosto de 2026",
+  "botones_y_acciones": [
+    "Acciones",
+    "Ver listado de EFOS",
+    "Editar columnas"
+  ],
+  "filtros": [
+    "Periodo (dropdown: Todos)",
+    "Búsqueda por UUID, RFC o emisor",
+    "Filtro avanzado (icono embudo)"
+  ],
+  "tab_tipo_cfdi": "Ingreso (0)",
+  "tabla_totales": {
+    "encabezados": ["Tipo", "Conteo de CFDIs", "Retención IVA", "Retención IEPS", "Retención ISR", "Traslado IVA", "Traslado IEPS", "Traslado ISR", "Total de retenciones", "Subtotal (parcial)"],
+    "filas": [
+      {"tipo": "Periodo", "conteo": 0, "todo_guion": true},
+      {"tipo": "Acumulado", "conteo": 0, "todo_guion": true}
+    ]
+  },
+  "tabla_cfdis": {
+    "encabezados": ["Checkbox", "Icono", "Estatus", "RFC emisor (sortable)", "Emisor (sortable)", "Subtotal (sortable)", "Total descuento (sortable)", "Neto (sortable)", "Retención IVA (sortable)", "Retención ISR (sortable)"],
+    "filas": [],
+    "nota": "Sin resultados — este contribuyente no tiene CFDIs de emisores en lista 69-B"
+  },
+  "notas": "Cruza automáticamente los CFDIs recibidos contra la lista 69-B (EFOS). Actualización del listado EFOS: 31/ago/2026. 0 matches para este contribuyente."
+}

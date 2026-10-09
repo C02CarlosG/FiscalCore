@@ -1,0 +1,12 @@
+{
+  "pantalla": "DIOT por flujo",
+  "existe": true,
+  "url": "/empresas/{id}/diot?periodo=2026-10",
+  "screenshot": "09_diot_por_flujo.jpg",
+  "titulo": "DIOT por flujo",
+  "etiqueta": "IMPUESTOS",
+  "subtitulo": "Lo pagado en el mes por tercero y tipo de operación, con el IVA acreditable y el que no lo es.",
+  "filtros": ["Periodo (selector mensual)"],
+  "botones": ["Exportar Excel"],
+  "mensaje_vacio": "No hay compras con efecto en este periodo."
+}

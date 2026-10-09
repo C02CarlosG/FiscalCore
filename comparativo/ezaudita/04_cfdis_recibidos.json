@@ -1,0 +1,37 @@
+{
+  "pantalla": "CFDIs recibidos",
+  "ruta_menu": "CFDIs > Recibidos",
+  "url": "https://app.ezaudita.com/cfdi-received/?cid=...&type=ingress&period=2026-enero",
+  "periodo": "2026 - Enero",
+  "filtros": {
+    "periodo": "2026 - Enero",
+    "busqueda": "UUID, RFC o emisor",
+    "icono_filtro_avanzado": true,
+    "estado": {"opciones": ["Vigentes", "Cancelados", "Todos"], "seleccionado": "Vigentes"},
+    "metodo_pago": {"opciones": ["PUE", "PPD", "Todos"], "seleccionado": "Todos"}
+  },
+  "pestanas_tipo_cfdi": [
+    {"nombre": "Ingreso", "conteo": 201, "activa": true},
+    {"nombre": "Egreso", "conteo": 9},
+    {"nombre": "Traslado", "conteo": 0},
+    {"nombre": "Nómina", "conteo": 0},
+    {"nombre": "Pago", "conteo": 61}
+  ],
+  "tabla_totales": {
+    "encabezados": ["Tipo", "Conteo de CFDIs", "Retención IVA", "Retención IEPS", "Retención ISR", "Traslado IVA", "Traslado IEPS", "Traslado ISR", "Total de retenciones", "Subtotal", "Descuento", "Neto", "Total"],
+    "filas": [
+      {"tipo": "Periodo", "conteo": 201, "retencion_iva": "$4,572.56", "retencion_ieps": "$0.00", "retencion_isr": "$2,317.69", "traslado_iva": "$1,817,064.97", "traslado_ieps": "$0.00", "traslado_isr": "$0.00", "total_retenciones": "$6,890.25", "subtotal": "$14,552,4xx (cortado)"},
+      {"tipo": "Acumulado", "conteo": 201, "mismos_valores": true}
+    ]
+  },
+  "tabla_cfdis": {
+    "encabezados": ["(expand +)", "(checkbox)", "(icono tipo)", "(adjunto)", "Fecha expedición", "Serie", "Folio", "RFC emisor", "Emisor", "Total", "Saldo de la factura"],
+    "primeras_filas": [
+      {"fecha": "01/01/2026", "serie": "", "folio": "012610...", "rfc_emisor": "BBA830831LJ2", "emisor": "BBVA MEXICO, S.A., INSTITUCION...", "total": "$680.34"},
+      {"fecha": "01/01/2026", "serie": "KC", "folio": "000076...", "rfc_emisor": "CFE370814QI0", "emisor": "COMISION FEDERAL DE ELECTRICIDA...", "total": "$1,574,217.95"},
+      {"fecha": "01/01/2026", "serie": "", "folio": "050110...", "rfc_emisor": "BSM970519DU8", "emisor": "BANCO SANTANDER MEXICO S.A., IN...", "total": "$3,540.95"}
+    ]
+  },
+  "botones_y_acciones": ["Exportar", "Ícono calendario/descarga", "Editar columnas (x2)"],
+  "diferencias_vs_emitidos": "Busca por 'emisor' en vez de 'receptor'. Columnas RFC emisor/Emisor en vez de RFC receptor/Receptor. Sin pestaña de Nómina con datos (0 recibidos)."
+}

@@ -1,0 +1,18 @@
+{
+  "pantalla": "Conciliación",
+  "existe": true,
+  "url": "/empresas/{id}/conciliacion?periodo=2026-10",
+  "screenshot": "05_conciliacion.jpg",
+  "titulo": "Cruces banco-CFDI",
+  "etiqueta": "CONCILIACIÓN BANCARIA",
+  "subtitulo": "Movimientos bancarios comparados con comprobantes fiscales del periodo.",
+  "filtros": ["Periodo (selector mensual)", "Búsqueda: Buscar concepto..."],
+  "kpis": {
+    "exactos": 0,
+    "parciales": 0,
+    "sin_cfdi": 0,
+    "sin_movimiento": 0,
+    "conciliado": "0%"
+  },
+  "mensaje_vacio": "No hay movimientos pendientes de conciliar en este periodo."
+}

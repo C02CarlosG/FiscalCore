@@ -1,0 +1,72 @@
+{
+  "pantalla": "Generar DIOT",
+  "ruta_menu": "DIOT > Generar DIOT",
+  "url": "https://app.ezaudita.com/generate_diot/?cid=...&period=2026-01",
+  "periodo": "2026 - Enero",
+  "pestanas": [
+    {"nombre": "Todos", "activa": true},
+    {"nombre": "Zona norte"},
+    {"nombre": "Zona sur"},
+    {"nombre": "IVA general"},
+    {"nombre": "Importaciones tangibles"},
+    {"nombre": "Importaciones intangibles"}
+  ],
+  "filtros": ["Periodo (2026 - Enero)", "Búsqueda por RFC o proveedor"],
+  "botones_y_acciones": [
+    "Exportar DIOT (dropdown)",
+    "+ Agregar proveedor (dropdown)",
+    "Guardar Cambios (en pestañas de zona)"
+  ],
+  "seccion_superior": "Datos de tercero",
+  "columnas_datos_tercero": [
+    "Acciones (lápiz editar)",
+    "Tipo de tercero (dropdown: Nacional)",
+    "Tipo de operación (dropdown: 85 - Otros)",
+    "Nombre / Razón social",
+    "RFC (sortable)",
+    "Nombre extranjero",
+    "No. identificación",
+    "País",
+    "Lugar de jurisdicción fiscal"
+  ],
+  "columnas_montos_por_region": {
+    "norte": ["Nte. Total actos", "Nte. Devoluciones"],
+    "sur": ["Sur Total actos", "Sur Devoluciones"],
+    "iva_general": ["IVA Total actos", "IVA Devoluciones"],
+    "tangibles": ["Tang. Total actos", "Tang. Devoluciones"],
+    "intangibles": ["Intg. Total actos", "Intg. Devoluciones"]
+  },
+  "columnas_desglose_iva": {
+    "norte": ["Nte. Gravadas", "Nte. Con proporción", "Nte. No cumple", "Nte. Exentas", "Nte. No objeto"],
+    "sur": ["Sur Gravadas", "Sur Con proporción", "Sur No cumple", "Sur Exentas", "Sur No objeto"],
+    "iva_general": ["IVA Gravadas", "IVA Con proporción", "IVA No cumple", "IVA Exentas", "IVA No objeto"],
+    "tangibles": ["Tang. Gravadas", "Tang. Con proporción", "Tang. No cumple", "Tang. Exentas", "Tang. No objeto"],
+    "intangibles": ["Intg. Gravadas", "Intg. Con proporción", "Intg. No cumple", "Intg. Exentas", "Intg. No objeto"]
+  },
+  "columnas_adicionales": [
+    "IVA retenido",
+    "Exentos importaciones",
+    "Actividades exentas",
+    "Actividades 0% IVA",
+    "No objeto nacional",
+    "No objeto extranjero",
+    "Manifiesto efectos (toggle on/off)"
+  ],
+  "primeros_proveedores": [
+    {"nombre": "COMERCIAL OAXAQUEÑA DE PINT...", "rfc": "COP861107ENA", "tipo_tercero": "Nacional", "tipo_operacion": "85 - Otros", "iva_total_actos": 3189, "iva_gravadas": 510},
+    {"nombre": "VIRGEN RIOS MALDONADO", "rfc": "RIMV820717MY0", "tipo_tercero": "Nacional", "tipo_operacion": "85 - Otros", "iva_total_actos": 816, "iva_gravadas": 131},
+    {"nombre": "ENTECRESINS MEXICO", "rfc": "EME0109141G6", "tipo_tercero": "Nacional", "tipo_operacion": "85 - Otros", "iva_total_actos": 1671420, "iva_gravadas": 267427},
+    {"nombre": "TRANSPORTES DE CARGA FORTIN", "rfc": "TCF950424IV7", "tipo_tercero": "Nacional", "tipo_operacion": "85 - Otros", "iva_total_actos": 46895, "iva_gravadas": 7503, "iva_retenido": 1876},
+    {"nombre": "PROYECTOS CASA NUEVA", "rfc": "PCN0307033R0", "tipo_tercero": "Nacional", "tipo_operacion": "85 - Otros", "iva_total_actos": 2958, "iva_gravadas": 473},
+    {"nombre": "ESTACION DE SERVICIO JUQUIL...", "rfc": "ESJ970621UR2", "tipo_tercero": "Nacional", "tipo_operacion": "85 - Otros", "iva_total_actos": 3387, "iva_gravadas": 542},
+    {"nombre": "DOLORES MONSERRAT LOPEZ LAZ...", "rfc": "LOLD910915TJ2", "tipo_tercero": "Nacional", "tipo_operacion": "85 - Otros", "iva_total_actos": 57209, "iva_gravadas": 9153}
+  ],
+  "scroll": "continuo (no paginado)",
+  "hallazgo_region": {
+    "descripcion": "La 'región' de la DIOT (Zona norte / Zona sur) se implementa como pestañas separadas en la vista Generar DIOT. En la pestaña 'Todos' se muestran columnas por cada región (Nte.*, Sur*, IVA*, Tang.*, Intg.*). Este contribuyente tiene todos los montos en 'IVA general' (columnas IVA*), con 0 en Norte y Sur. La región parece determinarse por el domicilio fiscal del proveedor según la clasificación SAT de estados frontera norte/sur, o se asigna manualmente.",
+    "zona_norte_vacia": true,
+    "zona_sur_vacia": true,
+    "nota": "Zona norte tiene 'No hay datos' para este contribuyente. Todos los proveedores caen en IVA general (tasa 16% no fronteriza)."
+  },
+  "notas": "La tabla es extremadamente ancha (~40+ columnas). Los campos editables son Tipo de tercero y Tipo de operación (dropdowns). Los montos (Total actos, Devoluciones, Gravadas, etc.) son inputs editables. Manifiesto efectos es un toggle. Cada proveedor tiene un lápiz de edición para más detalles."
+}

@@ -1,0 +1,56 @@
+{
+  "pantalla": "CFDIs emitidos",
+  "ruta_menu": "CFDIs > Emitidos",
+  "url": "https://app.ezaudita.com/cfdi-issued/?cid=...&type=ingress&period=2026-enero",
+  "periodo": "2026 - Enero",
+  "filtros": {
+    "periodo": "2026 - Enero",
+    "busqueda": "UUID, RFC o receptor (campo de texto con lupa)",
+    "icono_filtro_avanzado": true,
+    "estado": {
+      "opciones": ["Vigentes", "Cancelados", "Todos"],
+      "seleccionado": "Vigentes"
+    },
+    "metodo_pago": {
+      "opciones": ["PUE", "PPD", "Todos"],
+      "seleccionado": "Todos"
+    }
+  },
+  "pestanas_tipo_cfdi": [
+    {"nombre": "Ingreso", "conteo": 415, "activa": true},
+    {"nombre": "Egreso", "conteo": 12},
+    {"nombre": "Traslado", "conteo": 22},
+    {"nombre": "Nómina", "conteo": 791},
+    {"nombre": "Pago", "conteo": 52}
+  ],
+  "tabla_totales": {
+    "encabezados": ["Tipo", "Conteo de CFDIs", "Retención IVA", "Retención IEPS", "Retención ISR", "Traslado IVA", "Traslado IEPS", "Traslado ISR", "Total de retenciones", "Subtotal", "Descuento", "Neto", "Total"],
+    "filas": [
+      {"tipo": "Periodo", "conteo": 415, "retencion_iva": "$0.00", "retencion_ieps": "$0.00", "retencion_isr": "$0.00", "traslado_iva": "$4,820,624.73", "traslado_ieps": "$0.00", "traslado_isr": "$0.00", "total_retenciones": "$0.00", "subtotal": "$30,128,904.86", "descuento": "$0.00", "neto": "$30,128,904.86", "total": "$34,949,529.59"},
+      {"tipo": "Acumulado", "conteo": 415, "retencion_iva": "$0.00", "retencion_ieps": "$0.00", "retencion_isr": "$0.00", "traslado_iva": "$4,820,624.73", "traslado_ieps": "$0.00", "traslado_isr": "$0.00", "total_retenciones": "$0.00", "subtotal": "$30,128,904.86", "descuento": "$0.00", "neto": "$30,128,904.86", "total": "$34,949,529.59"}
+    ],
+    "acciones": ["Editar columnas"]
+  },
+  "tabla_cfdis": {
+    "encabezados": ["(expand +)", "(checkbox)", "(icono tipo)", "(adjunto)", "Fecha expedición", "Serie", "Folio", "RFC receptor", "Receptor", "Total", "Saldo de la factura"],
+    "ordenamiento": "Por columnas (Fecha expedición, Folio, RFC receptor, Receptor, Total son ordenables)",
+    "paginacion": "Scroll continuo (sin paginador numérico)",
+    "total_registros": 415,
+    "primeras_filas": [
+      {"fecha": "03/01/2026", "serie": "A1", "folio": "2448", "rfc_receptor": "RONC950612SQ5", "receptor": "CESAR HOBET ROBLES NUÑEZ", "total": "$6,643.00"},
+      {"fecha": "03/01/2026", "serie": "A1", "folio": "2449", "rfc_receptor": "RONC950612SQ5", "receptor": "CESAR HOBET ROBLES NUÑEZ", "total": "$22,499.00"},
+      {"fecha": "03/01/2026", "serie": "A1", "folio": "2450", "rfc_receptor": "RONC950612SQ5", "receptor": "CESAR HOBET ROBLES NUÑEZ", "total": "$4,434.00"},
+      {"fecha": "03/01/2026", "serie": "A1", "folio": "2458", "rfc_receptor": "BPO001117BTA", "receptor": "PRACTIJOMARLU", "total": "$343,250.00"},
+      {"fecha": "03/01/2026", "serie": "A1", "folio": "2459", "rfc_receptor": "BPO001117BTA", "receptor": "PRACTIJOMARLU", "total": "$126,077.37"},
+      {"fecha": "03/01/2026", "serie": "A1", "folio": "2460", "rfc_receptor": "BPO001117BTA", "receptor": "PRACTIJOMARLU", "total": "$353,172.57"},
+      {"fecha": "05/01/2026", "serie": "A1", "folio": "2461", "rfc_receptor": "RONC950612SQ5", "receptor": "CESAR HOBET ROBLES NUÑEZ", "total": "$16,475.00"},
+      {"fecha": "05/01/2026", "serie": "A1", "folio": "2471", "rfc_receptor": "RONC950612SQ5", "receptor": "CESAR HOBET ROBLES NUÑEZ", "total": "$1,125.00"},
+      {"fecha": "05/01/2026", "serie": "A1", "folio": "2472", "rfc_receptor": "OOCE800214S86", "receptor": "ELI CHRISTIAN OROZCO CAMACHO", "total": "$35,386.30"},
+      {"fecha": "05/01/2026", "serie": "A1", "folio": "2473", "rfc_receptor": "RONC950612SQ5", "receptor": "CESAR HOBET ROBLES NUÑEZ", "total": "$7,250.00"}
+    ],
+    "acciones_por_fila": ["Expandir detalle (+)", "Checkbox selección", "Ícono tipo CFDI (flecha arriba = Ingreso)", "Menú contextual (tres puntos)"],
+    "acciones_tabla": ["Editar columnas"]
+  },
+  "botones_y_acciones": ["Exportar", "Ícono calendario/descarga", "Editar columnas (x2)"],
+  "notas": "Cada fila tiene un botón '+' para expandir detalle y un ícono con tres puntos para menú contextual. Columna 'Saldo de la factura' visible pero cortada en la captura."
+}

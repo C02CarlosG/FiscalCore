@@ -1,0 +1,33 @@
+{
+  "pantalla": "Usuarios",
+  "existe": true,
+  "url": "/empresas/{id}/usuarios",
+  "screenshot": "13_usuarios.jpg",
+  "titulo": "Usuarios",
+  "etiqueta": "CONFIGURACIÓN",
+  "subtitulo": "Quién tiene acceso a esta empresa y con qué rol.",
+  "secciones": [
+    {
+      "nombre": "Usuarios con acceso",
+      "descripcion": "El administrador invita y gestiona quién tiene acceso; el contador trabaja la empresa.",
+      "usuarios": [
+        {
+          "nombre": "Administrador (tú)",
+          "correo": "admin@fiscalcore.mx",
+          "desde": "02/10/2026",
+          "rol": "Administrador",
+          "acciones": ["Cambiar rol (dropdown)", "Eliminar (icono)"]
+        }
+      ]
+    },
+    {
+      "nombre": "Invitar a otra persona",
+      "campos": [
+        {"nombre": "Correo", "tipo": "email_input"},
+        {"nombre": "Rol", "tipo": "dropdown", "valor_default": "Contador"}
+      ],
+      "boton": "Invitar"
+    }
+  ],
+  "roles_disponibles": ["Administrador", "Contador"]
+}

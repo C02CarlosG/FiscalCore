@@ -1,0 +1,56 @@
+{
+  "pantalla": "Detalle de CFDI (modal)",
+  "ruta_menu": "CFDIs > Emitidos > clic en fila",
+  "url": "Modal sobre /cfdi-issued/",
+  "ejemplo_cfdi": {
+    "tipo": "INGRESO",
+    "estado": "VIGENTE",
+    "serie": "A1",
+    "folio": "2472"
+  },
+  "datos_emisor": {
+    "nombre": "COPLASUR",
+    "rfc": "COP941004363",
+    "lugar_expedicion": "68258",
+    "regimen_fiscal": "601 - General de Ley Personas Morales"
+  },
+  "datos_receptor": {
+    "nombre": "ELI CHRISTIAN OROZCO CAMACHO",
+    "rfc": "OOCE800214S86",
+    "domicilio_fiscal": "68020",
+    "regimen_fiscal": "612 - Personas Físicas con Actividades Empresariales y Profesionales"
+  },
+  "folio_fiscal_uuid": "c8772e4e-fcb8-4893-bf76-d882ae44842e",
+  "fecha_hora_emision": "1/5/2026, 12:16:32 PM",
+  "no_certificado_digital": "00001000000718980263",
+  "tabla_conceptos": {
+    "encabezados": ["(expand +)", "Clave producto", "Cantidad", "Clave unidad", "Concepto(s)", "Precio unitario", "Importe"],
+    "total_conceptos": 35,
+    "paginacion": "< [1] 2 > (paginación numérica dentro del modal)",
+    "concepto_ejemplo": {
+      "clave_producto": "24111503",
+      "cantidad": 64,
+      "clave_unidad": "H87",
+      "descripcion": "BOLSA AD ROLLO TRANSPARENTE 20X30 (500 PZS)",
+      "precio_unitario": "$24.57",
+      "importe": "$1,572.41"
+    },
+    "nota": "Cada concepto tiene un botón '+' para expandir impuestos del concepto"
+  },
+  "totales": {
+    "subtotal": "$30,505.43",
+    "traslados_iva": "$4,880.87",
+    "total": "$35,386.30"
+  },
+  "moneda": "MXN - Peso Mexicano",
+  "forma_de_pago": "99 - Por definir",
+  "metodo_de_pago": "PPD - Pago en parcialidades o diferido",
+  "uso_del_cfdi": "G01 - Adquisición de mercancías",
+  "etiquetas": "Campo 'Agregar etiquetas' (dropdown, funcionalidad de etiquetado personalizado)",
+  "botones_y_acciones": [
+    "Descargar CFDI: XML (botón azul)",
+    "Descargar CFDI: PDF (botón azul)",
+    "Ir a ver Evidencias (botón azul destacado)",
+    "Cerrar (botón gris)"
+  ]
+}

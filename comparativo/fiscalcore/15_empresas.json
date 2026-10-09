@@ -1,0 +1,24 @@
+{
+  "pantalla": "Empresas",
+  "existe": true,
+  "url": "/empresas",
+  "screenshot": "15_empresas.jpg",
+  "titulo": "Empresas",
+  "etiqueta": "WORKSPACE",
+  "subtitulo": "Entidades y registros fiscales asociados a tu cuenta.",
+  "filtros": ["Buscar por RFC o razón social..."],
+  "botones": ["+ Nueva empresa"],
+  "indicador": "1 registradas",
+  "tabla": {
+    "columnas": ["RFC", "Razón social", "RÉGIMEN FISCAL", "Acciones"],
+    "filas": [
+      {
+        "rfc": "COP941004363",
+        "razon_social": "COPLASUR S.A. DE C.V.",
+        "regimen_fiscal": "—",
+        "acciones": ["Abrir →", "... (menú contextual)"]
+      }
+    ]
+  },
+  "paginacion": "1–1 de 1 · Página 1/1"
+}
