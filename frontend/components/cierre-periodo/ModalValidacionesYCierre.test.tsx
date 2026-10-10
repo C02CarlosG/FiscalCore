@@ -19,7 +19,7 @@ describe("ModalValidacionesYCierre", () => {
         onConfirm={vi.fn()}
       />
     );
-    expect(container.firstChild?.childNodes.length).toBe(0);
+    expect(container).toBeEmptyDOMElement();
   });
 
   it("renderiza cuando open es true", () => {
