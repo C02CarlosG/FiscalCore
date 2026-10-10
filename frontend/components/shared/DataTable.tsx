@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, Search } from "lucide-react";
+import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, ChevronsUpDown, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -161,15 +161,18 @@ export function DataTable<T>({
                     <button
                       type="button"
                       onClick={() => toggleSort(column.key)}
-                      className={`inline-flex items-center gap-1.5 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${column.align === "right" ? "ml-auto" : ""}`}
+                      className={`group inline-flex items-center gap-1.5 rounded-sm transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${column.align === "right" ? "ml-auto" : ""}`}
                     >
                       {column.header}
-                      {sort?.key === column.key &&
-                        (sort.dir === "asc" ? (
-                          <ArrowUp className="h-3 w-3" />
+                      {sort?.key === column.key ? (
+                        sort.dir === "asc" ? (
+                          <ArrowUp className="h-3 w-3 text-primary" />
                         ) : (
-                          <ArrowDown className="h-3 w-3" />
-                        ))}
+                          <ArrowDown className="h-3 w-3 text-primary" />
+                        )
+                      ) : (
+                        <ChevronsUpDown className="h-3 w-3 opacity-30 transition-opacity group-hover:opacity-60" />
+                      )}
                     </button>
                   ) : (
                     column.header

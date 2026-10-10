@@ -84,6 +84,14 @@ const config: Config = {
         display: ["var(--font-sora)", "var(--font-public-sans)", "system-ui"],
         mono: ["var(--font-mono)", "ui-monospace", "monospace"],
       },
+      keyframes: {
+        shimmer: {
+          "100%": { transform: "translateX(100%)" },
+        },
+      },
+      animation: {
+        shimmer: "shimmer 1.6s infinite",
+      },
     },
   },
   plugins: [require("tailwindcss-animate")],

@@ -37,6 +37,7 @@ export function StatusBadge({ status }: { status: string }) {
       variant="outline"
       className={`border-transparent font-medium ${entry.className}`}
     >
+      <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-current" />
       {entry.label}
     </Badge>
   );

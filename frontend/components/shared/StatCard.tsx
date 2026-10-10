@@ -17,9 +17,20 @@ const TONE_CLASSES: Record<NonNullable<StatCardProps["tone"]>, string> = {
   ok: "bg-status-ok-soft text-status-ok",
 };
 
+const TONE_ACCENT: Record<NonNullable<StatCardProps["tone"]>, string> = {
+  default: "from-severity-bajo",
+  critico: "from-severity-critico",
+  alto: "from-severity-alto",
+  ok: "from-status-ok",
+};
+
 export function StatCard({ label, value, icon: Icon, tone = "default", delta }: StatCardProps) {
   return (
-    <Card className="min-w-0 overflow-hidden transition-shadow hover:shadow-md">
+    <Card className="relative min-w-0 overflow-hidden transition-shadow hover:shadow-md">
+      <span
+        aria-hidden="true"
+        className={`absolute inset-x-0 top-0 h-[3px] bg-gradient-to-r to-transparent ${TONE_ACCENT[tone]}`}
+      />
       <CardContent className="p-4 sm:p-5">
         <div className="mb-4 flex items-start justify-between gap-3">
           <span className="text-xs font-semibold text-muted-foreground">{label}</span>

@@ -40,7 +40,15 @@ export default function LoginPage() {
   return (
     <main className="grid min-h-[100dvh] bg-background lg:grid-cols-[1.05fr_0.95fr]">
       <section className="relative hidden min-h-[100dvh] flex-col justify-between overflow-hidden bg-foreground px-12 py-10 text-background lg:flex xl:px-16">
-        <div className="flex items-center gap-3 font-display text-lg font-bold">
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 bg-[radial-gradient(65%_55%_at_82%_-5%,hsl(var(--brand)/0.45),transparent_68%)]"
+        />
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute -left-24 bottom-4 h-80 w-80 rounded-full bg-[radial-gradient(circle,hsl(var(--brand-contrast)/0.30),transparent_70%)] blur-2xl"
+        />
+        <div className="relative z-10 flex items-center gap-3 font-display text-lg font-bold">
           <span className="flex h-10 w-10 items-center justify-center rounded-md bg-primary text-primary-foreground">
             <Landmark className="h-5 w-5" />
           </span>
