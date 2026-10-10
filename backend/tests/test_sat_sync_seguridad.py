@@ -45,7 +45,7 @@ def test_un_error_al_descargar_no_filtra_la_efirma(monkeypatch, caplog):
     monkeypatch.setattr(sat_sync, "verificar_solicitud",
                         lambda creds, id_sat: {"estado": 3, "num_cfdi": 1, "id_paquetes": ["p1"]})
 
-    def _descargar(creds, id_paquete):
+    def _descargar(creds, id_paquete, extensiones=(".xml",)):
         raise FIELError(f"Error al descargar paquete {id_paquete!r}: tiempo de espera agotado")
     monkeypatch.setattr(sat_sync, "descargar_paquete", _descargar)
 
