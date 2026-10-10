@@ -133,6 +133,12 @@ async def clasificar_tercero(empresa_id: str, periodo: str, proveedor_id: str, d
     """Tipo de tercero y de operación de un proveedor **en este periodo** (lo que no se manda cae al catálogo)."""
     validar_acceso_empresa(empresa_id, current_user)
     _periodo_o_422(periodo)
+
+    # Validar que el período no esté cerrado
+    from .. import cierre as cierre_logic
+    if cierre_logic.periodo_esta_cerrado(empresa_id, periodo):
+        raise HTTPException(status_code=422, detail="Período cerrado; reabre para cambios")
+
     p = _proveedor_o_404(empresa_id, proveedor_id)
     errores = diot_catalogos.validar({**p, **{k: v for k, v in datos.model_dump().items() if v is not None}})
     if errores:
@@ -145,6 +151,12 @@ async def clasificar_tercero(empresa_id: str, periodo: str, proveedor_id: str, d
 async def quitar_clasificacion(empresa_id: str, periodo: str, proveedor_id: str, current_user: dict = Depends(get_current_user)):
     validar_acceso_empresa(empresa_id, current_user)
     _periodo_o_422(periodo)
+
+    # Validar que el período no esté cerrado
+    from .. import cierre as cierre_logic
+    if cierre_logic.periodo_esta_cerrado(empresa_id, periodo):
+        raise HTTPException(status_code=422, detail="Período cerrado; reabre para cambios")
+
     p = _proveedor_o_404(empresa_id, proveedor_id)
     if not diot_datos.quitar_tercero_periodo(empresa_id, periodo, p["id"], current_user["user_id"]):
         raise HTTPException(status_code=404, detail="Sin clasificación para ese periodo")
@@ -156,6 +168,12 @@ async def operacion_de_un_cfdi(empresa_id: str, periodo: str, uuid: str, datos: 
     """Tipo de operación de **un CFDI** en el periodo: así un mismo tercero se declara con varias operaciones."""
     validar_acceso_empresa(empresa_id, current_user)
     _periodo_o_422(periodo)
+
+    # Validar que el período no esté cerrado
+    from .. import cierre as cierre_logic
+    if cierre_logic.periodo_esta_cerrado(empresa_id, periodo):
+        raise HTTPException(status_code=422, detail="Período cerrado; reabre para cambios")
+
     empresa = empresa_or_404(empresa_id)
     cfdi = None if len(uuid) > _UUID_MAX else db.query_one(
         """SELECT uuid FROM cfdi WHERE empresa_id = %s AND UPPER(uuid) = UPPER(%s) AND estado = 'vigente'
@@ -177,6 +195,12 @@ async def operacion_de_un_cfdi(empresa_id: str, periodo: str, uuid: str, datos: 
 async def quitar_operacion_de_un_cfdi(empresa_id: str, periodo: str, uuid: str, current_user: dict = Depends(get_current_user)):
     validar_acceso_empresa(empresa_id, current_user)
     _periodo_o_422(periodo)
+
+    # Validar que el período no esté cerrado
+    from .. import cierre as cierre_logic
+    if cierre_logic.periodo_esta_cerrado(empresa_id, periodo):
+        raise HTTPException(status_code=422, detail="Período cerrado; reabre para cambios")
+
     if len(uuid) > _UUID_MAX or not diot_datos.quitar_operacion_cfdi(empresa_id, periodo, uuid, current_user["user_id"]):
         raise HTTPException(status_code=404, detail="Sin operación asignada a ese CFDI")
 

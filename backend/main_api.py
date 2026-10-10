@@ -37,6 +37,7 @@ from .routers import validaciones_cfdi
 from .routers import cuenta
 from .routers import suscripcion
 from .routers import reinicio
+from .routers import cierre as cierre_router
 
 logging.basicConfig(
     level=logging.INFO,
@@ -104,6 +105,7 @@ app.include_router(validaciones_cfdi.router)
 app.include_router(cuenta.router)
 app.include_router(suscripcion.router)
 app.include_router(reinicio.router)
+app.include_router(cierre_router.router)
 
 
 @app.on_event("startup")

@@ -101,6 +101,12 @@ async def guardar_ajuste(empresa_id: str, datos: AjusteIn, current_user: dict = 
     if not propio or cfdi["tipo_comprobante"] not in ("I", "E"):
         raise HTTPException(status_code=404, detail="CFDI no encontrado para ese ajuste")
 
+    # Validar que el período no esté cerrado
+    from .. import cierre as cierre_logic
+    periodo_cfdi = cfdi["fecha_emision"].strftime("%Y-%m")
+    if cierre_logic.periodo_esta_cerrado(empresa_id, periodo_cfdi):
+        raise HTTPException(status_code=422, detail="Período cerrado; reabre para cambios")
+
     # Un PUE tiene un solo mes de efecto: reasignarlo a ese mismo mes no hace nada.
     un_solo_mes = cfdi["tipo_comprobante"] == "E" or cfdi["metodo_pago"] == "PUE"
     if datos.accion == "reasignar" and un_solo_mes and datos.periodo_destino == cfdi["fecha_emision"].strftime("%Y-%m"):
@@ -120,6 +126,18 @@ async def quitar_ajuste(empresa_id: str, direccion: Literal["trasladado", "acred
     validar_acceso_empresa(empresa_id, current_user)
     if len(uuid) > _UUID_MAX:
         raise HTTPException(status_code=404, detail="Ajuste no encontrado")
+
+    # Validar que el período no esté cerrado
+    from .. import cierre as cierre_logic
+    cfdi = db.query_one(
+        """SELECT fecha_emision FROM cfdi WHERE empresa_id = %s AND UPPER(uuid) = UPPER(%s)""",
+        (empresa_id, uuid),
+    )
+    if cfdi:
+        periodo = cfdi["fecha_emision"].strftime("%Y-%m")
+        if cierre_logic.periodo_esta_cerrado(empresa_id, periodo):
+            raise HTTPException(status_code=422, detail="Período cerrado; reabre para cambios")
+
     if iva_flujo_datos.quitar_ajuste(empresa_id, uuid, direccion, current_user["user_id"]) is None:
         raise HTTPException(status_code=404, detail="Ajuste no encontrado")
 

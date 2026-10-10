@@ -460,7 +460,7 @@ pausa.
 | F3.6 | A | En revisión: etiquetas por empresa, comentarios y evidencias (bytea, 5 MB / 20 por CFDI, tipo por contenido), lote de hasta 500 CFDI, filtro `etiqueta=` | `docs/superpowers/specs/2026-10-05-f3-6-etiquetas-comentarios-evidencias-design.md` | — |
 | Punto de control de paridad | Coordinación | Pendiente: al terminar F5–F7 se recorre FiscalCore con Playwright contra las capturas y se cuadran las cifras de control | — | — |
 | M5 | C | M5.1 (API y comparativo, migración 056) integrada en #52; M5.2 (pantalla Declaraciones) en revisión | `docs/superpowers/specs/2026-10-06-m5-comparativo-declarado-design.md` | un plan por entrega |
-| M2 | C | Pendiente | — | — |
+| M2 | C | Especificación y plan listos (2026-10-09); pendiente implementación (M2.1 Excel + M2.2 Cierre) | `docs/superpowers/specs/2026-10-09-m2-papel-trabajo-cierre-design.md` | `docs/superpowers/plans/2026-10-09-m2-papel-trabajo.md` |
 
 ### Lista de verificación de F0
 
