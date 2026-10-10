@@ -287,6 +287,9 @@ def init_db() -> None:
         # 067 es idempotente — tokens e historial de «Reiniciar datos» (carril D)
         _run_sql_file("067_reinicios_empresa.sql")
 
+        # 070 es idempotente — tabla de períodos cerrados (M2, papel de trabajo)
+        _run_sql_file("070_periodos_cerrados.sql")
+
         # Seed inicial: usuario admin si la base aún no tiene usuarios
         _seed_admin()
 
