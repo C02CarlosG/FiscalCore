@@ -20,6 +20,7 @@ ESTADOS = ("vigente", "cancelado", "todos")
 METODOS = ("PUE", "PPD", "todos")
 PAGOS = ("pendientes", "pagadas", "todos")
 POR_PAGINA = (30, 50, 100)
+EFOS = ("todos", "en_lista", "presunto", "definitivo")   # cruce con la lista 69-B (solo recibidos)
 MAX_FILTROS = 10
 MAX_TEXTO = 200
 MAX_BUSQUEDA = 100
@@ -60,6 +61,7 @@ class Consulta:
     pago: str = "todos"
     q: Optional[str] = None
     etiqueta: Optional[str] = None
+    efos: str = "todos"
     filtros: list[dict] = field(default_factory=list)
     orden: str = "fecha_emision"
     dir: str = "asc"
@@ -164,6 +166,7 @@ def validar(
     pagina: int = 1,
     por_pagina: int = 30,
     etiqueta: Optional[str] = None,
+    efos: str = "todos",
 ) -> Consulta:
     """Valida todos los parámetros contra el catálogo. Lanza ``FiltroInvalido``."""
     _uno_de("direccion", direccion, DIRECCIONES)
@@ -173,6 +176,7 @@ def validar(
     _uno_de("estado", estado, ESTADOS)
     _uno_de("metodo", metodo, METODOS)
     _uno_de("pago", pago, PAGOS)
+    _uno_de("efos", efos, EFOS)
     _uno_de("dir", dir, ("asc", "desc"))
     _uno_de("por_pagina", por_pagina, POR_PAGINA)
     if not isinstance(pagina, int) or not 1 <= pagina <= MAX_PAGINA:
@@ -191,7 +195,7 @@ def validar(
 
     return Consulta(
         direccion=direccion, periodo=periodo, tipo=tipo, estado=estado, metodo=metodo, pago=pago,
-        q=q, etiqueta=etiqueta.lower() if etiqueta else None,
+        q=q, etiqueta=etiqueta.lower() if etiqueta else None, efos=efos,
         filtros=_validar_filtros(filtros, por_clave), orden=orden, dir=dir,
         pagina=pagina, por_pagina=por_pagina,
     )
@@ -251,6 +255,16 @@ def condiciones(
         sql.append("EXISTS (SELECT 1 FROM cfdi_etiquetas ce JOIN etiquetas e ON e.id = ce.etiqueta_id "
                    "WHERE ce.cfdi_id = c.id AND ce.etiqueta_id = %s AND e.empresa_id = c.empresa_id)")
         params.append(c.etiqueta)
+    if c.efos != "todos":
+        if c.direccion != "recibidos":
+            sql.append("FALSE")                              # lo emitido por la empresa nunca cruza con EFOS
+        else:
+            situacion = {"presunto": "Presunto", "definitivo": "Definitivo"}.get(c.efos)
+            fragmento = "EXISTS (SELECT 1 FROM efos_vigente v WHERE v.rfc = UPPER(TRIM(c.rfc_emisor))"
+            if situacion:
+                fragmento += " AND v.situacion = %s"
+                params.append(situacion)
+            sql.append(fragmento + ")")
     for f in c.filtros:
         fragmento, valores = _filtro_sql(por_clave[f["campo"]], f["op"], f["valor"])
         sql.append(fragmento)

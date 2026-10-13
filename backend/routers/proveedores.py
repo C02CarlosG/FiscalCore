@@ -9,7 +9,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, field_validator
 
-from .. import diot_catalogos, proveedores
+from .. import diot_catalogos, efos_datos, proveedores
 from ..deps import empresa_or_404, get_current_user, validar_acceso_empresa
 
 router = APIRouter(tags=["Proveedores"])
@@ -105,6 +105,9 @@ async def listar_proveedores(
     empresa = empresa_or_404(empresa_id)
     sincronizado = proveedores.sincronizar(empresa_id, empresa["rfc"], current_user["user_id"])
     items = proveedores.listar(empresa_id, q)
+    marcas = efos_datos.situaciones_de(p["rfc"] for p in items)
+    for p in items:
+        p["efos"] = marcas.get(p["rfc"].strip().upper())
     return {"total": len(items), **sincronizado, "items": items}
 
 

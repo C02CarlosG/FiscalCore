@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from . import catalogos_sat
+from .efos import SITUACIONES
 
 TIPOS_DATO = ("texto", "fecha", "fecha_hora", "moneda", "numero", "booleano", "catalogo", "lista")
 
@@ -272,6 +273,11 @@ def _columnas_comprobante(direccion: str) -> list[Columna]:
         # Contraparte
         Columna("rfc_contraparte", rfc_etq, "texto", rfc_sql, visible=True),
         Columna("contraparte", nombre_etq, "texto", nombre_sql, visible=True),
+        *([] if direccion == "emitidos" else [
+            Columna("situacion_69b", "Situación 69-B", "catalogo",
+                    "(SELECT v.situacion FROM efos_vigente v WHERE v.rfc = UPPER(TRIM(c.rfc_emisor)))",
+                    visible=True, opciones=SITUACIONES),
+        ]),
         Columna("regimen_fiscal_receptor", "Régimen fiscal receptor", "texto", "c.regimen_fiscal_receptor"),
         Columna("regimen_fiscal_receptor_desc", "Régimen fiscal receptor descripción", "texto"),
         Columna("regimen_emisor", "Régimen fiscal emisor", "texto", "c.regimen_emisor"),
