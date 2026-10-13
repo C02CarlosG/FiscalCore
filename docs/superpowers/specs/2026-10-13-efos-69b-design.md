@@ -74,7 +74,7 @@ La 072 es el criterio de efectivo (PR en curso); esta usa **073**.
 
 - `efos_importaciones`: `id`, `origen` (`automatica` | `manual`), `usuario_id` (nulo si automática),
   `fecha_archivo DATE` (la de «actualizada al», nula si no se pudo leer), `sha256 TEXT`,
-  `filas INT`, `rfc_unicos INT`, `estado` (`correcta` | `fallida`), `mensaje TEXT`, `creado_en`.
+  `filas INT`, `rfc_unicos INT`, `estado` (`correcta` | `fallida` | `sin_cambios`), `mensaje TEXT`, `creado_en`.
 - `efos_lista`: `importacion_id` (FK), `no_sat INT`, `rfc VARCHAR(13)` (mayúsculas), `nombre TEXT`,
   `situacion` con CHECK en (`Presunto`, `Desvirtuado`, `Definitivo`, `Sentencia Favorable`),
   fechas de publicación por etapa (`fecha_presunto_sat`, `fecha_desvirtuado_sat`,
@@ -110,24 +110,25 @@ de CFDI. URL configurable por `EFOS_URL` (por defecto la del SAT), con tiempo m�
 
 ### API (`backend/routers/efos.py`)
 
-- `GET /api/v1/efos/estado` (cualquier usuario autenticado): `{fecha_archivo, importada_en, filas,
-  rfc_unicos, dias_de_antiguedad, desactualizada}` (`desactualizada` si la fecha del archivo tiene más
-  de 45 días o no hay lista).
-- `GET /api/v1/empresas/{id}/efos?periodo=AAAA-MM&situacion=…&pagina=&por_pagina=` (acceso a la
-  empresa): CFDI recibidos vigentes del periodo cuyo emisor está en `efos_vigente`, con totales del
-  periodo y acumulado del ejercicio, la situación y las fechas de publicación.
-- `GET /api/v1/empresas/{id}/efos/proveedores`: RFC de los proveedores de la empresa que están en la
-  lista, con su situación (alimenta la columna de Proveedores).
+- `GET /api/v1/efos/estado` (cualquier usuario autenticado): `{hay_lista, fecha_archivo, importada_en, filas,
+  rfc_unicos, dias_de_antiguedad, desactualizada, ultimo_intento}` (`desactualizada` si la fecha del archivo
+  tiene más de 45 días o no hay lista).
 - `POST /api/v1/admin/efos/importar` (administrador de plataforma): fuerza la descarga ahora.
 - `POST /api/v1/admin/efos/subir` (administrador de plataforma): sube el CSV a mano. Se valida el tipo
   y el tamaño en el límite del backend (CLAUDE.md, Seguridad).
+- **El listado de CFDI de EFOS no tiene endpoint propio**: sale de `GET /api/v1/empresas/{id}/cfdis`
+  (y `/resumen`, `/exportar`) con el nuevo filtro `efos=todos|en_lista|presunto|definitivo` (solo
+  recibidos), de modo que lista, conteos, totales y exportación coinciden por construcción.
+- **Proveedores**: cada ítem de `GET /api/v1/empresas/{id}/proveedores` trae `efos`
+  (`{situacion, riesgo, fecha_publicacion}` o `null`).
 
 Las operaciones de administración quedan en `auditoria` con usuario, origen y resultado. Todo se
 documenta en `docs/openapi.yaml` (`test_openapi_sync.py`).
 
 ### Cruce
 
-- Por **RFC del emisor** de cada CFDI recibido (`c.rfc_emisor`), en mayúsculas, contra `efos_vigente.rfc`.
+- Por **RFC del emisor** de cada CFDI recibido (`UPPER(TRIM(c.rfc_emisor))`) contra `efos_vigente.rfc`.
+- Se agrega al catálogo de columnas de CFDI recibidos la columna `situacion_69b`.
 - Se agrega al listado de CFDI el filtro `efos` (valores `todos`, `en_lista`, `presunto`, `definitivo`)
   reutilizando `condiciones()` de `cfdi_listado.py`, para que lista, conteos y acumulado coincidan.
 - Solo CFDI vigentes (un cancelado no genera efecto).
