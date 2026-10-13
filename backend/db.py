@@ -293,6 +293,9 @@ def init_db() -> None:
         # 072 es idempotente — criterio de efectivo por empresa: legal (> $2,000) o estricto (todo efectivo)
         _run_sql_file("072_criterio_efectivo.sql")
 
+        # 073 es idempotente — lista 69-B del SAT (EFOS): bitácora de importaciones, filas y vista vigente
+        _run_sql_file("073_efos_69b.sql")
+
         # Seed inicial: usuario admin si la base aún no tiene usuarios
         _seed_admin()
 
