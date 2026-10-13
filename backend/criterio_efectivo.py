@@ -10,6 +10,8 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Any
 
+import psycopg2.extras
+
 from . import db
 
 CRITERIOS = ("legal", "estricto")
@@ -37,3 +39,22 @@ def leer(empresa_id: str) -> str:
     """Criterio vigente de la empresa; ``legal`` si la empresa no existe."""
     fila = db.query_one("SELECT criterio_efectivo FROM empresas WHERE id = %s", (empresa_id,))
     return fila["criterio_efectivo"] if fila else CRITERIO_POR_DEFECTO
+
+
+def guardar(empresa_id: str, nuevo: str, usuario_id: str) -> dict:
+    """Cambia el criterio y lo audita, todo o nada. Devuelve el valor nuevo y el anterior."""
+    nuevo = validar(nuevo)
+    with db.get_conn() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("SELECT criterio_efectivo FROM empresas WHERE id = %s FOR UPDATE", (empresa_id,))
+            fila = cur.fetchone()
+            if fila is None:
+                raise LookupError("Empresa no encontrada")
+            anterior = fila["criterio_efectivo"]
+            cur.execute("UPDATE empresas SET criterio_efectivo = %s WHERE id = %s", (nuevo, empresa_id))
+            cur.execute(
+                """INSERT INTO auditoria (usuario_id, empresa_id, accion, entidad, entidad_id, metadata)
+                   VALUES (%s, %s, 'criterio_efectivo', 'empresa', %s, %s)""",
+                (usuario_id, empresa_id, empresa_id, psycopg2.extras.Json({"anterior": anterior, "nuevo": nuevo})),
+            )
+    return {"criterio_efectivo": nuevo, "anterior": anterior}

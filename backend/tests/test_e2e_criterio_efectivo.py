@@ -80,3 +80,24 @@ def test_isr_deducciones_en_efectivo_siguen_el_criterio(empresa):
     assert excluidos() == []
     db.execute("UPDATE empresas SET criterio_efectivo = 'estricto' WHERE id = %s", (empresa,))
     assert len(excluidos()) == 9
+
+
+def test_guardar_audita_en_la_misma_transaccion_y_valida(empresa):
+    from backend import criterio_efectivo, db
+
+    usuario = str(db.execute("INSERT INTO usuarios (email, password_hash, nombre) VALUES ('cef-e2e@test.local', 'x', 'E2E') "
+                             "ON CONFLICT (email) DO UPDATE SET nombre = 'E2E' RETURNING id", returning=True)["id"])
+    try:
+        assert criterio_efectivo.guardar(empresa, "estricto", usuario) == {"criterio_efectivo": "estricto", "anterior": "legal"}
+        assert criterio_efectivo.leer(empresa) == "estricto"
+        fila = db.query_one("SELECT metadata FROM auditoria WHERE empresa_id = %s AND accion = 'criterio_efectivo' "
+                            "ORDER BY creado_en DESC LIMIT 1", (empresa,))
+        assert fila["metadata"] == {"anterior": "legal", "nuevo": "estricto"}
+        with pytest.raises(criterio_efectivo.CriterioInvalido):
+            criterio_efectivo.guardar(empresa, "laxo", usuario)
+        assert criterio_efectivo.leer(empresa) == "estricto"
+        with pytest.raises(LookupError):
+            criterio_efectivo.guardar("00000000-0000-0000-0000-000000000000", "legal", usuario)
+    finally:
+        db.execute("DELETE FROM auditoria WHERE empresa_id = %s", (empresa,))
+        db.execute("DELETE FROM usuarios WHERE id = %s", (usuario,))

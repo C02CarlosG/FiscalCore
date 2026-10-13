@@ -156,7 +156,8 @@ async def resumen_iva_flujo(
     empresa = empresa_or_404(empresa_id)
     ajustes = iva_flujo_datos.cargar_ajustes(empresa_id)
     eventos = iva_flujo_datos.cargar_eventos(empresa_id, empresa["rfc"], periodo, ajustes)
-    return _json({"empresa_id": empresa_id, **iva_flujo.resumen(eventos, periodo, ajustes, factor_dec)})
+    return _json({"empresa_id": empresa_id, "criterio_efectivo": empresa.get("criterio_efectivo", "legal"),
+                  **iva_flujo.resumen(eventos, periodo, ajustes, factor_dec)})
 
 
 @router.get(_BASE + "/{periodo}/detalle")

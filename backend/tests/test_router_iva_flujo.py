@@ -246,3 +246,16 @@ def test_sin_acceso_es_403(monkeypatch):
             assert getattr(client, metodo)(ruta, **kw).status_code == 403, (metodo, ruta)
     finally:
         main.app.dependency_overrides.clear()
+
+
+def test_resumen_incluye_el_criterio_de_efectivo_de_la_empresa(con_acceso, monkeypatch):
+    monkeypatch.setattr(router, "empresa_or_404", lambda eid: {"id": eid, "rfc": "AAA010101AAA", "criterio_efectivo": "estricto"})
+    monkeypatch.setattr(iva_flujo_datos, "cargar_ajustes", lambda e: {})
+    monkeypatch.setattr(iva_flujo_datos, "cargar_eventos", lambda e, rfc, p, aj: [])
+    assert client.get(f"{BASE}/2026-09").json()["criterio_efectivo"] == "estricto"
+
+
+def test_resumen_sin_criterio_en_la_empresa_dice_legal(con_acceso, monkeypatch):
+    monkeypatch.setattr(iva_flujo_datos, "cargar_ajustes", lambda e: {})
+    monkeypatch.setattr(iva_flujo_datos, "cargar_eventos", lambda e, rfc, p, aj: [])
+    assert client.get(f"{BASE}/2026-09").json()["criterio_efectivo"] == "legal"

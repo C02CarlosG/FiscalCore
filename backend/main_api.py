@@ -35,6 +35,7 @@ from .routers import diot as diot_router
 from .routers import proveedores as proveedores_router
 from .routers import validaciones_cfdi
 from .routers import cuenta
+from .routers import criterio_efectivo as criterio_efectivo_router
 from .routers import suscripcion
 from .routers import reinicio
 from .routers import cierre as cierre_router
@@ -106,6 +107,7 @@ app.include_router(cuenta.router)
 app.include_router(suscripcion.router)
 app.include_router(reinicio.router)
 app.include_router(cierre_router.router)
+app.include_router(criterio_efectivo_router.router)
 
 
 @app.on_event("startup")
