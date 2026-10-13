@@ -10,6 +10,8 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Any
 
+from . import db
+
 CRITERIOS = ("legal", "estricto")
 CRITERIO_POR_DEFECTO = "legal"
 UMBRAL_LEGAL = Decimal("2000")
@@ -29,3 +31,9 @@ def validar(valor: Any) -> str:
 def umbral(criterio: Any) -> Decimal:
     """Monto en efectivo por encima del cual un pago no se acredita ni se deduce."""
     return UMBRAL_ESTRICTO if validar(criterio) == "estricto" else UMBRAL_LEGAL
+
+
+def leer(empresa_id: str) -> str:
+    """Criterio vigente de la empresa; ``legal`` si la empresa no existe."""
+    fila = db.query_one("SELECT criterio_efectivo FROM empresas WHERE id = %s", (empresa_id,))
+    return fila["criterio_efectivo"] if fila else CRITERIO_POR_DEFECTO
