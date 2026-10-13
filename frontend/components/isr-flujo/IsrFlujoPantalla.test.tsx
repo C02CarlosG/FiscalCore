@@ -27,6 +27,7 @@ vi.mock("@/hooks/useIsrFlujo", () => ({
   useGuardarPorcentajeNomina: vi.fn(),
   POR_PAGINA_ISR: 50,
 }));
+vi.mock("@/components/shared/CriterioEfectivo", () => ({ CriterioEfectivo: () => <div data-testid="criterio-efectivo" /> }));
 vi.mock("@/hooks/usePeriodos", () => ({ usePeriodos: () => ({ data: { periodos: ["2026-09"] } }) }));
 vi.mock("@/components/cfdi/CfdiVisor", () => ({
   CfdiVisor: ({ uuid }: { uuid: string | null }) => (uuid ? <div role="dialog" aria-label="Visor">{uuid}</div> : null),
@@ -140,5 +141,10 @@ describe("IsrFlujoPantalla", () => {
     expect(vi.mocked(apiDescargar).mock.calls[0][0]).toBe(
       "/api/v1/empresas/e1/isr-flujo/2026-09/exportar?lado=deduccion&bloque=nomina&acumulado=false",
     );
+  });
+
+  it("muestra el selector del criterio de efectivo", () => {
+    render(<IsrFlujoPantalla />);
+    expect(screen.getByTestId("criterio-efectivo")).toBeInTheDocument();
   });
 });

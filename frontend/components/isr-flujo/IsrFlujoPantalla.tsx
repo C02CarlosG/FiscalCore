@@ -6,6 +6,7 @@ import { Download } from "lucide-react";
 import { CfdiVisor } from "@/components/cfdi/CfdiVisor";
 import { ErrorState } from "@/components/shared/ErrorState";
 import { PageHeader } from "@/components/shared/PageHeader";
+import { CriterioEfectivo } from "@/components/shared/CriterioEfectivo";
 import { PeriodSelector } from "@/components/shared/PeriodSelector";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -158,6 +159,7 @@ export function IsrFlujoPantalla() {
                 <option value="0.53">53 % (sin disminución de prestaciones)</option>
               </select>
             </div>
+            <CriterioEfectivo empresaId={empresaId} />
             <p className="text-sm text-muted-foreground">
               Utilidad fiscal estimada:{" "}
               <span className="font-mono font-semibold tabular-nums text-foreground">{formatearMoneda(bloque.utilidad_fiscal_estimada)}</span>
