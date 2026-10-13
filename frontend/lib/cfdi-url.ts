@@ -7,11 +7,13 @@ export const ESTADOS = ["vigente", "cancelado", "todos"] as const;
 export const METODOS = ["PUE", "PPD", "todos"] as const;
 export const PAGOS = ["pendientes", "pagadas", "todos"] as const;
 export const POR_PAGINA = [30, 50, 100] as const;
+export const EFOS = ["todos", "en_lista", "presunto", "definitivo"] as const;
 
 export type Tipo = (typeof TIPOS)[number];
 export type EstadoCfdi = (typeof ESTADOS)[number];
 export type MetodoPago = (typeof METODOS)[number];
 export type PagoPpd = (typeof PAGOS)[number];
+export type FiltroEfos = (typeof EFOS)[number];
 
 export type CfdiEstadoUrl = {
   periodo: string;
@@ -19,6 +21,7 @@ export type CfdiEstadoUrl = {
   estado: EstadoCfdi;
   metodo: MetodoPago;
   pago: PagoPpd;
+  efos: FiltroEfos;
   q: string;
   etiqueta: string;
   filtros: string;
@@ -33,6 +36,7 @@ export const POR_DEFECTO: Omit<CfdiEstadoUrl, "periodo"> = {
   estado: "vigente",
   metodo: "todos",
   pago: "todos",
+  efos: "todos",
   q: "",
   etiqueta: "",
   filtros: "",
@@ -49,6 +53,7 @@ const NOMBRE: Record<keyof CfdiEstadoUrl, string> = {
   estado: "estado",
   metodo: "metodo",
   pago: "pago",
+  efos: "efos",
   q: "q",
   etiqueta: "etiqueta",
   filtros: "filtros",
@@ -80,6 +85,7 @@ export function leerEstado(params: URLSearchParams, periodo: string): CfdiEstado
     estado: unoDe(ESTADOS, params.get(NOMBRE.estado), POR_DEFECTO.estado),
     metodo: unoDe(METODOS, params.get(NOMBRE.metodo), POR_DEFECTO.metodo),
     pago: unoDe(PAGOS, params.get(NOMBRE.pago), POR_DEFECTO.pago),
+    efos: unoDe(EFOS, params.get(NOMBRE.efos), POR_DEFECTO.efos),
     q: params.get(NOMBRE.q) ?? POR_DEFECTO.q,
     etiqueta: UUID_RE.test(params.get(NOMBRE.etiqueta) ?? "") ? params.get(NOMBRE.etiqueta)! : POR_DEFECTO.etiqueta,
     filtros: params.get(NOMBRE.filtros) ?? POR_DEFECTO.filtros,
@@ -137,6 +143,7 @@ export function consultaApi(estado: CfdiEstadoUrl, direccion: "emitidos" | "reci
     pagina: String(estado.pagina),
     por_pagina: String(estado.porPagina),
   });
+  if (estado.efos !== "todos") consulta.set("efos", estado.efos);
   if (estado.q) consulta.set("q", estado.q);
   if (estado.etiqueta) consulta.set("etiqueta", estado.etiqueta);
   if (estado.filtros) consulta.set("filtros", estado.filtros);

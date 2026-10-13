@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import { Pencil, Plus, Search } from "lucide-react";
 import { ErrorState } from "@/components/shared/ErrorState";
 import { PageHeader } from "@/components/shared/PageHeader";
+import { EfosSituacion } from "@/components/efos/EfosSituacion";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,7 +21,7 @@ const mensajeDe = (e: unknown, porDefecto: string) => (e instanceof ApiError ? e
 
 /**
  * Catálogo de proveedores de la empresa: se alimenta de los CFDI recibidos y se completa a mano (alta y edición del tipo de
- * tercero y de la operación por omisión). La columna «Lista 69-B» queda reservada para la alerta de EFOS (M3).
+ * tercero y de la operación por omisión). La columna «Lista 69-B» muestra la situación vigente del RFC en la lista del SAT (EFOS).
  */
 export function ProveedoresPantalla() {
   const { empresaId } = useParams<{ empresaId: string }>();
@@ -113,7 +114,7 @@ export function ProveedoresPantalla() {
                       {p.pais || p.id_fiscal ? `${p.pais ?? "—"} · ${p.id_fiscal ?? "—"}` : "—"}
                       {p.pendiente && <Badge variant="secondary" className="ml-2 font-normal">Faltan datos</Badge>}
                     </TableCell>
-                    <TableCell className="text-xs text-muted-foreground">Sin verificar</TableCell>
+                    <TableCell><EfosSituacion situacion={p.efos?.situacion} /></TableCell>
                     <TableCell>
                       <Button type="button" variant="ghost" size="icon" className="h-7 w-7" aria-label={`Editar ${p.nombre || p.rfc}`}
                         onClick={() => { setError(null); setDialogo({ proveedor: p }); }}>

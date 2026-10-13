@@ -22,10 +22,11 @@ import { CfdiVisor } from "@/components/cfdi/CfdiVisor";
 import { CfdiTabs } from "@/components/cfdi/CfdiTabs";
 import { CfdiToolbar } from "@/components/cfdi/CfdiToolbar";
 import { CfdiTotales, catalogoCifras } from "@/components/cfdi/CfdiTotales";
+import { EfosFranja } from "@/components/efos/EfosFranja";
 import { ErrorState } from "@/components/shared/ErrorState";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { contarActivos } from "@/lib/cfdi-filtros";
-import { POR_DEFECTO, leerEstado, type CfdiEstadoUrl } from "@/lib/cfdi-url";
+import { POR_DEFECTO, leerEstado, type CfdiEstadoUrl, type FiltroEfos } from "@/lib/cfdi-url";
 import { columnasVisibles, resolverColumnas } from "@/lib/columnas-preferidas";
 
 const TEXTOS = {
@@ -44,11 +45,13 @@ const TEXTOS = {
  * (periodo, pestaña, filtros, orden y página), así que recargar o compartir el enlace
  * reproduce la misma vista.
  */
-export function CfdiPantalla({ direccion }: { direccion: "emitidos" | "recibidos" }) {
+export function CfdiPantalla({ direccion, soloEfos = false }: { direccion: "emitidos" | "recibidos"; soloEfos?: boolean }) {
   const { empresaId } = useParams<{ empresaId: string }>();
   const [periodo, cambiarPeriodo] = usePeriodoGlobal(empresaId);
   const { params, actualizar } = useUrlParams();
-  const estado = leerEstado(params, periodo);
+  const leido = leerEstado(params, periodo);
+  // La pantalla EFOS es el listado de recibidos limitado a emisores de la lista 69-B.
+  const estado = soloEfos && leido.efos === "todos" ? { ...leido, efos: "en_lista" as const } : leido;
   const [uuidVisor, setUuidVisor] = useState<string | null>(null);
   // CFDI marcados para una acción en lote; se conserva al paginar y se vacía al cambiar la consulta.
   const [seleccion, setSeleccion] = useState<ReadonlySet<string>>(new Set());
@@ -93,15 +96,31 @@ export function CfdiPantalla({ direccion }: { direccion: "emitidos" | "recibidos
     [resumen.data?.cifras, preferenciaTotales.data],
   );
 
-  const texto = TEXTOS[direccion];
+  const texto = soloEfos
+    ? { titulo: "EFOS (lista 69-B)", descripcion: "CFDI recibidos de emisores que el SAT publicó en la lista del artículo 69-B del CFF." }
+    : TEXTOS[direccion];
 
   return (
     <main className="space-y-6">
       <PageHeader eyebrow="Administración CFDI" title={texto.titulo} description={texto.descripcion} />
 
+      {soloEfos && <EfosFranja />}
+
       <CfdiToolbar empresaId={empresaId} estado={estado} periodosConDatos={periodos.data?.periodos ?? []} onCambio={cambiar} />
 
       <div className="flex flex-wrap items-center justify-end gap-2" role="toolbar" aria-label="Acciones del listado">
+        {soloEfos && (
+          <select
+            aria-label="Situación 69-B"
+            value={estado.efos}
+            onChange={(e) => cambiar({ efos: e.target.value as FiltroEfos })}
+            className="flex h-9 rounded-md border border-input bg-background px-3 text-sm"
+          >
+            <option value="en_lista">Todos en la lista</option>
+            <option value="presunto">Presuntos</option>
+            <option value="definitivo">Definitivos</option>
+          </select>
+        )}
         <Button type="button" variant="outline" size="sm" disabled={!catalogo} onClick={() => setDialogo("filtro")}>
           <Filter className="mr-1.5 h-4 w-4" />
           Filtro avanzado

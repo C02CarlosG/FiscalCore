@@ -31,6 +31,7 @@ const LABELS: Record<string, string> = {
   declaraciones: "Declaraciones",
   sat: "Conexión SAT",
   "informacion-fiscal": "Información fiscal",
+  efos: "EFOS",
 };
 
 function breadcrumbLabel(pathname: string): string {

@@ -670,6 +670,8 @@ export interface Proveedor {
   origen: "cfdi" | "manual";
   /** Extranjero sin país o sin ID fiscal. */
   pendiente: boolean;
+  /** Situación del RFC en la lista 69-B del SAT; null si no está. */
+  efos: { situacion: string; riesgo: "alto" | "critico" | "informativo"; fecha_publicacion: string | null } | null;
   created_at: string;
   updated_at: string;
 }
@@ -756,3 +758,14 @@ export type DeclaracionIn = {
   | "retenciones_a_terceros" | "saldo_a_favor_aplicado" | "impuesto_a_cargo" | "monto_pagado",
   string | null
 >>;
+
+export interface EfosEstado {
+  hay_lista: boolean;
+  fecha_archivo: string | null;
+  importada_en: string | null;
+  filas: number;
+  rfc_unicos: number;
+  dias_de_antiguedad: number | null;
+  desactualizada: boolean;
+  ultimo_intento: { estado: "correcta" | "fallida" | "sin_cambios"; mensaje: string | null; creado_en: string } | null;
+}

@@ -11,7 +11,7 @@ vi.mock("@/hooks/useProveedores", () => ({ useProveedores: vi.fn(), useCrearProv
 
 const prov = (extra: Partial<Proveedor> = {}): Proveedor => ({
   id: "p1", rfc: "PRO010101AAA", nombre: "PROVEEDOR UNO", nombre_editado: false, tipo_tercero: "04", tipo_operacion: "85",
-  pais: null, jurisdiccion_detalle: null, id_fiscal: null, efectos_fiscales: null, origen: "cfdi", pendiente: false,
+  pais: null, jurisdiccion_detalle: null, id_fiscal: null, efectos_fiscales: null, origen: "cfdi", pendiente: false, efos: null,
   created_at: "2026-09-01T00:00:00", updated_at: "2026-09-01T00:00:00", ...extra,
 });
 const lista = (items: Proveedor[], extra = {}) =>
@@ -93,5 +93,19 @@ describe("ProveedoresPantalla", () => {
     vi.mocked(useProveedores).mockReturnValue({ data: undefined, isError: true, refetch: vi.fn() } as never);
     render(<ProveedoresPantalla />);
     expect(screen.getByText("No se pudo cargar el catálogo de proveedores.")).toBeInTheDocument();
+  });
+
+  it("muestra la situación 69-B de un proveedor y un guion cuando no está en la lista", () => {
+    vi.mocked(useProveedores).mockReturnValue(lista([
+      prov({ id: "p1", rfc: "DEF010101AB1", nombre: "PROV DEFINITIVO", efos: { situacion: "Definitivo", riesgo: "critico", fecha_publicacion: "2018-08-01" } }),
+      prov({ id: "p2", rfc: "LIM010101AB1", nombre: "PROV LIMPIO", efos: null }),
+    ]));
+
+    render(<ProveedoresPantalla />);
+
+    const definitivo = screen.getByText("Definitivo");
+    expect(definitivo).toHaveAttribute("data-riesgo", "critico");
+    const limpio = screen.getByText("PROV LIMPIO").closest("tr")!;
+    expect(limpio.querySelector("td:nth-child(6)")).toHaveTextContent("—");
   });
 });

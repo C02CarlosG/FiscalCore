@@ -29,6 +29,7 @@ vi.mock("@/hooks/useNotasCfdi", () => ({
   useCrearEtiqueta: () => ({ mutate: vi.fn(), isPending: false, isError: false }),
 }));
 vi.mock("@/components/cfdi/CfdiNotas", () => ({ CfdiNotas: () => null }));
+vi.mock("@/components/efos/EfosFranja", () => ({ EfosFranja: () => <div data-testid="efos-franja" /> }));
 
 const preferencias: Record<string, unknown> = {};
 const guardarMutate = vi.fn();
@@ -424,5 +425,32 @@ describe("CfdiPantalla", () => {
       render(<CfdiPantalla direccion="emitidos" />);
       expect(screen.queryByText(/complemento de pago versión 2\.0/)).not.toBeInTheDocument();
     });
+  });
+
+  it("en modo EFOS pide solo los emisores de la lista 69-B, titula la pantalla y muestra la franja de estado", () => {
+    ruta = "/empresas/e1/efos";
+
+    render(<CfdiPantalla direccion="recibidos" soloEfos />);
+
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("EFOS");
+    expect(screen.getByTestId("efos-franja")).toBeInTheDocument();
+    const esperado = expect.objectContaining({ periodo: "2026-09", efos: "en_lista" });
+    expect(useCfdiListado).toHaveBeenCalledWith("e1", "recibidos", esperado);
+    expect(useCfdiResumen).toHaveBeenCalledWith("e1", "recibidos", esperado);
+  });
+
+  it("en modo EFOS respeta el filtro de situación de la URL", () => {
+    busqueda = "periodo=2026-09&efos=definitivo";
+
+    render(<CfdiPantalla direccion="recibidos" soloEfos />);
+
+    expect(useCfdiListado).toHaveBeenCalledWith("e1", "recibidos", expect.objectContaining({ efos: "definitivo" }));
+  });
+
+  it("sin modo EFOS no hay franja ni filtro de 69-B", () => {
+    render(<CfdiPantalla direccion="recibidos" />);
+
+    expect(screen.queryByTestId("efos-franja")).not.toBeInTheDocument();
+    expect(useCfdiListado).toHaveBeenCalledWith("e1", "recibidos", expect.objectContaining({ efos: "todos" }));
   });
 });

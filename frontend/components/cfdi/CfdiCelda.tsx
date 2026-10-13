@@ -1,6 +1,7 @@
 "use client";
 
 import { EtiquetaChip } from "@/components/cfdi/EtiquetaChip";
+import { EfosSituacion } from "@/components/efos/EfosSituacion";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { formatearFecha, formatearFechaHora, formatearMoneda } from "@/lib/formato";
 import type { CfdiColumna, CfdiFila, EtiquetaCfdi } from "@/types/api";
@@ -48,6 +49,8 @@ export function CfdiCelda({
       </button>
     );
   }
+
+  if (columna.clave === "situacion_69b") return <EfosSituacion situacion={typeof valor === "string" ? valor : null} />;
 
   if (valor === null || valor === undefined) return <>{SIN_DATO}</>;
 

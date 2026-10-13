@@ -11,6 +11,7 @@ describe("leerEstado", () => {
       estado: "vigente",
       metodo: "todos",
       pago: "todos",
+      efos: "todos",
       q: "",
       etiqueta: "",
       filtros: "",
@@ -153,5 +154,22 @@ describe("etiqueta", () => {
     expect(con.get("etiqueta")).toBe(id);
     expect(con.has("pagina")).toBe(false);
     expect(escribirEstado(con, { etiqueta: "" }).has("etiqueta")).toBe(false);
+  });
+});
+
+describe("filtro efos", () => {
+  it("por defecto es todos y no se escribe en la URL", () => {
+    expect(leerEstado(new URLSearchParams(), "2026-10").efos).toBe("todos");
+    expect(escribirEstado(new URLSearchParams(), { efos: "todos" }).has("efos")).toBe(false);
+  });
+  it("lee y escribe los valores válidos y descarta los demás", () => {
+    expect(leerEstado(new URLSearchParams("efos=definitivo"), "2026-10").efos).toBe("definitivo");
+    expect(leerEstado(new URLSearchParams("efos=raro"), "2026-10").efos).toBe("todos");
+    expect(escribirEstado(new URLSearchParams(), { efos: "presunto" }).get("efos")).toBe("presunto");
+  });
+  it("viaja a la API solo cuando no es todos", () => {
+    const base = { ...leerEstado(new URLSearchParams(), "2026-10") };
+    expect(consultaApi(base, "recibidos").has("efos")).toBe(false);
+    expect(consultaApi({ ...base, efos: "en_lista" }, "recibidos").get("efos")).toBe("en_lista");
   });
 });
