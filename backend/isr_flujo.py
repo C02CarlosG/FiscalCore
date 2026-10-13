@@ -97,41 +97,44 @@ def _evento(doc: dict, lado: str, origen: str, fecha_efecto: Any, base: Decimal,
         "uuid_pago": extra.get("uuid_pago"),
         "marcas": marcas,
         "nomina": extra.get("nomina"),
+        # Umbral de efectivo con el que se construyó el evento (criterio de la empresa); lo lee motivo_exclusion.
+        "umbral_efectivo": extra.get("umbral_efectivo", UMBRAL_EFECTIVO),
     }
 
 
 # ── eventos de un CFDI y de sus pagos ─────────────────────────────────────────
 
-def _no_deducible_por_si_mismo(rel: dict) -> bool:
-    """El CFDI relacionado nunca se dedujo (efectivo mayor a $2,000 o uso sin efectos)."""
+def _no_deducible_por_si_mismo(rel: dict, umbral_efectivo: Decimal = UMBRAL_EFECTIVO) -> bool:
+    """El CFDI relacionado nunca se dedujo (efectivo mayor al umbral o uso sin efectos)."""
     tc = _tc_documento({"moneda": rel.get("moneda"), "tipo_cambio": rel.get("tipo_cambio")}) or UNO
-    return (rel.get("forma_pago") == "01" and _dec(rel.get("total")) * tc > UMBRAL_EFECTIVO) \
+    return (rel.get("forma_pago") == "01" and _dec(rel.get("total")) * tc > umbral_efectivo) \
         or rel.get("uso_cfdi") in USOS_NO_DEDUCIBLES
 
 
-def _marcas_de_deduccion(doc: dict, marcas: set, forma_pago: Optional[str], monto: Decimal) -> None:
+def _marcas_de_deduccion(doc: dict, marcas: set, forma_pago: Optional[str], monto: Decimal,
+                         umbral_efectivo: Decimal = UMBRAL_EFECTIVO) -> None:
     """Avisos informativos de una compra o gasto: efectivo hasta el umbral (puede ser combustible, que en efectivo no se
     deduce por ningún monto, LISR 27-III; arriba del umbral ya está excluida) e inversiones (se identifican sin
     depreciación). ``forma_pago`` es la del documento (PUE) o la del pago del REP; ``monto`` lo pagado, en pesos."""
-    if forma_pago == "01" and monto <= UMBRAL_EFECTIVO:
+    if umbral_efectivo > 0 and forma_pago == "01" and monto <= umbral_efectivo:
         marcas.add("efectivo_hasta_umbral")
     if doc.get("uso_cfdi") in USOS_INVERSION:
         marcas.add("inversion_sin_depreciacion")
 
 
-def _marcas_de_egreso(doc: dict, lado: str) -> set:
+def _marcas_de_egreso(doc: dict, lado: str, umbral_efectivo: Decimal = UMBRAL_EFECTIVO) -> set:
     relacionados = doc.get("relacionados_info") or []
     marcas: set = set()
     if doc.get("forma_pago") == "30":
         marcas.add("aplicacion_anticipo")
         if any(r.get("metodo_pago") == "PPD" for r in relacionados):
             marcas.add("aplicado_en_rep")           # el REP de la factura final ya trae el remanente
-    if lado == "deduccion" and any(_no_deducible_por_si_mismo(r) for r in relacionados):
+    if lado == "deduccion" and any(_no_deducible_por_si_mismo(r, umbral_efectivo) for r in relacionados):
         marcas.add("original_no_deducible")
     return marcas
 
 
-def eventos_de_documento(doc: dict, rfc: str) -> list[dict]:
+def eventos_de_documento(doc: dict, rfc: str, umbral_efectivo: Decimal = UMBRAL_EFECTIVO) -> list[dict]:
     """Eventos que un CFDI causa por sí mismo: PUE y Egresos, en su emisión. Un PPD no causa nada hasta que se paga."""
     if doc.get("estado") != "vigente" or doc.get("tipo_comprobante") not in ("I", "E"):
         return []
@@ -150,16 +153,16 @@ def eventos_de_documento(doc: dict, rfc: str) -> list[dict]:
         if doc.get("es_anticipo_sat"):
             marcas.add("anticipo")
         if tipo == "E":
-            marcas |= _marcas_de_egreso(doc, lado)
+            marcas |= _marcas_de_egreso(doc, lado, umbral_efectivo)
         elif lado == "deduccion":
-            _marcas_de_deduccion(doc, marcas, doc.get("forma_pago"), _dec(doc.get("total")) * (tc or UNO))
+            _marcas_de_deduccion(doc, marcas, doc.get("forma_pago"), _dec(doc.get("total")) * (tc or UNO), umbral_efectivo)
         eventos.append(_evento(doc, lado, "devoluciones" if tipo == "E" else "contado", doc["fecha_emision"],
                                base, retencion, marcas, monto_efecto=_dec(doc.get("total")) * (tc or UNO),
-                               cubeta=None))
+                               cubeta=None, umbral_efectivo=umbral_efectivo))
     return eventos
 
 
-def eventos_de_pago(pago: dict, doc: dict, rfc: str) -> list[dict]:
+def eventos_de_pago(pago: dict, doc: dict, rfc: str, umbral_efectivo: Decimal = UMBRAL_EFECTIVO) -> list[dict]:
     """Eventos de cobro (ingreso) o pago (deducción) de un documento PPD, en la fecha del pago y proporcionales a lo
     pagado. Un REP o un documento cancelado, o un documento que no es Ingreso PPD, no producen eventos."""
     if pago.get("pago_estado") != "vigente" or doc.get("estado") != "vigente":
@@ -198,9 +201,9 @@ def eventos_de_pago(pago: dict, doc: dict, rfc: str) -> list[dict]:
         if lado == "deduccion":
             if forma is None:
                 marcas_ev.add("forma_pago_rep")     # REP sin FormaDePagoP guardada: no se detecta el efectivo
-            _marcas_de_deduccion(doc, marcas_ev, forma, pagado)
+            _marcas_de_deduccion(doc, marcas_ev, forma, pagado, umbral_efectivo)
         ev = _evento(doc, lado, "credito", pago["fecha_pago"], base, retencion, marcas_ev, monto_efecto=pagado,
-                     uuid_pago=pago.get("uuid_pago"))
+                     uuid_pago=pago.get("uuid_pago"), umbral_efectivo=umbral_efectivo)
         if forma is not None:
             ev["forma_pago"] = forma                # cuenta cómo se pagó, no la forma del PPD (99)
         eventos.append(ev)
@@ -239,7 +242,7 @@ def motivo_exclusion(ev: dict) -> Optional[str]:
             return marca
     if ev["lado"] == "deduccion" and ev["origen"] in ("contado", "credito"):
         monto = ev["monto_efecto"] if ev.get("monto_efecto") is not None else CERO
-        if ev.get("forma_pago") == "01" and monto > UMBRAL_EFECTIVO:
+        if ev.get("forma_pago") == "01" and monto > ev.get("umbral_efectivo", UMBRAL_EFECTIVO):
             return "efectivo"
         if ev.get("uso_cfdi") in USOS_NO_DEDUCIBLES:
             return "uso_no_deducible"
