@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { useEfosEstado, useImportarEfos, useSubirEfos } from "@/hooks/useEfos";
 import { loadSession } from "@/lib/auth";
@@ -14,7 +14,9 @@ export function EfosFranja() {
   const subir = useSubirEfos();
   const entrada = useRef<HTMLInputElement>(null);
   const [error, setError] = useState<string | null>(null);
-  const esAdmin = typeof window !== "undefined" && loadSession()?.rol === "admin";
+  // La sesión vive en localStorage: se lee tras montar para que el HTML del servidor y el primer render coincidan.
+  const [esAdmin, setEsAdmin] = useState(false);
+  useEffect(() => setEsAdmin(loadSession()?.rol === "admin"), []);
   const d = estado.data;
 
   async function ejecutar(accion: () => Promise<unknown>) {
