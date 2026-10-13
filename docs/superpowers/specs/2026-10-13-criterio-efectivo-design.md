@@ -23,11 +23,14 @@ deducciones de ISR.
 
 Entra:
 1. Criterio por empresa: `legal` (por defecto) o `estricto`.
-2. Aplicación en IVA base flujo, ISR base flujo, DIOT, cierre y papel de trabajo (estos
-   dos últimos y la DIOT la heredan al consumir los motores).
+2. Aplicación en IVA base flujo, ISR base flujo, DIOT, Inicio, Declaraciones y reportes (todos
+   consumen `cargar_eventos`, así que heredan el criterio).
 3. Insignia visible del criterio activo en IVA flujo e ISR flujo.
 
 No entra:
+- Papel de trabajo del cierre (`papel_trabajo.py`): calcula con SQL propio por fecha de emisión, no con
+  los motores de flujo, y por eso no sigue este criterio (tampoco coincide hoy con IVA/ISR flujo).
+  Alinearlo es trabajo aparte.
 - Cédula de IVA antigua (`iva.py`, `deducciones.py`) y tarjeta de efectivo de Validaciones:
   se parametrizan solo si el cambio es de bajo riesgo; si no, siguen con la regla legal y
   la pantalla lo indica.
