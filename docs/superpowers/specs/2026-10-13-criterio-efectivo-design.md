@@ -1,6 +1,6 @@
 # Criterio de efectivo por empresa
 
-Fecha: 2026-10-13. Estado: spec pendiente de revisión. Origen: auditoría de ezaudita
+Fecha: 2026-10-13. Estado: implementada (rama `feat/criterio-efectivo`). Origen: auditoría de ezaudita
 (`comparativo/ezaudita/`, memoria `auditoria-ezaudita-reglas-iva-isr`).
 
 ## Objetivo
