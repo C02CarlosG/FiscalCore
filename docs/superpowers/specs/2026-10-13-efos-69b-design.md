@@ -1,6 +1,6 @@
 # EFOS — cruce de CFDI recibidos contra la lista 69-B del SAT
 
-Fecha: 2026-10-13. Estado: spec pendiente de revisión. Origen: auditoría de ezaudita
+Fecha: 2026-10-13. Estado: implementada (rama `feat/efos-69b`). Origen: auditoría de ezaudita
 (`comparativo/ezaudita/09_efos.json`) y plan maestro, fase **M3** (parte EFOS).
 
 ## Objetivo
@@ -36,7 +36,8 @@ carpeta aislada y se analizó:
 | Filas / RFC únicos | 14,234 filas / 14,055 RFC |
 | Situaciones | Definitivo 11,270 · Sentencia Favorable 1,638 · Presunto 986 · Desvirtuado 340 |
 | RFC repetidos | 82 RFC en más de una fila; en 55 la situación difiere (p. ej. `AAS110331G59`: Definitivo en la fila 155 y Sentencia Favorable en la 156) |
-| RFC genérico | `XXXXXXXXXXXX` aparece y no identifica a nadie |
+| RFC genérico | `XXXXXXXXXXXX` aparece en **91 filas** y no identifica a nadie |
+| Fechas | 83 filas válidas (55 Definitivo, 28 Sentencia Favorable) traen la fecha de publicación como **dos fechas en una celda** (`25/05/2022 - 26/04/2021`, 66 celdas) o como **número de serie de Excel** (`44014`, 2 celdas), no como `dd/mm/aaaa` |
 | Frescura | El archivo dice 31/dic/2025; ezaudita mostraba su lista al 31/ago/2026. **La lista del SAT puede ir meses por detrás** |
 
 Estos hechos mandan sobre cualquier suposición: el diseño los trata explícitamente.
@@ -93,8 +94,11 @@ Parser puro `parsear(contenido: bytes) -> ResultadoParseo` y `importar(...)` con
    primera línea del preámbulo se analiza para extraer `fecha_archivo` (mes en español).
 3. Valida la cabecera: las 20 columnas esperadas, en ese orden.
 4. Por fila: `RFC` con formato válido (`[A-ZÑ&]{3,4}\d{6}[A-Z0-9]{3}`) y distinto de `XXXXXXXXXXXX`;
-   `situacion` dentro de las cuatro conocidas; fechas `dd/mm/aaaa` o vacío. Una fila inválida se
-   descarta y se cuenta; si descartadas > 1 % de las filas, **la importación falla**.
+   `situacion` dentro de las cuatro conocidas y `No` numérico. Una fila inválida se descarta y se cuenta;
+   si descartadas > 1 % de las filas, **la importación falla**. Las **fechas son tolerantes**: se acepta
+   `dd/mm/aaaa`, dos fechas en una celda (se toma la más reciente) y el número de serie de Excel; una fecha
+   ilegible **no descarta la fila** (el riesgo lo da el RFC y la situación): queda vacía y se cuenta en
+   `fechas_ilegibles`. Verificado con el archivo real: 14,143 filas válidas, 0 descartadas.
 5. Salvaguardas contra un archivo manipulado o roto (la descarga es HTTP sin TLS):
    - tamaño máximo 50 MB;
    - se rechaza si el número de filas válidas cae más de **20 %** respecto a la última importación
