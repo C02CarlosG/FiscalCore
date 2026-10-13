@@ -1813,6 +1813,15 @@ paths:
           description: Id de una etiqueta de la empresa
           title: Etiqueta
         description: Id de una etiqueta de la empresa
+      - name: efos
+        in: query
+        required: false
+        schema:
+          type: string
+          description: 'todos | en_lista | presunto | definitivo (solo recibidos)'
+          default: todos
+          title: Efos
+        description: 'todos | en_lista | presunto | definitivo (solo recibidos)'
       - name: filtros
         in: query
         required: false
@@ -1936,6 +1945,15 @@ paths:
           description: Id de una etiqueta de la empresa
           title: Etiqueta
         description: Id de una etiqueta de la empresa
+      - name: efos
+        in: query
+        required: false
+        schema:
+          type: string
+          description: 'todos | en_lista | presunto | definitivo (solo recibidos)'
+          default: todos
+          title: Efos
+        description: 'todos | en_lista | presunto | definitivo (solo recibidos)'
       - name: filtros
         in: query
         required: false
@@ -2035,6 +2053,15 @@ paths:
           description: Id de una etiqueta de la empresa
           title: Etiqueta
         description: Id de una etiqueta de la empresa
+      - name: efos
+        in: query
+        required: false
+        schema:
+          type: string
+          description: 'todos | en_lista | presunto | definitivo (solo recibidos)'
+          default: todos
+          title: Efos
+        description: 'todos | en_lista | presunto | definitivo (solo recibidos)'
       - name: filtros
         in: query
         required: false
@@ -3197,6 +3224,75 @@ paths:
                   enum:
                   - legal
                   - estricto
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/efos/estado:
+    get:
+      tags:
+      - EFOS (69-B)
+      summary: Estado Lista
+      description: Fecha del archivo del SAT, de la última importación y si la lista está desactualizada.
+      operationId: estado_lista_api_v1_efos_estado_get
+      security:
+      - HTTPBearer: []
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+  /api/v1/admin/efos/importar:
+    post:
+      tags:
+      - EFOS (69-B)
+      summary: Forzar Importacion
+      description: Descarga ahora la lista del SAT e importa. Solo administradores de la plataforma.
+      operationId: forzar_importacion_api_v1_admin_efos_importar_post
+      security:
+      - HTTPBearer: []
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/admin/efos/subir:
+    post:
+      tags:
+      - EFOS (69-B)
+      summary: Subir Lista
+      description: Importa un CSV subido a mano (respaldo si el SAT cambia la URL o va desfasado). Solo administradores.
+      operationId: subir_lista_api_v1_admin_efos_subir_post
+      security:
+      - HTTPBearer: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+              - archivo
+              properties:
+                archivo:
+                  type: string
+                  format: binary
       responses:
         '200':
           description: Successful Response

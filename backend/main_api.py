@@ -39,6 +39,7 @@ from .routers import criterio_efectivo as criterio_efectivo_router
 from .routers import suscripcion
 from .routers import reinicio
 from .routers import cierre as cierre_router
+from .routers import efos as efos_router
 
 logging.basicConfig(
     level=logging.INFO,
@@ -108,6 +109,7 @@ app.include_router(suscripcion.router)
 app.include_router(reinicio.router)
 app.include_router(cierre_router.router)
 app.include_router(criterio_efectivo_router.router)
+app.include_router(efos_router.router)
 
 
 @app.on_event("startup")
