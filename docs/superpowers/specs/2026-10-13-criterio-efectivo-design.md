@@ -1,4 +1,4 @@
-# Criterio de efectivo por empresa y selector de nómina 53 % / 47 %
+# Criterio de efectivo por empresa
 
 Fecha: 2026-10-13. Estado: spec pendiente de revisión. Origen: auditoría de ezaudita
 (`comparativo/ezaudita/`, memoria `auditoria-ezaudita-reglas-iva-isr`).
@@ -6,8 +6,7 @@ Fecha: 2026-10-13. Estado: spec pendiente de revisión. Origen: auditoría de ez
 ## Objetivo
 
 Que cada empresa elija cómo se trata el pago en efectivo en el IVA acreditable y en las
-deducciones de ISR, y que el porcentaje de nómina exenta deducible (53 % / 47 %) se pueda
-cambiar desde la pantalla.
+deducciones de ISR.
 
 ## Contexto
 
@@ -16,8 +15,9 @@ cambiar desde la pantalla.
 - ezaudita excluye **todo** pago en efectivo, sin importar el monto. Se verificó en octubre
   de 2026 con COPLASUR: 9 compras en efectivo, todas menores a $2,000 (la mayor, $1,855),
   quedaron fuera; IVA acreditable $510.17 contra ~$2,082.83 con la regla legal.
-- `isr_config_flujo.pct_nomina_exenta` y su `PUT` ya existen (migración 053, router
-  `isr_flujo.py`); falta el control en la pantalla.
+- El selector de nómina exenta 53 % / 47 % **ya existe** (migración 053, router
+  `isr_flujo.py`, `IsrFlujoPantalla.tsx`). Una versión previa de esta spec lo daba por
+  faltante; se corrigió al leer la pantalla. No forma parte de este trabajo.
 
 ## Alcance
 
@@ -26,7 +26,6 @@ Entra:
 2. Aplicación en IVA base flujo, ISR base flujo, DIOT, cierre y papel de trabajo (estos
    dos últimos y la DIOT la heredan al consumir los motores).
 3. Insignia visible del criterio activo en IVA flujo e ISR flujo.
-4. Selector 53 % / 47 % en la pantalla de ISR flujo, con su fundamento (LISR 28-XXX).
 
 No entra:
 - Cédula de IVA antigua (`iva.py`, `deducciones.py`) y tarjeta de efectivo de Validaciones:
@@ -60,17 +59,16 @@ Los llamadores actuales no cambian de comportamiento. La marca informativa
 umbral y lo pasan a los motores. El criterio se lee una vez por solicitud.
 
 ### API
-- `GET`/`PUT /api/v1/empresas/{id}` expone `criterio_efectivo`; el `PUT` exige rol
-  administrador de la empresa, valida el valor y escribe en `auditoria` (valor anterior y
-  nuevo) en la misma transacción.
+- `GET`/`PUT /api/v1/empresas/{id}/criterio-efectivo` (router propio `criterio_efectivo.py`);
+  el `PUT` exige rol administrador de la empresa (o de la plataforma), valida el valor y
+  escribe en `auditoria` (valor anterior y nuevo) en la misma transacción que el cambio.
 - Las respuestas de `iva-flujo` e `isr-flujo` incluyen `criterio_efectivo`.
 - Se documenta en `docs/openapi.yaml` (lo exige `test_openapi_sync.py`).
 
 ### Pantalla
-- Configuración de empresa: selector "Criterio de efectivo" con texto explicativo de cada
+- Selector "Criterio de efectivo" en IVA flujo e ISR flujo, junto a los controles del periodo (en `main` no hay pantalla de configuración de empresa), con texto explicativo de cada
   opción (legal: efectivo mayor a $2,000; estricto: todo efectivo).
 - IVA flujo e ISR flujo: insignia "Criterio: Estricto" cuando aplica.
-- ISR flujo: selector 53 % / 47 % con el texto del Art. 28-XXX LISR, usando el `PUT` existente.
 - Los CFDI excluidos siguen apareciendo en "No considerados" con el motivo `efectivo`.
 
 ## Criterios de aceptación
