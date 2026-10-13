@@ -2,7 +2,10 @@
 from __future__ import annotations
 
 import hashlib
-from datetime import date
+import logging
+import os
+import urllib.request
+from datetime import date, datetime, timedelta, timezone
 from typing import Iterable, Optional
 
 import psycopg2.extras
@@ -105,3 +108,48 @@ def situaciones_de(rfcs: Iterable[str]) -> dict:
         resultado[f["rfc"]] = {"situacion": f["situacion"], "riesgo": efos.RIESGO[f["situacion"]],
                                "fecha_publicacion": fecha.isoformat() if fecha else None}
     return resultado
+
+
+_log = logging.getLogger("backend.efos")
+
+URL_POR_DEFECTO = "http://omawww.sat.gob.mx/cifras_sat/Documents/Listado_completo_69-B.csv"
+DIAS_ENTRE_DESCARGAS = 7
+REINTENTO_TRAS_FALLA = timedelta(hours=1)
+
+
+def descargar(url: Optional[str] = None, timeout: int = 60) -> bytes:
+    """Descarga el CSV. La URL viene de configuración (``EFOS_URL``), nunca del usuario; solo http/https."""
+    url = url or os.environ.get("EFOS_URL") or URL_POR_DEFECTO
+    if not url.lower().startswith(("http://", "https://")):
+        raise ValueError("La URL de la lista 69-B debe ser http o https")
+    peticion = urllib.request.Request(url, headers={"User-Agent": "FiscalCore/1.0"})
+    with urllib.request.urlopen(peticion, timeout=timeout) as respuesta:
+        datos = respuesta.read(efos.MAX_BYTES + 1)
+    if len(datos) > efos.MAX_BYTES:
+        raise efos.ErrorImportacion("El archivo del SAT excede el tamaño máximo")
+    return datos
+
+
+def toca_descargar(ahora: Optional[datetime] = None) -> bool:
+    """Cada 7 días desde la última importación automática; tras una falla, se reintenta en una hora."""
+    ahora = ahora or datetime.now(timezone.utc)
+    ultimo = db.query_one(
+        "SELECT estado, creado_en FROM efos_importaciones WHERE origen = 'automatica' ORDER BY creado_en DESC, id DESC LIMIT 1")
+    if ultimo is None:
+        return True
+    espera = REINTENTO_TRAS_FALLA if ultimo["estado"] == "fallida" else timedelta(days=DIAS_ENTRE_DESCARGAS)
+    return ahora - ultimo["creado_en"] >= espera
+
+
+def ciclo_efos(ahora: Optional[datetime] = None) -> Optional[str]:
+    """Una vuelta del worker: descarga e importa si toca. Nunca lanza; devuelve el estado o ``None`` si no tocaba."""
+    if not toca_descargar(ahora):
+        return None
+    try:
+        return importar(descargar(), "automatica")["estado"]
+    except efos.ErrorImportacion as exc:
+        _log.warning("Lista 69-B rechazada: %s", exc)               # importar() ya registró el intento
+    except Exception as exc:
+        _log.exception("No se pudo descargar la lista 69-B")
+        _registrar("automatica", None, "fallida", f"No se pudo descargar: {exc}")
+    return "fallida"

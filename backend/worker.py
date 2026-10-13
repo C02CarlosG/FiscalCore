@@ -26,7 +26,7 @@ from pathlib import Path
 
 load_dotenv(Path(__file__).parent.parent / ".env")
 
-from . import db, fiel_store, sat_sync  # noqa: E402  (después de cargar .env)
+from . import db, efos_datos, fiel_store, sat_sync  # noqa: E402  (después de cargar .env)
 
 _log = logging.getLogger("backend.worker")
 
@@ -88,6 +88,16 @@ def _dormir(segundos: int) -> None:
         time.sleep(1)
 
 
+def _ciclo_efos() -> None:
+    """Actualización semanal de la lista 69-B. Una falla se registra y no detiene el ciclo de descarga de CFDI."""
+    try:
+        resultado = efos_datos.ciclo_efos()
+        if resultado:
+            _log.info("Lista 69-B: %s", resultado)
+    except Exception:
+        _log.exception("Falló el ciclo de la lista 69-B; se reintenta en el siguiente")
+
+
 def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
@@ -110,6 +120,7 @@ def main() -> int:
                 _log.info("Ciclo: %s", ", ".join(f"{e[:8]}={r}" for e, r in resultados))
         except Exception:
             _log.exception("Falló un ciclo del worker; se reintenta en el siguiente")
+        _ciclo_efos()
         _dormir(sat_sync.config_sync().intervalo_seg)
 
     _log.info("Worker detenido")
