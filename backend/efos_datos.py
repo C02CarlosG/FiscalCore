@@ -70,7 +70,8 @@ def importar(contenido: bytes, origen: str, usuario_id: Optional[str] = None) ->
         raise
     return {"estado": "correcta", "filas": len(resultado.filas), "rfc_unicos": rfc_unicos,
             "fecha_archivo": resultado.fecha_archivo.isoformat() if resultado.fecha_archivo else None,
-            "descartadas": resultado.descartadas, "genericas": resultado.genericas}
+            "descartadas": resultado.descartadas, "genericas": resultado.genericas,
+            "fechas_ilegibles": resultado.fechas_ilegibles}
 
 
 def estado(hoy: Optional[date] = None) -> dict:

@@ -38,8 +38,8 @@ def test_rfc_en_minusculas_se_normaliza_y_uno_invalido_se_descarta():
     assert r.descartadas == 1
 
 
-@pytest.mark.parametrize("campo,valor", [(3, "Otra situación"), (0, "no-es-numero"), (5, "31-12-2018"), (13, "2018/01/01")])
-def test_descarta_filas_con_situacion_numero_o_fecha_invalidos(campo, valor):
+@pytest.mark.parametrize("campo,valor", [(3, "Otra situación"), (0, "no-es-numero")])
+def test_descarta_filas_con_situacion_o_numero_invalidos(campo, valor):
     mala = fila(900, "ZZZ010101AB1", "MALA", "Presunto")
     mala[campo] = valor
     r = efos.parsear(csv_muestra(validas(200) + [mala]))
@@ -106,3 +106,23 @@ def test_caida_de_filas_mayor_a_20_por_ciento_falla(nuevas, anteriores, falla):
             efos.validar_contra_anterior(nuevas, anteriores)
     else:
         efos.validar_contra_anterior(nuevas, anteriores)
+
+
+# ── fechas del archivo real del SAT (verificado 2026-10-13: 83 filas válidas se perdían por esto) ──
+
+def test_celda_con_dos_publicaciones_toma_la_mas_reciente():
+    r = efos.parsear(csv_muestra([fila(1, "AAA010101AB1", "N", "Definitivo", definitivo="25/05/2022 - 26/04/2021")]))
+    assert r.filas[0].fechas["definitivo_sat"] == date(2022, 5, 25) and r.descartadas == 0
+
+
+def test_fecha_como_numero_de_serie_de_excel():
+    r = efos.parsear(csv_muestra([fila(1, "AAA010101AB1", "N", "Presunto", presunto="44014")]))
+    assert r.filas[0].fechas["presunto_sat"] == date(2020, 7, 2)
+
+
+@pytest.mark.parametrize("raro", ["31-12-2018", "2018/01/01", "pendiente", "32/13/2018", "123"])
+def test_una_fecha_ilegible_no_descarta_la_fila_se_deja_vacia_y_se_cuenta(raro):
+    r = efos.parsear(csv_muestra([fila(1, "AAA010101AB1", "N", "Definitivo", definitivo=raro)]))
+    f = r.filas[0]
+    assert (f.rfc, f.situacion) == ("AAA010101AB1", "Definitivo")        # el riesgo no depende de la fecha
+    assert f.fechas["definitivo_sat"] is None and r.descartadas == 0 and r.fechas_ilegibles >= 1
