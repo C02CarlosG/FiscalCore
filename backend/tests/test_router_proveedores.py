@@ -3,7 +3,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import backend.main_api as main
-from backend import proveedores
+from backend import efos_datos, proveedores
 from backend.deps import get_current_user
 from backend.routers import proveedores as router
 
@@ -20,6 +20,7 @@ def con_acceso(monkeypatch):
     main.app.dependency_overrides[get_current_user] = lambda: {"user_id": "u1"}
     monkeypatch.setattr(router, "validar_acceso_empresa", lambda *a, **k: None)
     monkeypatch.setattr(router, "empresa_or_404", lambda eid: {"id": eid, "rfc": "AAA010101AAA"})
+    monkeypatch.setattr(efos_datos, "situaciones_de", lambda rfcs: {})
     yield
     main.app.dependency_overrides.clear()
 
