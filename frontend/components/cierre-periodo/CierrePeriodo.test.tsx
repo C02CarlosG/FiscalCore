@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { CierrePeriodo } from "./CierrePeriodo";
 import { useCierre } from "@/hooks/useCierre";
 import { usePeriodoGlobal } from "@/hooks/usePeriodoGlobal";
@@ -83,15 +83,15 @@ describe("CierrePeriodo", () => {
   it("llama a cerrar cuando se confirma el cierre", async () => {
     const mockCerrar = vi.fn().mockResolvedValue({});
     vi.mocked(useCierre).mockReturnValue({
-      ...vi.mocked(useCierre).getMockImplementation()?.(),
+      ...(vi.mocked(useCierre).getMockImplementation() as any)?.(),
       cerrar: mockCerrar,
       refetchEstado: vi.fn(),
     } as any);
 
     render(<CierrePeriodo />);
     fireEvent.click(screen.getByText("Cerrar período"));
-    await waitFor(() => {
-      fireEvent.click(screen.getByText(/Cerrar período/)[1]);
-    });
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByText("Cerrar período"));
+    await waitFor(() => expect(mockCerrar).toHaveBeenCalledTimes(1));
   });
 });

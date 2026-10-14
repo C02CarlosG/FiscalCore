@@ -652,7 +652,6 @@ export interface IsrDetalle {
   por_pagina: number;
 }
 
-<<<<<<< HEAD
 // ── Proveedores (F6.1) ────────────────────────────────────────────────────────
 
 export interface Proveedor {

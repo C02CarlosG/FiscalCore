@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { ApiError, apiClient } from "@/lib/api-client";
+import { apiDescargar, apiFetch } from "@/lib/api-client";
 import { guardarArchivo } from "@/lib/descarga";
 
 export interface Validacion {
@@ -26,36 +26,21 @@ export interface ListaValidaciones {
 }
 
 export function useCierre(empresaId: string, periodo: string) {
-  const queryClient = (window as any).__tanstackQueryClient;
+  const base = `/api/v1/empresas/${empresaId}/periodos/${periodo}`;
 
   const validacionesQuery = useQuery({
     queryKey: ["cierre", empresaId, periodo, "validaciones"],
-    queryFn: async () => {
-      const res = await apiClient.get<ListaValidaciones>(
-        `/api/v1/empresas/${empresaId}/periodos/${periodo}/validaciones`
-      );
-      return res;
-    },
+    queryFn: () => apiFetch<ListaValidaciones>(`${base}/validaciones`),
   });
 
   const estadoQuery = useQuery({
     queryKey: ["cierre", empresaId, periodo, "estado"],
-    queryFn: async () => {
-      const res = await apiClient.get<EstadoCierre>(
-        `/api/v1/empresas/${empresaId}/periodos/${periodo}/estado-cierre`
-      );
-      return res;
-    },
+    queryFn: () => apiFetch<EstadoCierre>(`${base}/estado-cierre`),
   });
 
   const cerrarMutation = useMutation({
-    mutationFn: async () => {
-      const res = await apiClient.post<{ mensaje: string }>(
-        `/api/v1/empresas/${empresaId}/periodos/${periodo}/cerrar`,
-        {}
-      );
-      return res;
-    },
+    mutationFn: () =>
+      apiFetch<{ mensaje: string }>(`${base}/cerrar`, { method: "POST", body: JSON.stringify({}) }),
     onSuccess: () => {
       // Refrescar estado del cierre
       estadoQuery.refetch();
@@ -63,35 +48,15 @@ export function useCierre(empresaId: string, periodo: string) {
   });
 
   const reabrirMutation = useMutation({
-    mutationFn: async () => {
-      const res = await apiClient.delete<{ mensaje: string }>(
-        `/api/v1/empresas/${empresaId}/periodos/${periodo}/cierre`
-      );
-      return res;
-    },
+    mutationFn: () => apiFetch<{ mensaje: string }>(`${base}/cierre`, { method: "DELETE" }),
     onSuccess: () => {
       estadoQuery.refetch();
     },
   });
 
   const descargarPapelTrabajo = async () => {
-    try {
-      const archivo = await fetch(
-        `/api/v1/empresas/${empresaId}/periodos/${periodo}/papel-trabajo`,
-        {
-          headers: {
-            Authorization: `Bearer ${localStorage.getItem("token")}`,
-          },
-        }
-      ).then((r) => r.blob());
-      guardarArchivo(archivo, `papel-trabajo-${periodo}.xlsx`);
-    } catch (e) {
-      throw new ApiError(
-        "No se pudo descargar el papel de trabajo",
-        500,
-        new Error("Descarga fallida")
-      );
-    }
+    const archivo = await apiDescargar(`${base}/papel-trabajo`);
+    guardarArchivo(archivo, `papel-trabajo-${periodo}.xlsx`);
   };
 
   return {
