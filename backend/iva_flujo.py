@@ -154,6 +154,8 @@ def _evento(doc: dict, direccion: str, origen: str, fecha_efecto: Any, d: dict, 
         "retencion": d["retencion"],
         "iva_total": iva_total,
         "marcas": marcas,
+        # Umbral de efectivo con el que se construyó el evento (criterio de la empresa); lo lee motivo_exclusion.
+        "umbral_efectivo": extra.get("umbral_efectivo", UMBRAL_EFECTIVO),
     }
 
 
@@ -213,14 +215,14 @@ def _desglose_de_documento(doc: dict, k: Decimal) -> tuple[dict, Decimal, set]:
     return d, d["iva"]["total"], marcas
 
 
-def _no_acreditable_por_si_mismo(rel: dict) -> bool:
-    """El CFDI relacionado nunca se acreditó (efectivo mayor a $2,000 o uso sin efectos)."""
+def _no_acreditable_por_si_mismo(rel: dict, umbral_efectivo: Decimal = UMBRAL_EFECTIVO) -> bool:
+    """El CFDI relacionado nunca se acreditó (efectivo mayor al umbral o uso sin efectos)."""
     tc = _tc_documento({"moneda": rel.get("moneda"), "tipo_cambio": rel.get("tipo_cambio")}) or UNO
-    efectivo = rel.get("forma_pago") == "01" and _dec(rel.get("total")) * tc > UMBRAL_EFECTIVO
+    efectivo = rel.get("forma_pago") == "01" and _dec(rel.get("total")) * tc > umbral_efectivo
     return efectivo or rel.get("uso_cfdi") in USOS_NO_ACREDITABLES
 
 
-def _marcas_por_originales(doc: dict, direccion: str) -> set:
+def _marcas_por_originales(doc: dict, direccion: str, umbral_efectivo: Decimal = UMBRAL_EFECTIVO) -> set:
     """Marcas de un Egreso según los CFDI que relaciona (``relacionados_info``, que carga el SQL).
 
     - ``aplicado_en_rep``: el egreso que aplica un anticipo (forma de pago 30) a una factura final
@@ -233,12 +235,12 @@ def _marcas_por_originales(doc: dict, direccion: str) -> set:
     marcas: set = set()
     if doc.get("forma_pago") == "30" and any(r.get("metodo_pago") == "PPD" for r in relacionados):
         marcas.add("aplicado_en_rep")
-    if direccion == "acreditable" and any(_no_acreditable_por_si_mismo(r) for r in relacionados):
+    if direccion == "acreditable" and any(_no_acreditable_por_si_mismo(r, umbral_efectivo) for r in relacionados):
         marcas.add("original_no_acreditable")
     return marcas
 
 
-def eventos_de_documento(doc: dict, rfc: str) -> list[dict]:
+def eventos_de_documento(doc: dict, rfc: str, umbral_efectivo: Decimal = UMBRAL_EFECTIVO) -> list[dict]:
     """Eventos que un CFDI causa por sí mismo: los PUE y las notas de crédito (en su emisión).
 
     Un PPD no causa nada hasta que se paga (``evento_de_pago``). Cancelados y tipos distintos
@@ -262,10 +264,10 @@ def eventos_de_documento(doc: dict, rfc: str) -> list[dict]:
         if tipo == "E" and doc.get("forma_pago") == "30":
             marcas.add("aplicacion_anticipo")
         if tipo == "E":
-            marcas |= _marcas_por_originales(doc, direccion)
+            marcas |= _marcas_por_originales(doc, direccion, umbral_efectivo)
         origen = "notas_credito" if tipo == "E" else "contado"
         eventos.append(_evento(doc, direccion, origen, doc["fecha_emision"], d, iva_total, marcas,
-                               monto_efecto=_dec(doc.get("total")) * (tc or UNO)))
+                               monto_efecto=_dec(doc.get("total")) * (tc or UNO), umbral_efectivo=umbral_efectivo))
     return eventos
 
 
@@ -375,7 +377,7 @@ def tc_real(pago: dict) -> Decimal:
     return UNO if (pago.get("pago_moneda") or "MXN") == "MXN" else _dec(pago.get("pago_tipo_cambio"))
 
 
-def eventos_de_pago(pago: dict, doc: dict, rfc: str) -> list[dict]:
+def eventos_de_pago(pago: dict, doc: dict, rfc: str, umbral_efectivo: Decimal = UMBRAL_EFECTIVO) -> list[dict]:
     """Eventos de cobro (trasladado) o pago (acreditable) de un documento PPD, en la fecha del
     pago; uno por dirección (una autofactura causa en ambas). Un REP o un documento cancelado,
     y un documento que no es un Ingreso PPD, no producen eventos."""
@@ -393,7 +395,8 @@ def eventos_de_pago(pago: dict, doc: dict, rfc: str) -> list[dict]:
         if forma is None and direccion == "acreditable":
             marcas_ev.add("forma_pago_rep")        # sin FormaDePagoP no se detecta un pago en efectivo
         ev = _evento(doc, direccion, "credito", pago["fecha_pago"], d, iva_total, marcas_ev,
-                     uuid_pago=pago.get("uuid_pago"), parcialidad=pago.get("parcialidad"), monto_efecto=pagado)
+                     uuid_pago=pago.get("uuid_pago"), parcialidad=pago.get("parcialidad"), monto_efecto=pagado,
+                     umbral_efectivo=umbral_efectivo)
         ev["importe_pagado"] = pagado
         if forma is not None:
             ev["forma_pago"] = forma           # lo que cuenta es cómo se pagó, no la forma del PPD (99)
@@ -401,9 +404,9 @@ def eventos_de_pago(pago: dict, doc: dict, rfc: str) -> list[dict]:
     return eventos
 
 
-def evento_de_pago(pago: dict, doc: dict, rfc: str) -> Optional[dict]:
+def evento_de_pago(pago: dict, doc: dict, rfc: str, umbral_efectivo: Decimal = UMBRAL_EFECTIVO) -> Optional[dict]:
     """El primer evento de ``eventos_de_pago`` (o ``None``): atajo para el caso de una sola dirección."""
-    eventos = eventos_de_pago(pago, doc, rfc)
+    eventos = eventos_de_pago(pago, doc, rfc, umbral_efectivo)
     return eventos[0] if eventos else None
 
 
@@ -425,7 +428,7 @@ def motivo_exclusion(ev: dict) -> Optional[str]:
     # Las reglas de deducibilidad aplican a lo que se compra o se paga, no a una nota de crédito recibida.
     if ev["direccion"] == "acreditable" and ev["origen"] != "notas_credito":
         monto = ev["monto_efecto"] if ev.get("monto_efecto") is not None else ev["total_documento"]
-        if ev.get("forma_pago") == "01" and monto > UMBRAL_EFECTIVO:
+        if ev.get("forma_pago") == "01" and monto > ev.get("umbral_efectivo", UMBRAL_EFECTIVO):
             return "efectivo"
         if ev.get("uso_cfdi") in USOS_NO_ACREDITABLES:
             return "uso_no_deducible"

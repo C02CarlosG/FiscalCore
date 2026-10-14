@@ -6,6 +6,7 @@ import { Download } from "lucide-react";
 import { CfdiVisor } from "@/components/cfdi/CfdiVisor";
 import { ErrorState } from "@/components/shared/ErrorState";
 import { PageHeader } from "@/components/shared/PageHeader";
+import { CriterioEfectivo } from "@/components/shared/CriterioEfectivo";
 import { PeriodSelector } from "@/components/shared/PeriodSelector";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -112,6 +113,7 @@ export function IvaFlujoPantalla() {
       />
 
       <PeriodSelector value={periodo} onChange={cambiarPeriodo} periodosConDatos={periodos.data?.periodos ?? []} />
+      <CriterioEfectivo empresaId={empresaId} />
 
       {resumen.isError && !datos ? (
         <ErrorState message="No se pudo cargar el IVA del periodo." onRetry={() => resumen.refetch()} />

@@ -179,7 +179,8 @@ async def resumen_isr_flujo(empresa_id: str, periodo: str, current_user: dict = 
     resultado = isr_flujo.resumen(eventos, periodo, ajustes, pct)
     registrar_evento(current_user["user_id"], "reporte_generado", empresa_id=empresa_id,
                      metadata={"tipo": "isr_flujo", "periodo": periodo})
-    return _json({"empresa_id": empresa_id, "regimen": isr_flujo.aplicabilidad(empresa.get("regimen_fiscal")), **resultado})
+    return _json({"empresa_id": empresa_id, "regimen": isr_flujo.aplicabilidad(empresa.get("regimen_fiscal")),
+                  "criterio_efectivo": empresa.get("criterio_efectivo", "legal"), **resultado})
 
 
 @router.get(_BASE + "/{periodo}/pago-provisional")

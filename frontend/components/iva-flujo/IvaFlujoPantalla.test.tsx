@@ -23,6 +23,7 @@ vi.mock("@/hooks/useIvaFlujo", () => ({
   useQuitarAjusteIva: vi.fn(),
   POR_PAGINA_IVA: 50,
 }));
+vi.mock("@/components/shared/CriterioEfectivo", () => ({ CriterioEfectivo: () => <div data-testid="criterio-efectivo" /> }));
 vi.mock("@/hooks/usePeriodos", () => ({ usePeriodos: () => ({ data: { periodos: ["2026-09", "2026-08"] } }) }));
 vi.mock("@/components/cfdi/CfdiVisor", () => ({
   CfdiVisor: ({ uuid }: { uuid: string | null }) => (uuid ? <div role="dialog" aria-label="Visor">{uuid}</div> : null),
@@ -202,5 +203,10 @@ describe("IvaFlujoPantalla", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("No se pudo cargar el IVA del periodo.");
     await userEvent.setup().click(within(screen.getByRole("alert")).getByRole("button", { name: "Reintentar" }));
     expect(refetch).toHaveBeenCalled();
+  });
+
+  it("muestra el selector del criterio de efectivo", () => {
+    render(<IvaFlujoPantalla />);
+    expect(screen.getByTestId("criterio-efectivo")).toBeInTheDocument();
   });
 });

@@ -9,7 +9,7 @@ from typing import Optional
 
 import psycopg2.extras
 
-from . import db, isr_flujo
+from . import criterio_efectivo, db, isr_flujo
 
 
 def cargar_ajustes(empresa_id: str) -> dict:
@@ -93,11 +93,12 @@ def cargar_eventos(empresa_id: str, rfc: str, periodo: str) -> list[dict]:
         """,
         (empresa_id, desde, hasta),
     )
-    eventos = [e for d in docs for e in isr_flujo.eventos_de_documento(d, rfc)]
+    umbral = criterio_efectivo.umbral(criterio_efectivo.leer(empresa_id))
+    eventos = [e for d in docs for e in isr_flujo.eventos_de_documento(d, rfc, umbral)]
     for p in pagos:
         doc: Optional[dict] = por_uuid.get(isr_flujo.llave(p["cfdi_uuid"]))
         if doc is not None:
-            eventos.extend(isr_flujo.eventos_de_pago(p, doc, rfc))
+            eventos.extend(isr_flujo.eventos_de_pago(p, doc, rfc, umbral))
     for n in _cargar_nominas(empresa_id, rfc, desde, hasta):
         ev = isr_flujo.evento_de_nomina(n)
         if ev:

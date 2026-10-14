@@ -198,3 +198,13 @@ def test_config_acepta_el_mes_de_pago_de_la_ptu(con_acceso, monkeypatch):
     assert client.put(f"{BASE}/config/2026", json={"pct_nomina_exenta": 0.47, "ptu_pagada": 100, "ptu_mes_pago": 5}).status_code == 200
     assert visto == {"mes": 5}
     assert client.put(f"{BASE}/config/2026", json={"pct_nomina_exenta": 0.47, "ptu_mes_pago": 13}).status_code == 422
+
+
+def test_resumen_incluye_el_criterio_de_efectivo_de_la_empresa(con_acceso, monkeypatch):
+    monkeypatch.setattr(router, "empresa_or_404", lambda eid: {"id": eid, "rfc": "AAA010101AAA", "regimen_fiscal": "612 - PFAE",
+                                                              "criterio_efectivo": "estricto"})
+    monkeypatch.setattr(isr_flujo_datos, "cargar_ajustes", lambda e: {})
+    monkeypatch.setattr(isr_flujo_datos, "porcentaje_nomina_exenta", lambda e, ej: isr_flujo_datos.isr_flujo.PORCENTAJE_NOMINA_EXENTA)
+    monkeypatch.setattr(isr_flujo_datos, "cargar_eventos", lambda e, rfc, p: [])
+    monkeypatch.setattr(router, "registrar_evento", lambda *a, **k: None)
+    assert client.get(f"{BASE}/2026-09").json()["criterio_efectivo"] == "estricto"

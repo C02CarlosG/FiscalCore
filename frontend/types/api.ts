@@ -470,6 +470,7 @@ export interface IvaDireccionResumen {
 
 export interface IvaFlujoResumen {
   empresa_id: string;
+  criterio_efectivo?: "legal" | "estricto";
   periodo: string;
   factor_prorrateo: number;
   trasladado: IvaDireccionResumen;
@@ -621,6 +622,7 @@ export interface IsrBloqueResumen {
 
 export interface IsrFlujoResumen {
   empresa_id: string;
+  criterio_efectivo?: "legal" | "estricto";
   periodo: string;
   regimen: { codigo: string | null; modulo: "flujo" | "coeficiente" | "no_soportado"; avisos: string[] };
   porcentaje_nomina_exenta: number;

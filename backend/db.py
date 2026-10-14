@@ -290,6 +290,9 @@ def init_db() -> None:
         # 070 es idempotente — tabla de períodos cerrados (M2, papel de trabajo)
         _run_sql_file("070_periodos_cerrados.sql")
 
+        # 072 es idempotente — criterio de efectivo por empresa: legal (> $2,000) o estricto (todo efectivo)
+        _run_sql_file("072_criterio_efectivo.sql")
+
         # Seed inicial: usuario admin si la base aún no tiene usuarios
         _seed_admin()
 

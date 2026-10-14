@@ -11,7 +11,7 @@ from typing import Optional
 
 import psycopg2.extras
 
-from . import db, iva_flujo
+from . import criterio_efectivo, db, iva_flujo
 
 _FILAS_IMPUESTOS = """
     json_agg(json_build_object(
@@ -132,13 +132,14 @@ def _cargar(empresa_id: str, rfc: str, desde: str, hasta: str, reasignados: list
         (empresa_id, desde, hasta, reasignados),
     )
 
-    eventos = [e for d in docs for e in iva_flujo.eventos_de_documento(d, rfc)]
+    umbral = criterio_efectivo.umbral(criterio_efectivo.leer(empresa_id))
+    eventos = [e for d in docs for e in iva_flujo.eventos_de_documento(d, rfc, umbral)]
     por_pago: dict = {}
     for p in pagos:
         doc: Optional[dict] = por_uuid.get(iva_flujo.llave(p["cfdi_uuid"]))
         if doc is None:
             continue
-        nuevos = iva_flujo.eventos_de_pago(p, doc, rfc)
+        nuevos = iva_flujo.eventos_de_pago(p, doc, rfc, umbral)
         eventos.extend(nuevos)
         if nuevos:
             grupo = por_pago.setdefault(p["pago_id"], {"pago": p, "filas": 0, "eventos": []})

@@ -3139,6 +3139,76 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/empresas/{empresa_id}/criterio-efectivo:
+    get:
+      tags:
+      - Criterio de efectivo
+      summary: Leer Criterio
+      description: Criterio de efectivo vigente de la empresa y el umbral que implica.
+      operationId: leer_criterio_api_v1_empresas__empresa_id__criterio_efectivo_get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: empresa_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Empresa Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    put:
+      tags:
+      - Criterio de efectivo
+      summary: Cambiar Criterio
+      description: Cambia el criterio de efectivo (legal o estricto) y lo audita. Solo
+        administradores.
+      operationId: cambiar_criterio_api_v1_empresas__empresa_id__criterio_efectivo_put
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: empresa_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Empresa Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - criterio
+              properties:
+                criterio:
+                  type: string
+                  enum:
+                  - legal
+                  - estricto
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /api/v1/empresas/{empresa_id}/iva-flujo/{periodo}:
     get:
       tags:
